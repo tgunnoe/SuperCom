@@ -3,6 +3,7 @@
 
 Usage (exactly one mode per run):
   spec_lint.py --check PATH       clause grammar and evaluator references in PATH
+  spec_lint.py --require ID FILE  succeed only if FILE holds a well-formed clause with ID
   spec_lint.py --self-test        run every fixture under tools/spec_lint/fixtures/
 
 Exit status: 0 clean, 1 findings (printed as file:line: message), 2 usage error.
@@ -313,12 +314,7 @@ def check_command(root: Path) -> int:
     first_seen: dict[str, Clause] = {}
     clauses = 0
     for path in files:
-        try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            findings.append(Finding(str(path), 1, "not valid UTF-8"))
-            continue
-        for clause in scan(str(path), text):
+        for clause in scan(str(path), path.read_text(encoding="utf-8")):
             clauses += 1
             findings += judge_clause(clause, first_seen)
     for finding in findings:
@@ -410,6 +406,20 @@ def self_test() -> int:
     return 0
 
 
+def require_command(ident: str, path: Path) -> int:
+    clauses = scan(str(path), path.read_text(encoding="utf-8"))
+    clauses = [clause for clause in clauses if clause.header.ident == ident]
+    for clause in clauses:
+        if not clause.problems:
+            print(f"spec_lint: found {ident} at {clause.path}:{clause.line}")
+            return 0
+    for clause in clauses:
+        for problem in clause.problems:
+            print(Finding(clause.path, clause.line, problem))
+    print(f"{path}: no well-formed clause with ID {ident!r}")
+    return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="spec_lint.py",
@@ -418,6 +428,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     modes = parser.add_mutually_exclusive_group(required=True)
     modes.add_argument("--check", metavar="PATH", help="check clauses in a file or directory")
+    modes.add_argument(
+        "--require",
+        nargs=2,
+        metavar=("ID", "FILE"),
+        help="succeed only if FILE holds a well-formed clause with this ID",
+    )
     modes.add_argument("--self-test", action="store_true", help="run the fixture suite")
     return parser
 
@@ -427,6 +443,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.self_test:
         return self_test()
+    if args.require is not None:
+        ident, file = args.require
+        if problems := id_problems(ident):
+            parser.error(problems[0])
+        if not Path(file).is_file():
+            parser.error(f"no such file: {file}")
+        return require_command(ident, Path(file))
     if not Path(args.check).exists():
         parser.error(f"no such file or directory: {args.check}")
     return check_command(Path(args.check))
