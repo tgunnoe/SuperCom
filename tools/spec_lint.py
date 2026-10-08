@@ -32,6 +32,10 @@ the output must contain. A name starting with "green-" must expect 0, any other 
 a non-zero code. A fixture runs `--check` on itself unless its first line is a
 directive `<!-- spec-lint: ARGS -->`; ARGS then replace the default arguments, with
 {file} standing for the fixture and {dir} for the fixtures directory.
+
+A fixture that no committed file may hold, because it would trip the identifier-leak
+gate, is built in code instead (synthesized_fixtures) and written to a scratch
+directory for the run.
 """
 
 import argparse
@@ -43,6 +47,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -422,8 +427,51 @@ def judge_fixture(fixture: Path) -> list[str]:
     return problems
 
 
+def synthesized_fixtures() -> dict[str, tuple[str, str]]:
+    """Fixtures built in code, as name -> (markdown, expectation).
+
+    A clause ID that matches RESERVED_ID is the input the reserved-pattern rule must
+    reject, and the identifier-leak gate rejects the same text in a committed file. The
+    input is therefore assembled from parts here, and never written out whole in a file.
+    """
+    bare, tagged = "N" + "12", "P" + "3-001"
+    spans = "`design` `source:https://example.com/notes`"
+    name = "red-node-pattern-id"
+    markdown = (
+        "# Red: IDs that match the node-id pattern\n"
+        "\n"
+        f"**{bare}** {spans}\n"
+        "The first sample MUST hold.\n"
+        "\n"
+        f"**{tagged}** {spans}\n"
+        "The second sample MUST hold.\n"
+    )
+    expectation = (
+        "1\n"
+        f"{name}.md:3: clause ID {bare!r} matches the reserved node-id pattern\n"
+        f"{name}.md:6: clause ID {tagged!r} matches the reserved node-id pattern\n"
+    )
+    return {name: (markdown, expectation)}
+
+
+def write_synthesized(directory: Path) -> list[Path]:
+    """Write the synthesized fixtures into directory; return their .md paths."""
+    written = []
+    for name, (markdown, expectation) in synthesized_fixtures().items():
+        fixture = directory / f"{name}.md"
+        fixture.write_text(markdown, encoding="utf-8")
+        fixture.with_suffix(".expect").write_text(expectation, encoding="utf-8")
+        written.append(fixture)
+    return written
+
+
 def self_test() -> int:
-    fixtures = sorted(FIXTURES.glob("*.md"))
+    """Run the fixtures on disk together with the synthesized ones."""
+    with tempfile.TemporaryDirectory() as scratch:
+        return run_suite(sorted(FIXTURES.glob("*.md")) + write_synthesized(Path(scratch)))
+
+
+def run_suite(fixtures: list[Path]) -> int:
     problems = [
         f"{orphan.name}: no sibling {orphan.stem}.md"
         for orphan in sorted(FIXTURES.glob("*.expect"))

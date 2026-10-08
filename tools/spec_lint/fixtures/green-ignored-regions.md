@@ -13,7 +13,7 @@ A clause directly after a fence is still found.
 An HTML comment is skipped too:
 
 <!--
-**P7** `commented out`
+**FM-7** `commented out`
 -->
 
 **FMT-002** `design` `source:https://example.com/notes`
