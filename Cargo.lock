@@ -7,5 +7,12 @@ name = "supercom"
 version = "0.0.1"
 
 [[package]]
+name = "supercom-scd"
+version = "0.0.1"
+dependencies = [
+ "supercom-testkit",
+]
+
+[[package]]
 name = "supercom-testkit"
 version = "0.0.1"

@@ -1,0 +1,17 @@
+[package]
+description  = "Reader for .scd archives and the virtual filesystem over an installed game's gamedata"
+edition      = { workspace = true }
+license      = { workspace = true }
+name         = "supercom-scd"
+publish      = false
+repository   = { workspace = true }
+rust-version = { workspace = true }
+version      = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+supercom-testkit = { path = "../testkit" }
