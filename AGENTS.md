@@ -27,8 +27,9 @@ Each item: statement · grounding · signpost (what defeats it).
   installed Forged Alliance (primary) or Supreme Commander (reference) data,
   read in place. Grounding: `~/.local/share/Steam/steamapps/common/Supreme
 Commander Forged Alliance/` (`gamedata/*.scd` store-only zips: 568 unit
-  blueprints, 1148 meshes, 63 maps). Signpost: a v0 feature needs an asset
-  type with no loader.
+  blueprints; 1,939 meshes across the archives, 1,148 of them in `units.scd`;
+  60 maps in 61 folders; counts from `tools/survey/`). Signpost: a v0 feature
+  needs an asset type with no loader.
 - **R2 Deterministic simulation.** The sim is a pure function of (initial
   state, command stream, tick); identical on every supported platform.
   Grounding: lockstep networking and replays are command streams
@@ -79,7 +80,9 @@ Each item: statement · grounding · signpost (what would violate it).
   tree is formatted with `treefmt` before commit. Grounding: predicate
   `rules.md` §3. Signpost: a commit landed with `--no-verify`.
 - **I6 Library code returns `Result`.** No `unwrap`, `expect`, or `panic!` in
-  non-test library paths. Grounding: predicate `rust` skill. Signpost:
+  non-test library paths. Test support may panic by contract when a required
+  fixture is absent, under `#[expect(clippy::panic, reason = ...)]` (the test
+  kit's `require_game`). Grounding: predicate `rust` skill. Signpost:
   `clippy::unwrap_used` warnings in a library crate.
 - **I7 Game path is configuration.** The install directory comes from
   `SUPERCOM_FA_DIR` or the config file, never a hard-coded path. Grounding:
@@ -107,7 +110,7 @@ Each item: statement · grounding (why unresolved) · signpost (what resolves it
   engine docs list about 60 exposed classes; the split is not yet inventoried.
   Signpost: the spec's engine-API inventory is complete.
 - **U5 Map format coverage.** `.scmap` inner versions 56 and 60 are documented;
-  installed maps are untested. Signpost: the loader parses all 63 installed
+  installed maps are untested. Signpost: the loader parses all 60 installed
   maps.
 - **U6 Audio codecs.** Which codecs the installed XACT banks use. Signpost: a
   codec inventory across `sounds/*.xwb`.
@@ -122,8 +125,9 @@ Each item: statement · grounding (why unresolved) · signpost (what resolves it
 - Read first: this file, docs/specs/README.md, docs/adr/.
 - Environment: `direnv allow` or `nix-shell` (no flakes). If `IN_NIX_SHELL`
   is set, every tool below is already on PATH; do not nest `nix-shell`.
-- Commands: `just check`, `just test`, `just clippy`, `just fmt`, `just gate`
-  (the CI gate: format check, clippy with `-D warnings`, tests, license audit).
+- Commands: `just check`, `just test`, `just clippy`, `just fmt`, `just lint`
+  (the specification lint: self-test, check, run), `just gate` (the CI gate:
+  format check, lint, clippy with `-D warnings`, tests, license audit).
 - Game data: `SUPERCOM_FA_DIR` (defaults to the Steam install path).
 - Predicate arsenal by moment: `rust` for all code; `spec` and `form` for the
   reverse-engineered specification; `prior-art` before any format loader or
@@ -151,8 +155,8 @@ Core (planned; only `crates/supercom` exists today — WIP):
   camera and strategic zoom.
 
 Context-sensitive: `docs/specs/` (authority), `docs/adr/` (decisions),
-`docs/models/` (formal models), `tools/` (one-off importers and probes; none
-yet).
+`docs/models/` (formal models), `tools/` (the specification lint and the
+census scripts over the installed game).
 
 ## Spec Pointers
 
