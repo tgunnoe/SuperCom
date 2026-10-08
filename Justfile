@@ -28,6 +28,11 @@ lint:
     python3 tools/spec_lint.py --check docs/specs
     python3 tools/spec_lint.py --run docs/specs
 
+# Keep game content out of the tree: self-test the rules, then check every tracked file
+scan:
+    python3 tools/cleanroom_scan.py --self-test
+    python3 tools/cleanroom_scan.py --check
+
 # Audit dependency licenses, bans, and sources (no network needed)
 deny:
     cargo deny check licenses bans sources
@@ -36,5 +41,5 @@ deny:
 audit:
     cargo deny check advisories
 
-# The CI gate: formatting, spec lint, lints, tests, license audit
-gate: fmt-check lint clippy test deny
+# The CI gate: formatting, spec lint, clean-room check, lints, tests, license audit
+gate: fmt-check lint scan clippy test deny
