@@ -1,0 +1,7 @@
+.ledger/
+.scratch/
+.prior_art_cache/
+.direnv/
+target/
+result
+result-*
