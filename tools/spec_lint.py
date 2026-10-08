@@ -21,7 +21,10 @@ paragraph that starts with the header line
   **<TAG>-<NNN>** `<evidence class>` `<evaluator reference>`
 
 followed by the statement text up to the first blank line. A line that starts with
-`**` is always a clause header; fenced code and HTML comments are not scanned.
+`**` is always a clause header; fenced code and HTML comments are not scanned. A
+bold clause ID and a code span after indentation, a list marker, or a quote marker
+is reported as a header that does not start at column 0, never dropped silently.
+IDs are unique across the files checked, compared without regard to case.
 
 An inventory is a pipe table whose header names Name, Owner, and Citation (any order,
 other columns allowed). Every row needs a name, an owner of engine or lua, and a
@@ -84,6 +87,10 @@ RESERVED_ID = re.compile(r"\b[NPFC][1-9][0-9]*\b")
 CLAUSE_ID = re.compile(r"[A-Za-z]{3,}-[0-9]{3}")
 LOOSE_ID = re.compile(r"(?P<tag>[A-Za-z]+)-(?P<number>[0-9]+)")
 HEADER = re.compile(r"\*\*(?P<ident>[^*`]*)\*\*(?P<spans>(?: `[^`]*`)*)(?P<tail>.*)")
+# What precedes a bold clause ID and a code span when the header is indented, listed, or quoted.
+MISPLACED = re.compile(
+    r"[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|[0-9]+[.)])[ \t]+)?(?=\*\*[A-Za-z]{3,}-[0-9]{3}\*\* `)"
+)
 SPAN = re.compile(r"`([^`]*)`")
 FENCE = re.compile(r" {0,3}(?P<run>`{3,}|~{3,})")
 DIRECTIVE = re.compile(r"<!-- spec-lint: (?P<args>.*) -->")
@@ -151,6 +158,7 @@ class Clause:
     header: Header
     statement: tuple[str, ...]
     starts_paragraph: bool
+    column_zero: bool
 
     @property
     def problems(self) -> list[str]:
@@ -158,6 +166,10 @@ class Clause:
         problems = list(self.header.problems)
         if not self.statement:
             problems.append("clause has no statement text")
+        if not self.column_zero:
+            problems.append(
+                "clause header must start at column 0 (not indented, in a list, or in a quote)"
+            )
         if not self.starts_paragraph:
             problems.append("clause header must start a paragraph (put a blank line before it)")
         return problems
@@ -173,6 +185,7 @@ class Draft:
     line: int
     header: str
     starts_paragraph: bool
+    column_zero: bool
     statement: list[str] = field(default_factory=list)
 
 
@@ -298,8 +311,9 @@ def scan(path: str, text: str) -> list[Clause]:
     current: Draft | None = None
     after_blank = True
     for number, line in live_lines(text):
-        if line.startswith("**"):
-            current = Draft(number, line, after_blank)
+        stray = None if line.startswith("**") else MISPLACED.match(line)
+        if stray or line.startswith("**"):
+            current = Draft(number, line[stray.end() :] if stray else line, after_blank, not stray)
             drafts.append(current)
         elif not line.strip():
             current = None
@@ -307,7 +321,14 @@ def scan(path: str, text: str) -> list[Clause]:
             current.statement.append(line.strip())
         after_blank = not line.strip()
     return [
-        Clause(path, d.line, parse_header(d.header), tuple(d.statement), d.starts_paragraph)
+        Clause(
+            path,
+            d.line,
+            parse_header(d.header),
+            tuple(d.statement),
+            d.starts_paragraph,
+            d.column_zero,
+        )
         for d in drafts
     ]
 
@@ -459,9 +480,11 @@ def judge_clause(clause: Clause, first_seen: dict[str, Clause]) -> list[Finding]
     messages = clause.problems
     well_formed = not messages
     if clause.header.ident_ok:
-        earlier = first_seen.setdefault(clause.header.ident, clause)
+        earlier = first_seen.setdefault(clause.header.ident.casefold(), clause)
         if earlier is not clause:
             where = f"{earlier.path}:{earlier.line}"
+            if earlier.header.ident != clause.header.ident:
+                where += f" as {earlier.header.ident!r}"
             messages.append(
                 f"duplicate clause ID {clause.header.ident!r} (first defined at {where})"
             )

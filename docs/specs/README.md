@@ -38,7 +38,8 @@ The header line holds three parts, separated by single spaces:
 - **ID**: `<TAG>-<NNN>`, a tag of three or more ASCII letters, a hyphen, and
   three digits. The ID never matches `\b[NPFC][1-9][0-9]*\b`, the pattern of
   planning-node identifiers. A tag need not equal its domain name, so `ai` and
-  `ui` take longer tags.
+  `ui` take longer tags. IDs are unique across the directory, compared without
+  regard to case, so `SPC-001` and `spc-001` collide.
 - **Evidence class**, in backticks: where the clause's truth comes from. When
   the installed game and another source both bear on a clause, the installed
   game is the evidence, and it wins where they differ.
@@ -95,7 +96,9 @@ installed game is never read. An inventory's `Citation` cell is held to the same
 rule and must hold at least one locator.
 
 A line that starts with `**` is always read as a clause header, so no other
-line may begin with bold text. Fenced code and HTML comments are skipped.
+line may begin with bold text. A header must start at column 0: an indented,
+listed, or quoted line that begins with a bold ID and a code span is reported,
+not dropped. Fenced code and HTML comments are skipped.
 
 ### Checking the specification
 
