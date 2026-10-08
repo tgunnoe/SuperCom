@@ -29,4 +29,4 @@ location is detected when the variable is unset.
 
 ## License
 
-Not yet chosen. The repository is private.
+GPL-3.0-or-later. See [LICENSE](LICENSE).

@@ -15,8 +15,8 @@ allow = [
   "Zlib",
 ]
 confidence-threshold = 0.8
-# Workspace crates are unpublished and the project license is not chosen yet
-# (AGENTS.md U4); dependencies are still audited.
+# Workspace crates are GPL-3.0-or-later and unpublished; the allowlist below
+# governs dependencies only (AGENTS.md I8).
 private                = { ignore = true }
 unused-allowed-license = "allow"
 

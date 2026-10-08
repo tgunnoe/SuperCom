@@ -85,6 +85,11 @@ Each item: statement · grounding · signpost (what would violate it).
   `SUPERCOM_FA_DIR` or the config file, never a hard-coded path. Grounding:
   R1, R6. Signpost: a Steam path literal outside the default-resolution
   function.
+- **I8 GPL-compatible dependencies.** The project is GPL-3.0-or-later; every
+  dependency carries a GPL-compatible license from the allowlist in
+  `deny.toml`. Grounding: LICENSE and
+  docs/adr/0005-license-gpl-3.0-or-later.md. Signpost: the license audit in
+  `just gate` fails on a new dependency.
 
 ## Unknowns
 
@@ -101,8 +106,6 @@ Each item: statement · grounding (why unresolved) · signpost (what resolves it
   versus its Lua layer, which fixes the Rust sim surface. Grounding: the FAF
   engine docs list about 60 exposed classes; the split is not yet inventoried.
   Signpost: the spec's engine-API inventory is complete.
-- **U4 Project license.** Grounding: not yet chosen; repo is private.
-  Signpost: the head decides before the repo goes public.
 - **U5 Map format coverage.** `.scmap` inner versions 56 and 60 are documented;
   installed maps are untested. Signpost: the loader parses all 63 installed
   maps.
@@ -154,7 +157,7 @@ yet).
 ## Spec Pointers
 
 - docs/specs/README.md — the reverse-engineering spec index.
-- docs/adr/ — decisions 0001–0004.
+- docs/adr/ — decisions 0001–0005.
 - Graphics pipeline study:
   https://www.adriancourreges.com/blog/2015/06/23/supreme-commander-graphics-study/
 - Engine Lua API surface (read for understanding only, see I1):
