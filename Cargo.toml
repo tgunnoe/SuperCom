@@ -14,5 +14,6 @@ unsafe_code = "warn"
 
 [workspace.lints.clippy]
 expect_used = "warn"
+panic       = "warn"
 pedantic    = { level = "warn", priority = -1 }
 unwrap_used = "warn"
