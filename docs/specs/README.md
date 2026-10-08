@@ -47,15 +47,32 @@ The header line holds three parts, separated by single spaces:
   clauses).
 - **Evaluator reference**, in backticks, exactly one of the forms below.
 
-| Evaluator reference                         | Resolves when                                                                                |
-| :------------------------------------------ | :------------------------------------------------------------------------------------------- |
-| `test:<name-or-filter>`                     | a line of `cargo nextest list --workspace` holds the text as whole path segments or a suffix |
-| `script:<path>[ <args>]`                    | the path, relative to the repository root, is a file that is executable or ends in `.py`     |
-| `source:<url-or-archive-member>[#<anchor>]` | the locator before the anchor is not empty; nothing is fetched                               |
+| Evaluator reference           | Resolves when                                                                                |
+| :---------------------------- | :------------------------------------------------------------------------------------------- |
+| `test:<name-or-filter>`       | a line of `cargo nextest list --workspace` holds the text as whole path segments or a suffix |
+| `script:<path>[ <args>]`      | the path, relative to the repository root, is a file that is executable or ends in `.py`     |
+| `source:<locator>[#<anchor>]` | the locator before the anchor takes one of the three forms below; nothing is fetched         |
 
 For a listed test `pkg::bin/pkg tests::name`, the references `name` and
 `tests::name` resolve and `ame` does not. A clause is **machine-verified** when
 its evaluator is a `test:` or a `script:`.
+
+A `source:` locator is one of:
+
+- an `https://` URL. A `github.com` or `raw.githubusercontent.com` URL carries
+  a commit hash of 7 to 40 hex digits as its ref (`/blob/<hash>/`,
+  `/tree/<hash>/`, or the raw host's `/<owner>/<repo>/<hash>/`), never a branch
+  name.
+- an install locator `fa:<path under the install>[!<member>]`, such as
+  `fa:gamedata/units.scd!units/UEL0001/UEL0001_unit.bp` or
+  `fa:bin/SupComDataPath.lua`. The archive is named because member paths are
+  not unique across archives.
+- a path in this repository that exists, such as
+  `docs/adr/0002-data-model-nickel.md`, for design clauses that cite an ADR.
+
+Anything else is a finding. The check is form only: nothing is fetched and the
+installed game is never read. An inventory's `Citation` cell is held to the same
+rule and must hold at least one locator.
 
 A line that starts with `**` is always read as a clause header, so no other
 line may begin with bold text. Fenced code and HTML comments are skipped.
@@ -80,4 +97,5 @@ references.
 
 An engine-API inventory is a table headed `Name` (a method or behaviour),
 `Owner` (`engine` or `lua`), and `Citation`; other columns and other tables are
-allowed. Every row fills all three cells.
+allowed. Every row fills all three cells, and its `Citation` holds at least one
+locator.

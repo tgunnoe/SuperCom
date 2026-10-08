@@ -1,0 +1,9 @@
+1
+red-source-unpinned-forge.md:3: source URL 'https://github.com/example/repo/blob/develop/docs/format.md' does not pin a commit
+the ref 'develop' must be a commit of 7 to 40 hex digits
+red-source-unpinned-forge.md:6: source URL 'https://raw.githubusercontent.com/example/repo/main/docs/format.md' does not pin a commit
+the ref 'main' must be a commit of 7 to 40 hex digits
+red-source-unpinned-forge.md:9: source URL 'https://github.com/example/repo/blob/123456/docs/format.md' does not pin a commit
+the ref '123456' must be a commit of 7 to 40 hex digits
+red-source-unpinned-forge.md:12: source URL 'https://github.com/example/repo' does not pin a commit
+no ref found

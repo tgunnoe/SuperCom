@@ -12,8 +12,8 @@ A second statement line continues the same paragraph.
 **DAT-001** `engine-stub` `script:tools/survey/blueprint_census.py --quiet`
 Arguments after the script path are not part of the path.
 
-**SIM-001** `design` `source:example.scd/units/sample`
-An archive member is a valid source locator.
+**SIM-001** `design` `source:fa:gamedata/sample.scd!units/sample`
+An install locator naming an archive member is a valid source.
 
 **DET-001** `derived` `script:tools/survey/format_versions.py`
 A clause MAY follow from other clauses.

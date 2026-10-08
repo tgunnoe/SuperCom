@@ -1,0 +1,5 @@
+1
+red-source-fa-outside-install.md:3: source install locator 'fa:/sample/absolute.scd' must be a relative path under the install
+red-source-fa-outside-install.md:6: source install locator 'fa:../sample.scd' must be a relative path under the install
+red-source-fa-outside-install.md:9: source install locator 'fa:gamedata/sample.scd!units/../sample.bp' must be a relative path under the install
+red-source-fa-outside-install.md:12: source install locator 'fa:gamedata\\sample.scd' must be a relative path under the install

@@ -24,7 +24,12 @@ followed by the statement text up to the first blank line. A line that starts wi
 
 An inventory is a pipe table whose header names Name, Owner, and Citation (any order,
 other columns allowed). Every row needs a name, an owner of engine or lua, and a
-citation. Other tables in the file are ignored.
+citation that holds at least one locator. Other tables in the file are ignored.
+
+A source: reference, and every locator in a Citation cell, is checked for form only:
+an https:// URL (a github.com or raw.githubusercontent.com URL must carry a commit of
+7 to 40 hex digits as its ref), an fa:<path>[!<member>] install locator, or a
+repository path that exists. Nothing is fetched and the install is never read.
 
 Fixtures are tools/spec_lint/fixtures/NAME.md with a sibling NAME.expect. The first
 line of the expectation is the expected exit code; every later line is a substring
@@ -48,6 +53,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -72,6 +78,25 @@ SPAN = re.compile(r"`([^`]*)`")
 FENCE = re.compile(r" {0,3}(?P<run>`{3,}|~{3,})")
 DIRECTIVE = re.compile(r"<!-- spec-lint: (?P<args>.*) -->")
 QUOTA = re.compile(r"(?P<domain>[a-z0-9][a-z0-9-]*)=(?P<clauses>[0-9]+)/(?P<verified>[0-9]+)")
+
+# A source locator is an https URL, an fa: install locator, or a repository path.
+LOCATOR_FORMS = (
+    "an https:// URL, an fa:<path>[!<member>] install locator, "
+    "or a path that exists in the repository"
+)
+COMMIT = re.compile(r"[0-9a-fA-F]{7,40}")
+# Where a forge URL carries its ref: github.com names a view first, the raw host does not.
+GITHUB_PATH = re.compile(
+    r"/[^/]+/[^/]+/(?:blob|tree|raw|blame|commit|commits)/(?P<ref>[^/]+)(?:/|$)"
+)
+RAW_PATH = re.compile(r"/[^/]+/[^/]+/(?P<ref>[^/]+)(?:/|$)")
+FORGE_PATHS = {
+    "github.com": GITHUB_PATH,
+    "www.github.com": GITHUB_PATH,
+    "raw.githubusercontent.com": RAW_PATH,
+}
+# A URL or install locator inside a citation cell that also holds prose.
+LOCATOR_IN_TEXT = re.compile(r"""(?<!\w)(?:https?://|fa:)[^\s,;<>()\[\]`'"]*""")
 
 NEXTEST_LIST = ("cargo", "nextest", "list", "--workspace", "--color", "never")
 NEXTEST_TIMEOUT_SECONDS = 900
@@ -319,10 +344,82 @@ def unresolved_script(payload: str) -> str | None:
     return None
 
 
-def unresolved_source(payload: str) -> str | None:
-    if not payload.partition("#")[0].strip():
-        return "source reference is empty"
+def repo_path_exists(text: str) -> bool:
+    """True if text names an existing path inside the repository."""
+    path = Path(text)
+    return not path.is_absolute() and ".." not in path.parts and (REPO_ROOT / path).exists()
+
+
+def url_problem(locator: str) -> str | None:
+    if not locator.startswith("https://"):
+        return f"URL {locator!r} must use https://"
+    try:
+        url = urllib.parse.urlsplit(locator)
+    except ValueError:
+        return f"URL {locator!r} is malformed"
+    if not url.hostname:
+        return f"URL {locator!r} has no host"
+    pattern = FORGE_PATHS.get(url.hostname)
+    if pattern is None:
+        return None
+    found = pattern.match(url.path)
+    if found is None:
+        why = (
+            "no ref found; carry a commit as the ref (/blob/<commit>/, /tree/<commit>/, "
+            "or the raw host's /<owner>/<repo>/<commit>/)"
+        )
+    elif not COMMIT.fullmatch(found["ref"]):
+        ref = found["ref"]
+        why = f"the ref {ref!r} must be a commit of 7 to 40 hex digits, not a branch or tag name"
+    else:
+        return None
+    return f"URL {locator!r} does not pin a commit: {why}"
+
+
+def install_problem(locator: str) -> str | None:
+    path, bang, member = locator.removeprefix("fa:").partition("!")
+    if not path:
+        return f"install locator {locator!r} has no path"
+    if bang and not member:
+        return f"install locator {locator!r} has an empty member after '!'"
+    for part in (path, member):
+        if part.startswith("/") or "\\" in part or ".." in part.split("/"):
+            return (
+                f"install locator {locator!r} must be a relative path under the install: "
+                "no leading /, no .. segment, no backslash"
+            )
     return None
+
+
+def locator_problem(locator: str) -> str | None:
+    """Why a locator is malformed or unpinned, else None. Form only: nothing is fetched."""
+    if locator.startswith(("https://", "http://", "fa:")):
+        if re.search(r"\s", locator):
+            return f"{locator!r} must not contain whitespace"
+        return install_problem(locator) if locator.startswith("fa:") else url_problem(locator)
+    if repo_path_exists(locator):
+        return None
+    return f"{locator!r} is not a locator: use {LOCATOR_FORMS}"
+
+
+def citation_problems(cell: str) -> list[str]:
+    """Why an inventory Citation cell holds no sound locator; empty when it does."""
+    if not cell:
+        return ["missing citation"]
+    found = [match.group().partition("#")[0] for match in LOCATOR_IN_TEXT.finditer(cell)]
+    if not found:
+        if repo_path_exists(cell.partition("#")[0].strip()):
+            return []
+        return [f"citation {cell!r} holds no locator: use {LOCATOR_FORMS}"]
+    return [f"citation {problem}" for item in found if (problem := locator_problem(item))]
+
+
+def unresolved_source(payload: str) -> str | None:
+    locator = payload.partition("#")[0].strip()
+    if not locator:
+        return "source reference is empty"
+    problem = locator_problem(locator)
+    return f"source {problem}" if problem else None
 
 
 def unresolved(clause: Clause) -> str | None:
@@ -547,8 +644,7 @@ def inventory_row(
         problems.append("missing owner")
     elif owner not in OWNERS:
         problems.append(f"owner {owner!r} is not one of {', '.join(OWNERS)}")
-    if not citation:
-        problems.append("missing citation")
+    problems += citation_problems(citation)
     return InventoryRow(number, owner, tuple(problems))
 
 
