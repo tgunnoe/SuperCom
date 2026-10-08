@@ -9,9 +9,10 @@
 //! reopening the file, so neither an [`Archive`] nor a [`Vfs`] holds an open
 //! file.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map};
+use std::ffi::OsStr;
 use std::fmt;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
@@ -279,7 +280,27 @@ impl Archive {
 /// The installed game's archives mounted as one namespace.
 #[derive(Debug)]
 pub struct Vfs {
+    /// The mounted archives, in mount order.
+    archives: Vec<Archive>,
+    /// The visible files: each path once, as its winning copy.
     files: Vec<Entry>,
+    /// Index into `archives` of the archive that supplies each folded path.
+    owners: HashMap<String, usize>,
+}
+
+/// The bytes of a path's file name, for ordering archives by plain byte
+/// comparison.
+fn file_name_bytes(path: &Path) -> &[u8] {
+    path.file_name()
+        .map(OsStr::as_encoded_bytes)
+        .unwrap_or_default()
+}
+
+/// Whether `path` is a file, following symlinks.
+fn is_file(path: &Path) -> Result<bool, Error> {
+    fs::metadata(path)
+        .map(|meta| meta.is_file())
+        .map_err(|source| io_error(source, format_args!("inspecting {}", path.display())))
 }
 
 impl Vfs {
@@ -299,11 +320,41 @@ impl Vfs {
     ///
     /// [`Error::Io`] if the install's `gamedata` directory cannot be listed;
     /// otherwise the first error from opening an archive.
-    pub fn from_install(_dir: impl AsRef<Path>) -> Result<Self, Error> {
-        Err(Error::Unimplemented)
+    pub fn from_install(dir: impl AsRef<Path>) -> Result<Self, Error> {
+        let gamedata = dir.as_ref().join("gamedata");
+        let listing_failed =
+            |source| io_error(source, format_args!("listing {}", gamedata.display()));
+        let mut paths = Vec::new();
+        for item in fs::read_dir(&gamedata).map_err(listing_failed)? {
+            let path = item.map_err(listing_failed)?.path();
+            if path.extension() == Some(OsStr::new("scd")) && is_file(&path)? {
+                paths.push(path);
+            }
+        }
+        paths.sort_by(|a, b| file_name_bytes(a).cmp(file_name_bytes(b)));
+
+        let mut archives = Vec::with_capacity(paths.len());
+        let mut files = Vec::new();
+        let mut owners = HashMap::new();
+        for path in &paths {
+            let archive = Archive::open(path)?;
+            for entry in archive.entries() {
+                if let hash_map::Entry::Vacant(slot) = owners.entry(fold(&entry.name)) {
+                    slot.insert(archives.len());
+                    files.push(entry.clone());
+                }
+            }
+            archives.push(archive);
+        }
+        Ok(Self {
+            archives,
+            files,
+            owners,
+        })
     }
 
-    /// Every visible file, each path once, in a deterministic order.
+    /// Every visible file, each path once: archives in mount order, and each
+    /// archive's members in the order of its directory.
     pub fn files(&self) -> impl Iterator<Item = &Entry> {
         self.files.iter()
     }
@@ -316,7 +367,11 @@ impl Vfs {
     /// [`Error::NotFound`] if no mounted archive holds the path;
     /// [`Error::Compressed`] if the member is not stored; [`Error::Io`] if
     /// the read fails.
-    pub fn read(&self, _path: &str) -> Result<Vec<u8>, Error> {
-        Err(Error::Unimplemented)
+    pub fn read(&self, path: &str) -> Result<Vec<u8>, Error> {
+        self.owners
+            .get(&fold(path))
+            .and_then(|&index| self.archives.get(index))
+            .ok_or(Error::NotFound)?
+            .read(path)
     }
 }
