@@ -1,0 +1,5 @@
+An ordinary note, written for this repository alone.
+It describes a rule in plain words and quotes nothing.
+Each line stands on its own and shares no line with the game.
+Four or more lines exist so that the file has shingles to compare.
+They are all different, so none of them can match.
