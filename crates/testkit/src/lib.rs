@@ -13,13 +13,20 @@
 //! ```text
 //! let Some(fa) = supercom_testkit::require_game() else { return };
 //! ```
-//!
-//! SKELETON: every function here is a deliberately unimplemented stub. The
-//! unit tests in this crate and the `conformance_*` suites of the crates that
-//! depend on it fail against the stubs until they are implemented.
 
+use std::env;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+
+/// Environment variable that points the tests at an install (AGENTS.md I7).
+const GAME_DIR_VAR: &str = "SUPERCOM_FA_DIR";
+
+/// Environment variable that, set to `1`, turns an absent game into a failure.
+const REQUIRE_GAME_VAR: &str = "SUPERCOM_REQUIRE_GAME";
+
+/// Steam's default install location, relative to the home directory. It is
+/// the same location the binary resolves in `crates/supercom/src/main.rs`.
+const STEAM_DEFAULT: &str = ".local/share/Steam/steamapps/common/Supreme Commander Forged Alliance";
 
 /// What a game-dependent test should do, as decided by [`decide_skip`].
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -43,11 +50,15 @@ pub enum Gate {
 /// only when `exists` accepts it.
 #[must_use]
 pub fn resolve_game_dir(
-    _override_dir: Option<OsString>,
-    _home: Option<OsString>,
-    _exists: impl Fn(&Path) -> bool,
+    override_dir: Option<OsString>,
+    home: Option<OsString>,
+    exists: impl Fn(&Path) -> bool,
 ) -> Option<PathBuf> {
-    None
+    let candidate = match override_dir.filter(|dir| !dir.is_empty()) {
+        Some(dir) => PathBuf::from(dir),
+        None => PathBuf::from(home?).join(STEAM_DEFAULT),
+    };
+    exists(&candidate).then_some(candidate)
 }
 
 /// Decides what a game-dependent test does, given the resolved directory and
@@ -57,15 +68,24 @@ pub fn resolve_game_dir(
 /// case it fails; both carry the same reason, which names `SUPERCOM_FA_DIR` so
 /// the reader knows how to point the suite at an install.
 #[must_use]
-pub fn decide_skip(_dir: Option<PathBuf>, _require: bool) -> Gate {
-    Gate::Run(PathBuf::new())
+pub fn decide_skip(dir: Option<PathBuf>, require: bool) -> Gate {
+    let Some(dir) = dir else {
+        let reason =
+            format!("no Forged Alliance install found; set {GAME_DIR_VAR} to its directory");
+        return if require {
+            Gate::Fail(reason)
+        } else {
+            Gate::Skip(reason)
+        };
+    };
+    Gate::Run(dir)
 }
 
 /// The installed game's directory: `SUPERCOM_FA_DIR` if set, else the Steam
 /// default beneath `HOME`; `None` when that directory does not exist.
 #[must_use]
 pub fn game_dir() -> Option<PathBuf> {
-    None
+    resolve_game_dir(env::var_os(GAME_DIR_VAR), env::var_os("HOME"), Path::is_dir)
 }
 
 /// The installed game's directory for a game-dependent test, or `None` to
@@ -78,13 +98,21 @@ pub fn game_dir() -> Option<PathBuf> {
 ///
 /// When `SUPERCOM_REQUIRE_GAME=1` and the game is absent, with the reason, so
 /// a gate that must exercise the game cannot pass vacuously.
-///
-/// STUB: returns an empty directory, never `None`, so that game-dependent
-/// tests run and fail on the unimplemented capability under test rather than
-/// returning early and passing.
 #[must_use]
+#[expect(
+    clippy::panic,
+    reason = "failing the calling test is this function's contract (see Panics)"
+)]
 pub fn require_game() -> Option<PathBuf> {
-    Some(PathBuf::new())
+    let required = env::var_os(REQUIRE_GAME_VAR).is_some_and(|value| value == "1");
+    match decide_skip(game_dir(), required) {
+        Gate::Run(dir) => Some(dir),
+        Gate::Skip(reason) => {
+            eprintln!("SKIP: {reason}");
+            None
+        }
+        Gate::Fail(reason) => panic!("{reason} ({REQUIRE_GAME_VAR}=1 forbids skipping)"),
+    }
 }
 
 #[cfg(test)]
