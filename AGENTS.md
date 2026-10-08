@@ -57,7 +57,7 @@ Commander Forged Alliance/` (`gamedata/*.scd` store-only zips: 568 unit
   code lands for a subsystem with no spec clause.
 - **R8 Reviewable.** Major features land as pull requests on
   https://github.com/tgunnoe/SuperCom for the head's review. Grounding:
-  predicate `/forge`. Signpost: a feature reaches `main` without a PR.
+  predicate `/forge`. Signpost: a feature reaches `master` without a PR.
 
 ## Invariants
 
