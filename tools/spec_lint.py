@@ -3,6 +3,7 @@
 
 Usage (exactly one mode per run):
   spec_lint.py --check PATH         clause grammar and evaluator references in PATH
+  spec_lint.py --inventory FILE     engine-API inventory table (--min-engine-rows N, default 127)
   spec_lint.py --coverage SPEC DIR  clause minimums per domain; SPEC is DOMAIN=MIN/VERIFIED,...
   spec_lint.py --require ID FILE    succeed only if FILE holds a well-formed clause with ID
   spec_lint.py --self-test          run every fixture under tools/spec_lint/fixtures/
@@ -16,6 +17,10 @@ paragraph that starts with the header line
 
 followed by the statement text up to the first blank line. A line that starts with
 `**` is always a clause header; fenced code and HTML comments are not scanned.
+
+An inventory is a pipe table whose header names Name, Owner, and Citation (any order,
+other columns allowed). Every row needs a name, an owner of engine or lua, and a
+citation. Other tables in the file are ignored.
 
 Fixtures are tools/spec_lint/fixtures/NAME.md with a sibling NAME.expect. The first
 line of the expectation is the expected exit code; every later line is a substring
@@ -61,6 +66,12 @@ QUOTA = re.compile(r"(?P<domain>[a-z0-9][a-z0-9-]*)=(?P<clauses>[0-9]+)/(?P<veri
 
 NEXTEST_LIST = ("cargo", "nextest", "list", "--workspace", "--color", "never")
 NEXTEST_TIMEOUT_SECONDS = 900
+
+DEFAULT_MIN_ENGINE_ROWS = 127
+INVENTORY_COLUMNS = ("name", "owner", "citation")
+OWNERS = ("engine", "lua")
+DELIMITER_CELL = re.compile(r":?-+:?")
+UNESCAPED_PIPE = re.compile(r"(?<!\\)\|")
 
 MIN_RED_FIXTURES = 8
 MIN_GREEN_FIXTURES = 2
@@ -134,6 +145,17 @@ class Quota:
     domain: str
     clauses: int
     verified: int
+
+
+@dataclass(frozen=True, slots=True)
+class InventoryRow:
+    line: int
+    owner: str
+    problems: tuple[str, ...]
+
+
+class UsageError(Exception):
+    """The command line is wrong; reported through argparse as exit status 2."""
 
 
 def count(number: int, noun: str) -> str:
@@ -428,9 +450,9 @@ def parse_quotas(spec: str) -> list[Quota]:
     for item in spec.split(","):
         found = QUOTA.fullmatch(item)
         if found is None:
-            raise ValueError(f"bad coverage entry {item!r}; expected DOMAIN=MIN/VERIFIED")
+            raise UsageError(f"bad coverage entry {item!r}; expected DOMAIN=MIN/VERIFIED")
         if any(quota.domain == found["domain"] for quota in quotas):
-            raise ValueError(f"domain {found['domain']!r} is listed twice")
+            raise UsageError(f"domain {found['domain']!r} is listed twice")
         quotas.append(Quota(found["domain"], int(found["clauses"]), int(found["verified"])))
     return quotas
 
@@ -454,6 +476,68 @@ def shortfall(quota: Quota, directory: Path) -> str | None:
     if len(clauses) > len(sound):
         notes.append(f"{count(len(clauses) - len(sound), 'malformed clause')} not counted")
     return f"{path}: {'; '.join(gaps)}" + (f" ({', '.join(notes)})" if notes else "")
+
+
+def table_cells(line: str) -> list[str]:
+    body = line.strip().removeprefix("|").removesuffix("|")
+    return [cell.strip().replace("\\|", "|") for cell in UNESCAPED_PIPE.split(body)]
+
+
+def inventory_row(
+    number: int, cells: list[str], columns: dict[str, int], width: int
+) -> InventoryRow:
+    if len(cells) != width:
+        return InventoryRow(number, "", (f"row has {len(cells)} cells, expected {width}",))
+    name, owner, citation = (cells[columns[key]] for key in INVENTORY_COLUMNS)
+    problems = []
+    if not name:
+        problems.append("missing name")
+    if not owner:
+        problems.append("missing owner")
+    elif owner not in OWNERS:
+        problems.append(f"owner {owner!r} is not one of {', '.join(OWNERS)}")
+    if not citation:
+        problems.append("missing citation")
+    return InventoryRow(number, owner, tuple(problems))
+
+
+def inventory_rows(text: str) -> list[InventoryRow]:
+    """The data rows of every table whose header names Name, Owner, and Citation."""
+    rows: list[InventoryRow] = []
+    header: list[str] | None = None
+    columns: dict[str, int] | None = None
+    width = 0
+    for number, line in live_lines(text):
+        if not line.strip().startswith("|"):
+            header, columns = None, None
+            continue
+        cells = table_cells(line)
+        if columns is not None:
+            rows.append(inventory_row(number, cells, columns, width))
+        elif header is not None and all(DELIMITER_CELL.fullmatch(cell) for cell in cells):
+            names = [cell.lower() for cell in header]
+            if all(key in names for key in INVENTORY_COLUMNS):
+                columns = {key: names.index(key) for key in INVENTORY_COLUMNS}
+                width = len(header)
+        else:
+            header = cells
+    return rows
+
+
+def inventory_command(path: Path, minimum: int) -> int:
+    rows = inventory_rows(path.read_text(encoding="utf-8"))
+    if not rows:
+        print(f"{path}: no inventory rows found (expected a table headed Name, Owner, Citation)")
+        return 1
+    for row in rows:
+        for problem in row.problems:
+            print(Finding(str(path), row.line, problem))
+    engine = sum(row.owner == "engine" and not row.problems for row in rows)
+    print(f"spec_lint: {path} has {count(engine, 'engine row')} (minimum {minimum})")
+    short = engine < minimum
+    if short:
+        print(f"{path}: {count(engine, 'engine row')} is below the minimum of {minimum}")
+    return 1 if short or any(row.problems for row in rows) else 0
 
 
 def coverage_command(quotas: list[Quota], directory: Path) -> int:
@@ -488,6 +572,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     modes = parser.add_mutually_exclusive_group(required=True)
     modes.add_argument("--check", metavar="PATH", help="check clauses in a file or directory")
+    modes.add_argument("--inventory", metavar="FILE", help="check an engine-API inventory table")
     modes.add_argument(
         "--coverage",
         nargs=2,
@@ -501,33 +586,52 @@ def build_parser() -> argparse.ArgumentParser:
         help="succeed only if FILE holds a well-formed clause with this ID",
     )
     modes.add_argument("--self-test", action="store_true", help="run the fixture suite")
+    parser.add_argument(
+        "--min-engine-rows",
+        type=int,
+        metavar="N",
+        help="with --inventory: fewest engine rows allowed (default 127)",
+    )
     return parser
+
+
+def existing(text: str, kind: str) -> Path:
+    """A command-line path that must exist as a file, a directory, or either."""
+    path = Path(text)
+    found = {"file": path.is_file(), "directory": path.is_dir(), "file or directory": path.exists()}
+    if not found[kind]:
+        raise UsageError(f"no such {kind}: {text}")
+    return path
+
+
+def dispatch(args: argparse.Namespace) -> int:
+    if args.min_engine_rows is not None and args.inventory is None:
+        raise UsageError("--min-engine-rows applies only to --inventory")
+    if args.self_test:
+        return self_test()
+    if args.inventory is not None:
+        minimum = DEFAULT_MIN_ENGINE_ROWS if args.min_engine_rows is None else args.min_engine_rows
+        if minimum < 0:
+            raise UsageError("--min-engine-rows must not be negative")
+        return inventory_command(existing(args.inventory, "file"), minimum)
+    if args.coverage is not None:
+        spec, directory = args.coverage
+        return coverage_command(parse_quotas(spec), existing(directory, "directory"))
+    if args.require is not None:
+        ident, file = args.require
+        if problems := id_problems(ident):
+            raise UsageError(problems[0])
+        return require_command(ident, existing(file, "file"))
+    return check_command(existing(args.check, "file or directory"))
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.self_test:
-        return self_test()
-    if args.coverage is not None:
-        spec, directory = args.coverage
-        try:
-            quotas = parse_quotas(spec)
-        except ValueError as error:
-            parser.error(str(error))
-        if not Path(directory).is_dir():
-            parser.error(f"no such directory: {directory}")
-        return coverage_command(quotas, Path(directory))
-    if args.require is not None:
-        ident, file = args.require
-        if problems := id_problems(ident):
-            parser.error(problems[0])
-        if not Path(file).is_file():
-            parser.error(f"no such file: {file}")
-        return require_command(ident, Path(file))
-    if not Path(args.check).exists():
-        parser.error(f"no such file or directory: {args.check}")
-    return check_command(Path(args.check))
+    try:
+        return dispatch(args)
+    except UsageError as error:
+        parser.error(str(error))
 
 
 if __name__ == "__main__":
