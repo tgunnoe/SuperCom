@@ -1,0 +1,13 @@
+[package]
+description  = "Clean-room reimplementation of the Supreme Commander: Forged Alliance engine"
+edition      = { workspace = true }
+name         = "supercom"
+publish      = false
+repository   = { workspace = true }
+rust-version = { workspace = true }
+version      = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
