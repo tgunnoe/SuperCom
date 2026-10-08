@@ -10,6 +10,10 @@ Usage (exactly one mode per run):
 
 Exit status: 0 clean, 1 findings (printed as file:line: message), 2 usage error.
 
+Resolving a `test:` reference runs `cargo nextest list --workspace` once per run, so
+those checks, and therefore --self-test, need cargo and nextest on PATH (the nix
+devshell provides them). Every other check needs only Python.
+
 The clause form is documented in docs/specs/README.md. In short, a clause is a
 paragraph that starts with the header line
 
