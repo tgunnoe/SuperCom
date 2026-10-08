@@ -14,4 +14,4 @@ workspace = true
 [dependencies]
 
 [dev-dependencies]
-supercom-testkit = { path = "../testkit" }
+supercom-testkit = { path = "../testkit", version = "0.0.1" }
