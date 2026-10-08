@@ -2,12 +2,14 @@
 
 The reverse-engineered specification is the authority for the engine: code
 satisfies spec clauses, never the other way round. Every clause carries an
-identifier and names its evaluator (test, property, contract, or proof), per
-predicate's `spec` workflow. The key words MUST, SHOULD, and MAY are to be
-read as in BCP 14.
+identifier and names its evaluator: a test, a script, or a pinned source (see
+the clause grammar), per predicate's `spec` workflow. The key words MUST,
+SHOULD, and MAY are to be read as in BCP 14.
 
 Clean-room rule: the spec records observed behaviour of the installed game and
-published, licensed references. It never reproduces game or FAF Lua source.
+published references; a reference without a licence is read for understanding
+only and quoted at most three lines. It never reproduces game or FAF Lua
+source.
 
 | Domain      | Scope                                                                                                                                                                           | Status |
 | :---------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :----- |
@@ -37,11 +39,25 @@ The header line holds three parts, separated by single spaces:
   three digits. The ID never matches `\b[NPFC][1-9][0-9]*\b`, the pattern of
   planning-node identifiers. A tag need not equal its domain name, so `ai` and
   `ui` take longer tags.
-- **Evidence class**, in backticks, one of `game-data` (observed in the
-  installed game's data), `reference` (taken from a published, licensed
-  source), `engine-stub` (an engine behaviour this project must provide),
-  `design` (a decision of this project), or `derived` (follows from other
-  clauses).
+- **Evidence class**, in backticks: where the clause's truth comes from. When
+  the installed game and another source both bear on a clause, the installed
+  game is the evidence, and it wins where they differ.
+  - `game-data`: the installed game's own files (archives and their members,
+    such as blueprints, meshes, and Lua; maps; sound banks), read in place by
+    a loader or a script.
+  - `reference`: a published source other than the game, such as an
+    article, a reference implementation, or a format or API document. A
+    source without a licence is read for understanding only: cite it by URL
+    and line and quote at most three lines.
+  - `engine-stub`: the name, arguments, or owner of an engine-exposed
+    function or class, as declared by FAF's `engine/` stubs or the
+    reconstructed engine header. It fixes the API's shape, not its behaviour.
+  - `design`: a decision of this project that the original never exposed
+    (the command stream, the replay format, state hashing, the WIT API, a
+    budget), or a deviation from the installed game, which cites its ratified
+    ADR. A design clause never states how the original behaves.
+  - `derived`: follows from other clauses, which its statement names by ID.
+    Its evaluator still checks it.
 - **Evaluator reference**, in backticks, exactly one of the forms below.
 
 | Evaluator reference           | Resolves when                                                                                |
