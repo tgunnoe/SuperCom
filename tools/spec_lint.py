@@ -92,7 +92,6 @@ class Header:
     """A parsed clause header line. `problems` holds its syntax findings."""
 
     ident: str
-    evidence: str | None
     refs: tuple[str, ...]
     ident_ok: bool
     problems: tuple[str, ...]
@@ -207,7 +206,7 @@ def parse_header(text: str) -> Header:
     found = HEADER.fullmatch(text.rstrip())
     if found is None:
         problem = "malformed clause header: expected **ID** `class` `evaluator`"
-        return Header("", None, (), False, (problem,))
+        return Header("", (), False, (problem,))
     ident = found["ident"]
     spans = SPAN.findall(found["spans"])
     problems = id_problems(ident)
@@ -234,7 +233,7 @@ def parse_header(text: str) -> Header:
         for ref in refs
         if ref_kind(ref) is None
     ]
-    return Header(ident, evidence, tuple(refs), ident_ok, tuple(problems))
+    return Header(ident, tuple(refs), ident_ok, tuple(problems))
 
 
 def scan(path: str, text: str) -> list[Clause]:
