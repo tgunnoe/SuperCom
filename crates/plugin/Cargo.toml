@@ -1,0 +1,15 @@
+[package]
+description  = "Host for plugin components: a wasmtime engine configured for deterministic, fuel-metered execution"
+edition      = { workspace = true }
+license      = { workspace = true }
+name         = "supercom-plugin"
+publish      = false
+repository   = { workspace = true }
+rust-version = "1.96"
+version      = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+wasmtime = "49"
