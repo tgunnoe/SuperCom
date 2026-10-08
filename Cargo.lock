@@ -982,6 +982,7 @@ name = "supercom-plugin"
 version = "0.0.1"
 dependencies = [
  "wasmtime",
+ "wat",
 ]
 
 [[package]]

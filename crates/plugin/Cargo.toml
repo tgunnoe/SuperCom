@@ -13,3 +13,6 @@ workspace = true
 
 [dependencies]
 wasmtime = "49"
+
+[dev-dependencies]
+wat = "1"

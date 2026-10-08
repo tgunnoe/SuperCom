@@ -314,3 +314,6 @@ impl Plugin {
         call(&mut self.store).map_err(|err| Error::call(&err))
     }
 }
+
+#[cfg(test)]
+mod tests;
