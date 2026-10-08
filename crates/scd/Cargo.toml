@@ -12,6 +12,7 @@ version      = { workspace = true }
 workspace = true
 
 [dependencies]
+zip = { default-features = false, version = "7.2" }
 
 [dev-dependencies]
 supercom-testkit = { path = "../testkit", version = "0.0.1" }
