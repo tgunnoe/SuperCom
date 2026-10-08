@@ -28,11 +28,8 @@ A clause is one paragraph: a header line, then the statement text up to the
 first blank line. The clause below is live; `just lint` checks it together with
 everything else in this directory.
 
-**FMT-001** `game-data` `script:tools/survey/archive_census.py`
-The archive layer MUST enumerate 23,015 files across the 17 archives.
-
-When the formats document adopts this clause as `FMT-001`, delete this copy in
-the same change: IDs are unique across the directory.
+**SPC-001** `design` `script:tools/spec_lint.py --self-test`
+The specification lint MUST reject every red fixture and accept every green one.
 
 The header line holds three parts, separated by single spaces:
 
@@ -56,6 +53,13 @@ The header line holds three parts, separated by single spaces:
 For a listed test `pkg::bin/pkg tests::name`, the references `name` and
 `tests::name` resolve and `ame` does not. A clause is **machine-verified** when
 its evaluator is a `test:` or a `script:`.
+
+A `test:` or `script:` evaluator MUST fail when its clause is false: a test by
+failing, a script by exiting non-zero. A script that only reports a value does
+not verify a clause. An evaluator that needs the installed game, which it finds
+through `SUPERCOM_FA_DIR`, follows the conformance convention: when the install
+is not found it prints `SKIP: <reason>` and succeeds, and with
+`SUPERCOM_REQUIRE_GAME=1` it fails instead.
 
 A `source:` locator is one of:
 
