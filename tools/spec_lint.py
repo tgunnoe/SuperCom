@@ -377,6 +377,8 @@ def unresolved_script(payload: str) -> str | None:
     words = payload.split(maxsplit=1)
     if not words:
         return "script reference is empty"
+    if Path(words[0]).is_absolute() or ".." in Path(words[0]).parts:
+        return f"script {words[0]!r} must be a relative path with no .. segment"
     path = REPO_ROOT / words[0]
     if not path.exists():
         return f"script {words[0]!r} does not exist"

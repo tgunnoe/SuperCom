@@ -1,0 +1,3 @@
+1
+red-script-outside-repo.md:3: script '/nonexistent/evaluator.py' must be a relative path with no .. segment
+red-script-outside-repo.md:6: script 'tools/../tools/spec_lint/fixtures/scripts/report.py' must be a relative path with no .. segment
