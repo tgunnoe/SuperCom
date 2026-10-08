@@ -2,9 +2,10 @@
 """Lint the SuperCom specification in docs/specs. Standard library only.
 
 Usage (exactly one mode per run):
-  spec_lint.py --check PATH       clause grammar and evaluator references in PATH
-  spec_lint.py --require ID FILE  succeed only if FILE holds a well-formed clause with ID
-  spec_lint.py --self-test        run every fixture under tools/spec_lint/fixtures/
+  spec_lint.py --check PATH         clause grammar and evaluator references in PATH
+  spec_lint.py --coverage SPEC DIR  clause minimums per domain; SPEC is DOMAIN=MIN/VERIFIED,...
+  spec_lint.py --require ID FILE    succeed only if FILE holds a well-formed clause with ID
+  spec_lint.py --self-test          run every fixture under tools/spec_lint/fixtures/
 
 Exit status: 0 clean, 1 findings (printed as file:line: message), 2 usage error.
 
@@ -44,6 +45,7 @@ FIXTURES = TOOL_DIR / "spec_lint" / "fixtures"
 EVIDENCE_CLASSES = ("game-data", "reference", "engine-stub", "design", "derived")
 CLASS_LIST = ", ".join(sorted(EVIDENCE_CLASSES))
 EVALUATOR_KINDS = ("test", "script", "source")
+VERIFIED_KINDS = frozenset({"test", "script"})
 MISSING_CLASS = f"missing evidence class (one of {CLASS_LIST})"
 MISSING_EVALUATOR = "missing evaluator reference (test:, script:, or source:)"
 
@@ -55,6 +57,7 @@ HEADER = re.compile(r"\*\*(?P<ident>[^*`]*)\*\*(?P<spans>(?: `[^`]*`)*)(?P<tail>
 SPAN = re.compile(r"`([^`]*)`")
 FENCE = re.compile(r" {0,3}(?P<run>`{3,}|~{3,})")
 DIRECTIVE = re.compile(r"<!-- spec-lint: (?P<args>.*) -->")
+QUOTA = re.compile(r"(?P<domain>[a-z0-9][a-z0-9-]*)=(?P<clauses>[0-9]+)/(?P<verified>[0-9]+)")
 
 NEXTEST_LIST = ("cargo", "nextest", "list", "--workspace", "--color", "never")
 NEXTEST_TIMEOUT_SECONDS = 900
@@ -102,6 +105,11 @@ class Clause:
             problems.append("clause header must start a paragraph (put a blank line before it)")
         return problems
 
+    @property
+    def kind(self) -> str | None:
+        """The evaluator kind: test, script, or source."""
+        return ref_kind(self.header.refs[0]) if len(self.header.refs) == 1 else None
+
 
 @dataclass(slots=True)
 class Draft:
@@ -117,6 +125,15 @@ class Tests:
 
     lines: tuple[str, ...]
     error: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class Quota:
+    """The minimums one domain file must meet."""
+
+    domain: str
+    clauses: int
+    verified: int
 
 
 def count(number: int, noun: str) -> str:
@@ -406,6 +423,49 @@ def self_test() -> int:
     return 0
 
 
+def parse_quotas(spec: str) -> list[Quota]:
+    quotas: list[Quota] = []
+    for item in spec.split(","):
+        found = QUOTA.fullmatch(item)
+        if found is None:
+            raise ValueError(f"bad coverage entry {item!r}; expected DOMAIN=MIN/VERIFIED")
+        if any(quota.domain == found["domain"] for quota in quotas):
+            raise ValueError(f"domain {found['domain']!r} is listed twice")
+        quotas.append(Quota(found["domain"], int(found["clauses"]), int(found["verified"])))
+    return quotas
+
+
+def shortfall(quota: Quota, directory: Path) -> str | None:
+    """Describe how a domain file misses its minimums, or None if it meets them."""
+    path = directory / f"{quota.domain}.md"
+    clauses = scan(str(path), path.read_text(encoding="utf-8")) if path.is_file() else []
+    sound = [clause for clause in clauses if not clause.problems]
+    verified = sum(clause.kind in VERIFIED_KINDS for clause in sound)
+    gaps = []
+    if len(sound) < quota.clauses:
+        gaps.append(f"{count(len(sound), 'clause')}, need {quota.clauses}")
+    if verified < quota.verified:
+        gaps.append(f"{verified} machine-verified, need {quota.verified}")
+    if not gaps:
+        return None
+    notes = []
+    if not path.is_file():
+        notes.append("file missing")
+    if len(clauses) > len(sound):
+        notes.append(f"{count(len(clauses) - len(sound), 'malformed clause')} not counted")
+    return f"{path}: {'; '.join(gaps)}" + (f" ({', '.join(notes)})" if notes else "")
+
+
+def coverage_command(quotas: list[Quota], directory: Path) -> int:
+    gaps = [gap for quota in quotas if (gap := shortfall(quota, directory))]
+    for gap in gaps:
+        print(gap)
+    if gaps:
+        return 1
+    print(f"spec_lint: coverage met for {count(len(quotas), 'domain')}")
+    return 0
+
+
 def require_command(ident: str, path: Path) -> int:
     clauses = scan(str(path), path.read_text(encoding="utf-8"))
     clauses = [clause for clause in clauses if clause.header.ident == ident]
@@ -429,6 +489,12 @@ def build_parser() -> argparse.ArgumentParser:
     modes = parser.add_mutually_exclusive_group(required=True)
     modes.add_argument("--check", metavar="PATH", help="check clauses in a file or directory")
     modes.add_argument(
+        "--coverage",
+        nargs=2,
+        metavar=("SPEC", "DIR"),
+        help="per-domain minimums, SPEC being DOMAIN=MIN/VERIFIED[,...], counted in DIR/DOMAIN.md",
+    )
+    modes.add_argument(
         "--require",
         nargs=2,
         metavar=("ID", "FILE"),
@@ -443,6 +509,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.self_test:
         return self_test()
+    if args.coverage is not None:
+        spec, directory = args.coverage
+        try:
+            quotas = parse_quotas(spec)
+        except ValueError as error:
+            parser.error(str(error))
+        if not Path(directory).is_dir():
+            parser.error(f"no such directory: {directory}")
+        return coverage_command(quotas, Path(directory))
     if args.require is not None:
         ident, file = args.require
         if problems := id_problems(ident):

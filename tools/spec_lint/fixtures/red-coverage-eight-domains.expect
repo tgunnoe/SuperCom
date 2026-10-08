@@ -1,0 +1,9 @@
+1
+formats.md: 0 clauses, need 12; 0 machine-verified, need 8 (file missing)
+data-model.md: 0 clauses, need 8; 0 machine-verified, need 5 (file missing)
+sim.md: 0 clauses, need 20; 0 machine-verified, need 10 (file missing)
+determinism.md: 0 clauses, need 6; 0 machine-verified, need 3 (file missing)
+render.md: 0 clauses, need 8; 0 machine-verified, need 2 (file missing)
+plugin-api.md: 0 clauses, need 6; 0 machine-verified, need 4 (file missing)
+ai.md: 0 clauses, need 4; 0 machine-verified, need 1 (file missing)
+ui.md: 0 clauses, need 4; 0 machine-verified, need 1 (file missing)
