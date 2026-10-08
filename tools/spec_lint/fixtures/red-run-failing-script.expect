@@ -1,0 +1,6 @@
+1
+red-run-failing-script.md:5: PASS FMT-001
+red-run-failing-script.md:8: FAIL FMT-002 script:tools/spec_lint/fixtures/scripts/report.py 1 stderr boom (exited 1)
+    | boom
+red-run-failing-script.md:11: PASS FMT-003
+spec_lint: ran 3 script evaluators: 2 passed, 0 skipped, 1 failed

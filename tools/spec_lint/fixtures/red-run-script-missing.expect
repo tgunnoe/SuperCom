@@ -1,0 +1,4 @@
+1
+red-run-script-missing.md:5: FAIL FMT-001
+script 'tools/spec_lint/fixtures/scripts/no-such-script.py' does not exist
+ran 1 script evaluator: 0 passed, 0 skipped, 1 failed

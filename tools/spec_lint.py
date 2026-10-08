@@ -3,6 +3,7 @@
 
 Usage (exactly one mode per run):
   spec_lint.py --check PATH         clause grammar and evaluator references in PATH
+  spec_lint.py --run PATH           run every script: evaluator in PATH (--timeout SECONDS)
   spec_lint.py --inventory FILE     engine-API inventory table (--min-engine-rows N, default 127)
   spec_lint.py --coverage SPEC DIR  clause minimums per domain; SPEC is DOMAIN=MIN/VERIFIED,...
   spec_lint.py --require ID FILE    succeed only if FILE holds a well-formed clause with ID
@@ -38,6 +39,14 @@ a non-zero code. A fixture runs `--check` on itself unless its first line is a
 directive `<!-- spec-lint: ARGS -->`; ARGS then replace the default arguments, with
 {file} standing for the fixture and {dir} for the fixtures directory.
 
+--run executes the script: evaluator of every well-formed clause in PATH, from the
+repository root and with this process's environment, so SUPERCOM_FA_DIR and
+SUPERCOM_REQUIRE_GAME reach the script. Exit 0 is a pass; exit 0 together with a line
+that starts with SKIP: on stdout or stderr is a skip, which is reported and does not
+fail the run; anything else, a timeout included, is a failure. It prints one line per
+evaluator and a summary, and exits 1 if any evaluator failed. test: and source:
+evaluators are not run.
+
 A fixture that no committed file may hold, because it would trip the identifier-leak
 gate, is built in code instead (synthesized_fixtures) and written to a scratch
 directory for the run.
@@ -47,6 +56,7 @@ import argparse
 import contextlib
 import functools
 import io
+import math
 import os
 import re
 import shlex
@@ -100,6 +110,9 @@ LOCATOR_IN_TEXT = re.compile(r"""(?<!\w)(?:https?://|fa:)[^\s,;<>()\[\]`'"]*""")
 
 NEXTEST_LIST = ("cargo", "nextest", "list", "--workspace", "--color", "never")
 NEXTEST_TIMEOUT_SECONDS = 900
+SCRIPT_TIMEOUT_SECONDS = 1800
+SKIP_PREFIX = "SKIP:"
+OUTPUT_TAIL_LINES = 10
 
 DEFAULT_MIN_ENGINE_ROWS = 127
 INVENTORY_COLUMNS = ("name", "owner", "citation")
@@ -169,6 +182,15 @@ class Tests:
 
     lines: tuple[str, ...]
     error: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class Outcome:
+    """How one script evaluator ended: PASS, SKIP, or FAIL, with the reason and output tail."""
+
+    status: str
+    detail: str = ""
+    tail: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -469,6 +491,67 @@ def check_command(root: Path) -> int:
     return 0
 
 
+def run_script(payload: str, timeout: float) -> Outcome:
+    """Run a script: evaluator from the repository root and classify how it ended."""
+    if reason := unresolved_script(payload):
+        return Outcome("FAIL", reason)
+    words = payload.split(maxsplit=1)
+    try:
+        args = shlex.split(words[1]) if len(words) > 1 else []
+    except ValueError as error:
+        return Outcome("FAIL", f"cannot split the arguments: {error}")
+    if words[0].endswith(".py"):
+        # A .py script runs under this interpreter, so it needs no executable bit.
+        command = [sys.executable, words[0], *args]
+    else:
+        command = [str(REPO_ROOT / words[0]), *args]
+    try:
+        done = subprocess.run(
+            command,
+            cwd=REPO_ROOT,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return Outcome("FAIL", f"timed out after {timeout:g}s")
+    except OSError as error:
+        return Outcome("FAIL", f"cannot start: {error}")
+    lines = done.stdout.splitlines() + done.stderr.splitlines()
+    if done.returncode != 0:
+        return Outcome("FAIL", f"exited {done.returncode}", tuple(lines[-OUTPUT_TAIL_LINES:]))
+    for line in lines:
+        if line.startswith(SKIP_PREFIX):
+            return Outcome("SKIP", line.removeprefix(SKIP_PREFIX).strip())
+    return Outcome("PASS")
+
+
+def run_command(root: Path, timeout: float) -> int:
+    tally = dict.fromkeys(("PASS", "SKIP", "FAIL"), 0)
+    for path in spec_files(root):
+        for clause in scan(str(path), path.read_text(encoding="utf-8")):
+            if clause.problems or clause.kind != "script":
+                continue
+            payload = clause.header.refs[0].partition(":")[2].strip()
+            outcome = run_script(payload, timeout)
+            tally[outcome.status] += 1
+            note = f" ({outcome.detail})" if outcome.detail else ""
+            ident = clause.header.ident
+            print(f"{clause.path}:{clause.line}: {outcome.status} {ident} script:{payload}{note}")
+            for line in outcome.tail:
+                print(f"    | {line}")
+            sys.stdout.flush()
+    ran = count(sum(tally.values()), "script evaluator")
+    print(
+        f"spec_lint: ran {ran}: {tally['PASS']} passed, "
+        f"{tally['SKIP']} skipped, {tally['FAIL']} failed"
+    )
+    return 1 if tally["FAIL"] else 0
+
+
 def fixture_args(fixture: Path) -> list[str]:
     """The arguments a fixture runs with: its directive line, else --check on itself."""
     lines = fixture.read_text(encoding="utf-8").splitlines()
@@ -721,6 +804,9 @@ def build_parser() -> argparse.ArgumentParser:
     modes.add_argument("--check", metavar="PATH", help="check clauses in a file or directory")
     modes.add_argument("--inventory", metavar="FILE", help="check an engine-API inventory table")
     modes.add_argument(
+        "--run", metavar="PATH", help="run every script: evaluator in a file or directory"
+    )
+    modes.add_argument(
         "--coverage",
         nargs=2,
         metavar=("SPEC", "DIR"),
@@ -739,6 +825,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="with --inventory: fewest engine rows allowed (default 127)",
     )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        metavar="SECONDS",
+        help=f"with --run: seconds one evaluator may take (default {SCRIPT_TIMEOUT_SECONDS})",
+    )
     return parser
 
 
@@ -754,6 +846,8 @@ def existing(text: str, kind: str) -> Path:
 def dispatch(args: argparse.Namespace) -> int:
     if args.min_engine_rows is not None and args.inventory is None:
         raise UsageError("--min-engine-rows applies only to --inventory")
+    if args.timeout is not None and args.run is None:
+        raise UsageError("--timeout applies only to --run")
     if args.self_test:
         return self_test()
     if args.inventory is not None:
@@ -769,6 +863,11 @@ def dispatch(args: argparse.Namespace) -> int:
         if problems := id_problems(ident):
             raise UsageError(problems[0])
         return require_command(ident, existing(file, "file"))
+    if args.run is not None:
+        timeout = SCRIPT_TIMEOUT_SECONDS if args.timeout is None else args.timeout
+        if not (math.isfinite(timeout) and timeout > 0):
+            raise UsageError("--timeout must be a positive number of seconds")
+        return run_command(existing(args.run, "file or directory"), timeout)
     return check_command(existing(args.check, "file or directory"))
 
 

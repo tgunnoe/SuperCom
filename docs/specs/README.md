@@ -27,8 +27,8 @@ Each domain gets its own file in this directory, authored by the spec campaign.
 ## Clause grammar
 
 A clause is one paragraph: a header line, then the statement text up to the
-first blank line. The clause below is live; `just lint` checks it together with
-everything else in this directory.
+first blank line. The clause below is live; `just lint` checks it and runs its
+evaluator, together with everything else in this directory.
 
 **SPC-001** `design` `script:tools/spec_lint.py --self-test`
 The specification lint MUST reject every red fixture and accept every green one.
@@ -100,13 +100,15 @@ line may begin with bold text. Fenced code and HTML comments are skipped.
 ### Checking the specification
 
 `tools/spec_lint.py` enforces the grammar with the Python standard library
-alone. `just lint` runs its self-test and then `--check docs/specs`, and
-`just gate` includes `just lint`. Findings print as `file:line: message`. The
-exit status is 0 when clean, 1 on findings, and 2 on a usage error.
+alone. `just lint` runs its self-test, then `--check docs/specs`, then
+`--run docs/specs`, and `just gate` includes `just lint`. Findings print as
+`file:line: message`. The exit status is 0 when clean, 1 on findings, and 2 on a
+usage error.
 
 | Mode                                               | Succeeds when                                                                                                                                    |
 | :------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--check <dir-or-file>`                            | every clause is well-formed, IDs are unique, and every evaluator reference resolves                                                              |
+| `--run <dir-or-file> [--timeout <seconds>]`        | no `script:` evaluator of a well-formed clause fails when run from the repository root                                                           |
 | `--coverage <domain>=<min>/<verified>[,...] <dir>` | each `<dir>/<domain>.md` has at least `<min>` well-formed clauses, at least `<verified>` of them machine-verified; a missing file counts as zero |
 | `--inventory <file> [--min-engine-rows <n>]`       | every inventory row is well-formed and there are at least `<n>` engine rows (default 127)                                                        |
 | `--require <ID> <file>`                            | the file holds a well-formed clause with exactly that ID                                                                                         |
@@ -114,6 +116,16 @@ exit status is 0 when clean, 1 on findings, and 2 on a usage error.
 
 `--coverage` and `--require` check form only: they do not resolve evaluator
 references.
+
+`--run` executes each `script:` evaluator from the repository root and passes its
+own environment through, so `SUPERCOM_FA_DIR` and `SUPERCOM_REQUIRE_GAME` reach
+the script. Exit 0 is a pass. Exit 0 with a line of output that starts with
+`SKIP:` is a skip, which is reported and does not fail the run. Anything else is
+a failure, as is an evaluator still running after `--timeout` seconds (default
+1800). It prints one line per evaluator with its status, the tail of a failed
+evaluator's output under that line, and a summary. Only well-formed clauses run;
+`test:` evaluators run under `just test`, and a `source:` evaluator has nothing
+to run.
 
 An engine-API inventory is a table headed `Name` (a method or behaviour),
 `Owner` (`engine` or `lua`), and `Citation`; other columns and other tables are

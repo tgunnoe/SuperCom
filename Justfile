@@ -22,10 +22,11 @@ fmt:
 fmt-check:
     treefmt --fail-on-change
 
-# Check the specification: tool self-test, then every clause in docs/specs
+# Check the specification: self-test, every clause, then run its scripts
 lint:
     python3 tools/spec_lint.py --self-test
     python3 tools/spec_lint.py --check docs/specs
+    python3 tools/spec_lint.py --run docs/specs
 
 # Audit dependency licenses, bans, and sources (no network needed)
 deny:
