@@ -1,0 +1,4 @@
+1
+red-inventory-citation-no-locator.md:8: citation 'the FAF engine stubs' holds no locator
+red-inventory-citation-no-locator.md:9: citation URL 'https://github.com/example/repo/blob/develop/engine/sample.lua' does not pin a commit
+red-inventory-citation-no-locator.md:10: citation URL 'https://github.com/example/repo/tree/main/x' does not pin a commit

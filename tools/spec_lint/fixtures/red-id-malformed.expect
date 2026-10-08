@@ -1,0 +1,4 @@
+1
+red-id-malformed.md:3: clause ID 'FMT-1': the number must be exactly three digits
+red-id-malformed.md:6: clause ID 'FMT-0001': the number must be exactly three digits
+red-id-malformed.md:9: clause ID 'FMT_002' is not of the form <TAG>-<NNN>

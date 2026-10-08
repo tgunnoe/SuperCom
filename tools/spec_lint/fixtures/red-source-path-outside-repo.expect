@@ -1,0 +1,3 @@
+1
+red-source-path-outside-repo.md:3: source '../outside.md' is not a locator
+red-source-path-outside-repo.md:6: source '/etc/hostname' is not a locator

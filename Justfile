@@ -22,6 +22,12 @@ fmt:
 fmt-check:
     treefmt --fail-on-change
 
+# Check the specification: self-test, every clause, then run its scripts
+lint:
+    python3 tools/spec_lint.py --self-test
+    python3 tools/spec_lint.py --check docs/specs
+    python3 tools/spec_lint.py --run docs/specs
+
 # Audit dependency licenses, bans, and sources (no network needed)
 deny:
     cargo deny check licenses bans sources
@@ -30,5 +36,5 @@ deny:
 audit:
     cargo deny check advisories
 
-# The CI gate: formatting, lints, tests, license audit
-gate: fmt-check clippy test deny
+# The CI gate: formatting, spec lint, lints, tests, license audit
+gate: fmt-check lint clippy test deny

@@ -1,0 +1,5 @@
+1
+red-run-skip-with-failure.md:5: FAIL FMT-001
+(exited 1)
+    | SKIP: the installed game was not found
+spec_lint: ran 1 script evaluator: 0 passed, 0 skipped, 1 failed

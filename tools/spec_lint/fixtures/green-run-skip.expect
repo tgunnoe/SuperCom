@@ -1,0 +1,5 @@
+0
+green-run-skip.md:5: SKIP FMT-001 script:tools/spec_lint/fixtures/scripts/report.py 0 stderr "SKIP: the installed game was not found" (the installed game was not found)
+green-run-skip.md:8: SKIP FMT-002 script:tools/spec_lint/fixtures/scripts/report.py 0 stdout "SKIP: the installed game was not found" (the installed game was not found)
+green-run-skip.md:11: PASS FMT-003
+spec_lint: ran 3 script evaluators: 1 passed, 2 skipped, 0 failed

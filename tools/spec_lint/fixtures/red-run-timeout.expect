@@ -1,0 +1,2 @@
+1
+red-run-timeout.md:5: FAIL FMT-001 script:tools/spec_lint/fixtures/scripts/hang.py (timed out after 1s)
