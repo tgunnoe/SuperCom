@@ -1,0 +1,11 @@
+# Run every test even after one fails, so a red suite reports all of its
+# failures in one pass instead of cancelling the rest at the first.
+[profile.default]
+fail-fast = false
+
+# Game-dependent tests skip by printing `SKIP: <reason>` and passing, because
+# nextest has no runtime skip. Show their output on success too, so a skip
+# is loud rather than silently green.
+[[profile.default.overrides]]
+filter         = 'test(/conformance_/)'
+success-output = "immediate"
