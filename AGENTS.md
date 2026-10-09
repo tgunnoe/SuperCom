@@ -141,8 +141,8 @@ Each item: statement · grounding (why unresolved) · signpost (what resolves it
 
 ## Structure
 
-Core (planned; `crates/supercom`, `crates/scd`, `crates/testkit`, and
-`crates/plugin` with `wit/` exist today — WIP):
+Core (planned; `crates/supercom`, `crates/scd`, `crates/testkit`,
+`crates/plugin` with `wit/`, and `crates/detbench` exist today — WIP):
 
 - `crates/supercom` — binary: configuration, wiring, launches a skirmish.
 - `crates/scd` — `.scd` archive virtual filesystem and mount order.
@@ -153,6 +153,8 @@ Core (planned; `crates/supercom`, `crates/scd`, `crates/testkit`, and
 - `crates/sim` — deterministic simulation (economy, units, orders, weapons,
   projectiles, pathfinding, damage); `crates/ai` — built-in skirmish AI.
 - `crates/plugin` — wasmtime host and plugin SDK; `wit/` — the engine API.
+- `crates/detbench` — determinism evidence: golden vectors for the float
+  strategy and the on-demand benchmark; never shipped.
 - `crates/render` — wgpu renderer; `crates/ui` — winit/egui HUD, input,
   camera and strategic zoom.
 

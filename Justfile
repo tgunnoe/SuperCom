@@ -9,6 +9,7 @@ check:
 # Run the test suite
 test:
     cargo nextest run --workspace
+    cargo nextest run -p supercom-detbench
 
 # Lint with the CI warning gate
 clippy:

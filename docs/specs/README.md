@@ -16,9 +16,9 @@ source.
 | formats     | `.scd` archives and mount order; the data subset of the GPG Lua dialect in `.bp`; `.scm` and `.sca`; `.scmap` with `_scenario.lua` and `_save.lua`; DDS; XACT `.xwb` and `.xsb` | WIP    |
 | data-model  | Nickel contracts for the blueprint families; mod overlay semantics; the import cache                                                                                            | WIP    |
 | sim         | tick model, economy, units and categories, orders and build queues, weapons and projectiles, damage and armour, pathfinding, veterancy, intel                                   | landed |
-| determinism | lockstep command stream, replay format, float strategy, desync detection                                                                                                        | WIP    |
+| determinism | lockstep command stream, replay format, float strategy, desync detection                                                                                                        | landed |
 | render      | terrain, decals, props, shadows, water, units, fog of war, strategic icons, post-processing                                                                                     | WIP    |
-| plugin-api  | WIT worlds, host imports, versioning, sandbox policy                                                                                                                            | WIP    |
+| plugin-api  | WIT worlds, host imports, versioning, sandbox policy                                                                                                                            | landed |
 | ai          | the skirmish AI interface and the built-in AI's contract                                                                                                                        | WIP    |
 | ui          | basic HUD and input behaviour                                                                                                                                                   | WIP    |
 

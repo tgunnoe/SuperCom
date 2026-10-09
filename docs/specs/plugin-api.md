@@ -8,9 +8,12 @@ Scope. The clauses fix the host-side contract: what bytes the host admits, what 
 
 Informative. The reference plugin in `plugins/hello` is the component the sandbox suite loads. The suite builds it as a core module for the `wasm32-unknown-unknown` target, then encodes the module as a component with `wasm-tools`, both found on `PATH`. That recipe is the fixture's, not a requirement on any plugin; the tests that need no build tool (`tests::*`) assemble their components from text.
 
-The licensing statement for plugins, whether a component built against the world is a derivative work of the engine and what licence it must carry, is reserved for the head as clause PLG-001. It is not written as a clause here: the section on licensing sets out the options.
+The licensing statement for plugins, whether a component built against the world is a derivative work of the engine and what licence it must carry, was reserved for the head and is now ruled: PLG-001 carries it, citing ADR-0007. It is not written as a clause here: the section on licensing sets out the options.
 
 ## The world and its versioning
+
+**PLG-001** `design` `source:docs/adr/0007-plugin-licensing.md`
+A plugin component distributed for use with the engine MUST be licensed under GPL-3.0-or-later or under a licence compatible with it, and its corresponding source MUST be available to every recipient of the component; closed-source plugins and plugins under licences that are not GPL-compatible are excluded; the interface artifacts (`wit/`, the SDK crate, and the template) stay GPL-3.0-or-later. This is the head's ruling of 2026-10-09, recorded in ADR-0007 as the project's policy and not as legal advice; the options it chose among remain in this file as the record.
 
 **PLG-002** `design` `source:wit/supercom.wit`
 The plugin world at version 0.1.0 MUST be the one declared in `wit/supercom.wit`: package `supercom:engine@0.1.0`, an interface `host` holding `log: func(message: string)`, and a world `plugin` that imports `host` and exports `describe: func() -> string`, `step: func(tick: u64) -> u64`, `nan-bits: func() -> u64`, and `spin: func()`. A component is a plugin of this world only if it implements every export; it MAY omit imports it does not call.
@@ -174,13 +177,13 @@ Guest code runs on the stack of the thread that calls it, so a loader MUST call 
 
 ## Cross-architecture witnesses
 
-The tests above run on one architecture. Two of their guarantees rest on facts that differ between x86_64 and aarch64, and the cross-architecture replay comparison named by AGENTS.md U1 (and by the determinism specification when it exists) is the evaluator that closes them.
+The tests above run on one architecture. Two of their guarantees rest on facts that differ between x86_64 and aarch64, and the cross-architecture replay comparison named by AGENTS.md U1 (and by DET-024 of `docs/specs/determinism.md`, which names the comparison that closes it) is the evaluator that closes them.
 
 **PLG-050** `design` `source:AGENTS.md`
-Equality of `NaN` bit patterns across x86_64 and aarch64 MUST be treated as unverified. The test of PLG-021 is a witness on x86_64 only: there the hardware's `NaN` for `0.0 / 0.0` differs from the canonical pattern, so the test can fail without canonicalization, while on aarch64 the same division already gives the canonical pattern, so the test passes whether or not the host canonicalizes. A payload `NaN` that arithmetic produces on one architecture and not on the other is not covered by any test, and U1's replay comparison is to include a guest that computes one.
+Equality of `NaN` bit patterns across x86_64 and aarch64 MUST be treated as unverified. The test of PLG-021 is a witness on x86_64 only: there the hardware's `NaN` for `0.0 / 0.0` differs from the canonical pattern, so the test can fail without canonicalization, while on aarch64 the same division already gives the canonical pattern, so the test passes whether or not the host canonicalizes. A payload `NaN` that arithmetic produces on one architecture and not on the other is not covered by any test; the replay comparison of DET-024 includes a guest that computes one and is the evaluator that closes this clause's gap.
 
 **PLG-051** `design` `source:AGENTS.md`
-The depth at which unbounded recursion traps at `MAX_WASM_STACK_BYTES` MUST be treated as architecture-dependent and unverified, because the native frame sizes of the compiled guest differ between x86_64 and aarch64: the test of PLG-029 shows that the guest traps and stays inside its budget on one build, not at what depth. A plugin MUST NOT depend on the depth at which it traps, and until U1's replay comparison includes a recursing guest, a match that mixes architectures with a plugin whose recursion approaches the budget lies outside the verified envelope.
+The depth at which unbounded recursion traps at `MAX_WASM_STACK_BYTES` MUST be treated as architecture-dependent and unverified, because the native frame sizes of the compiled guest differ between x86_64 and aarch64: the test of PLG-029 shows that the guest traps and stays inside its budget on one build, not at what depth. A plugin MUST NOT depend on the depth at which it traps, and until the comparison of DET-024 includes a recursing guest at the budget DET-023 states, a match that mixes architectures with a plugin whose recursion approaches the budget lies outside the verified envelope.
 
 ## The interfaces frontier
 
@@ -197,7 +200,7 @@ A host function other than `log` MUST NOT be added to `wit/supercom.wit` before 
 
 ## Licensing: PLG-001 options
 
-This section is not a clause and carries no evaluator. The head has reserved the licensing statement for plugins as clause PLG-001 (R7). The identifier is unused, and the requirement check for it fails until the head rules. The options below are drafted for that ruling; none is chosen, and none is legal advice. The consequences are read from the texts cited, as they stood when this file was written, not from any court's reading of them.
+This section is not a clause and carries no evaluator. The head has reserved the licensing statement for plugins as clause PLG-001 (R7). The head ruled for Option A on 2026-10-09 (ADR-0007), and PLG-001 at the head of this file carries the statement; the options stay as the record of what was weighed, and none of them is legal advice. The consequences are read from the texts cited, as they stood when this file was written, not from any court's reading of them.
 
 ### The question
 
