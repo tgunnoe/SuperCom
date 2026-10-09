@@ -9,3 +9,11 @@ fail-fast = false
 [[profile.default.overrides]]
 filter         = 'test(/conformance_/)'
 success-output = "immediate"
+
+# The plugin tests end on fuel, so a host that stopped metering it would hang
+# them instead of failing; bound each one and kill it rather than wait. The
+# slowest cold run, fixture build included, is well under a tenth of the kill
+# time.
+[[profile.default.overrides]]
+filter       = 'package(supercom-plugin)'
+slow-timeout = { period = "60s", terminate-after = 2 }
