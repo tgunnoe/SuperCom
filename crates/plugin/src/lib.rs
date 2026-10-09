@@ -317,6 +317,13 @@ impl Host {
 
 /// One instance of a plugin component, with its own state and fuel.
 ///
+/// A plugin fails closed. When any call into it returns an error, whether the
+/// guest ran out of fuel, trapped, overran its stack, or tried to pass more
+/// data than the host lifts in one crossing, the plugin is retired: every
+/// later call returns [`Error::Trap`] without running guest code, because
+/// what the guest left behind cannot be trusted. Load the component again for
+/// a fresh instance.
+///
 /// Guest code runs on the stack of the thread that calls it, and may use up to
 /// `MAX_WASM_STACK_BYTES` (256 KiB) of it before it traps. A caller therefore
 /// needs at least that much free stack plus the host's own frames: on a
@@ -407,7 +414,7 @@ impl Plugin {
     /// # Errors
     ///
     /// [`Error::OutOfFuel`] once the fuel is used up, which is the only way
-    /// the call ends.
+    /// the call ends, and which retires the plugin.
     pub fn spin(&mut self, fuel: u64) -> Result<(), Error> {
         let spin = self.exports.spin;
         self.run(fuel, |store| spin.call(store, ()))

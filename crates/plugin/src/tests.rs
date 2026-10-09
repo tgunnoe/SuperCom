@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use super::{
     COMPONENT_MAX_BYTES, Error, HOSTCALL_FUEL, Host, MAX_INSTANCES, MAX_MEMORIES, MAX_TABLES,
-    MAX_WASM_STACK_BYTES, MEMORY_LIMIT_BYTES, TABLE_ELEMENTS,
+    MAX_WASM_STACK_BYTES, MEMORY_LIMIT_BYTES, Plugin, TABLE_ELEMENTS,
 };
 
 /// A component that implements the whole `plugin` world: `describe` answers
@@ -516,4 +516,63 @@ fn the_async_abi_does_not_compile() {
         "(component (type (future u8)))",
         "(component (type (stream u8)))",
     ]);
+}
+
+/// Asserts that every export that tells a refusal from a run is refused:
+/// `describe` and `nan-bits` would answer, and `spin` would run out of fuel,
+/// if the guest ran at all.
+fn assert_retired(plugin: &mut Plugin) {
+    let described = plugin.describe();
+    assert!(
+        matches!(&described, Err(Error::Trap { .. })),
+        "describe returned {described:?}"
+    );
+    let nan_bits = plugin.nan_bits(1_000_000);
+    assert!(
+        matches!(&nan_bits, Err(Error::Trap { .. })),
+        "nan_bits returned {nan_bits:?}"
+    );
+    let spun = plugin.spin(1_000);
+    assert!(
+        matches!(&spun, Err(Error::Trap { .. })),
+        "spin returned {spun:?}"
+    );
+}
+
+/// A plugin fails closed: once a call has returned an error, `wasmtime`
+/// refuses to enter the instance again and the host reports the refusal as
+/// [`Error::Trap`]. Its `step` here is the identity, so an error from it can
+/// only be the refusal. The behaviour is `wasmtime`'s, so this test passes
+/// without the host doing anything; it holds the documented guarantee in place
+/// against a change of `wasmtime`.
+#[test]
+fn a_plugin_that_ran_out_of_fuel_is_retired() {
+    let mut plugin = host()
+        .load(&world("(local.get 0)", "(i64.const 0)"))
+        .expect("load the component");
+    let spun = plugin.spin(1_000);
+    assert!(
+        matches!(spun, Err(Error::OutOfFuel)),
+        "spin returned {spun:?}"
+    );
+    let stepped = plugin.step(1, 1_000_000);
+    assert!(
+        matches!(&stepped, Err(Error::Trap { .. })),
+        "step returned {stepped:?}"
+    );
+    assert_retired(&mut plugin);
+}
+
+/// As above, for a trap other than fuel exhaustion.
+#[test]
+fn a_plugin_that_trapped_is_retired() {
+    let mut plugin = host()
+        .load(&world("unreachable", "(i64.const 0)"))
+        .expect("load the trapping component");
+    let stepped = plugin.step(1, 1_000_000);
+    assert!(
+        matches!(&stepped, Err(Error::Trap { .. })),
+        "step returned {stepped:?}"
+    );
+    assert_retired(&mut plugin);
 }
