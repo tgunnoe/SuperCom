@@ -92,23 +92,32 @@ impl<'a> Reader<'a> {
         Ok(out)
     }
 
-    /// A NUL-terminated string, decoded as ISO-8859-1 (one `char` per byte).
-    /// A string with no terminator before the end of the buffer needs one
-    /// more byte than the buffer has.
-    fn cstr(&mut self) -> Result<String, Error> {
+    /// A NUL-terminated string of at most `max_len` bytes, decoded as
+    /// ISO-8859-1 (one `char` per byte). A string with no terminator before
+    /// the end of the buffer needs one more byte than the buffer has; one
+    /// with no terminator within `max_len` bytes is [`Error::Malformed`].
+    fn cstr(&mut self, max_len: usize) -> Result<String, Error> {
         let len = self.bytes.len();
         let rest = self.bytes.get(self.pos..).unwrap_or_default();
-        let Some(end) = rest.iter().position(|&b| b == 0) else {
+        let window = rest.get(..max_len.saturating_add(1)).unwrap_or(rest);
+        let Some(end) = window.iter().position(|&b| b == 0) else {
+            if window.len() < rest.len() {
+                return Err(malformed(format!("a name is longer than {max_len} bytes")));
+            }
             return Err(Error::Truncated {
                 needed: len.saturating_add(1),
                 len,
             });
         };
         self.pos = self.pos.saturating_add(end).saturating_add(1);
-        Ok(rest.iter().take(end).map(|&b| char::from(b)).collect())
+        Ok(window.iter().take(end).map(|&b| char::from(b)).collect())
     }
 }
 
+/// The longest bone name read. The installed names are far shorter; the
+/// bound keeps many bones that name one long string from multiplying it into
+/// an allocation larger than the file.
+const MAX_NAME_LEN: usize = 1024;
 /// The only format version either parser reads.
 const VERSION: u32 = 5;
 const MESH_HEADER_LEN: usize = 48;
@@ -141,7 +150,7 @@ fn read_bone(bytes: &[u8], record: &[u8], total: usize) -> Result<Bone, Error> {
     let parent = r.i32()?;
     let name_offset = usize::try_from(name_offset)
         .map_err(|_| malformed(format!("bone name offset {name_offset} is negative")))?;
-    let name = Reader::at(bytes, name_offset).cstr()?;
+    let name = Reader::at(bytes, name_offset).cstr(MAX_NAME_LEN)?;
     let parent = match usize::try_from(parent) {
         Ok(index) if index < total => Some(index),
         _ if parent == -1 => None,
@@ -283,8 +292,8 @@ impl Mesh {
     /// [`Error::Truncated`] when the buffer is shorter than the 48-byte
     /// header or than a table the header places, or when a bone's name lies
     /// past the end; [`Error::Malformed`] when the index count is not a
-    /// multiple of three, a bone's name offset is negative, or a parent index
-    /// names no bone.
+    /// multiple of three, a bone's name offset is negative or its name is
+    /// longer than 1024 bytes, or a parent index names no bone.
     pub fn parse(bytes: &[u8]) -> Result<Self, Error> {
         let Some(head) = bytes.get(..MESH_HEADER_LEN) else {
             return Err(Error::Truncated {
@@ -403,7 +412,8 @@ impl Animation {
     /// [`Error::UnsupportedVersion`] for any version but 5;
     /// [`Error::Truncated`] when the buffer is shorter than the 36-byte
     /// header or than the data the header places; [`Error::Malformed`] when
-    /// `frame_size` is not `8 + 28 * bone_count`.
+    /// `frame_size` is not `8 + 28 * bone_count` or a bone name is longer
+    /// than 1024 bytes.
     pub fn parse(bytes: &[u8]) -> Result<Self, Error> {
         let Some(head) = bytes.get(..ANIM_HEADER_LEN) else {
             return Err(Error::Truncated {
@@ -447,7 +457,7 @@ impl Animation {
             .collect::<Result<Vec<_>, _>>()?;
         let mut names = Reader::at(bytes, names_offset);
         let bone_names = (0..bone_count)
-            .map(|_| names.cstr())
+            .map(|_| names.cstr(MAX_NAME_LEN))
             .collect::<Result<Vec<_>, _>>()?;
 
         let frame_count = to_usize(frame_count_word);
