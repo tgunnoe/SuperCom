@@ -1,0 +1,21 @@
+[package]
+description  = "Importer of the installed game's blueprints into the typed catalog, with its cache and load benchmark"
+edition      = { workspace = true }
+license      = { workspace = true }
+name         = "supercom-bp-import"
+publish      = false
+repository   = { workspace = true }
+rust-version = "1.89"
+version      = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+supercom-bp   = { path = "../bp", version = "0.0.1" }
+supercom-data = { path = "../data", version = "0.0.1" }
+supercom-scd  = { path = "../scd", version = "0.0.1" }
+
+[dev-dependencies]
+supercom-testkit = { path = "../testkit", version = "0.0.1" }
+tempfile         = "3"
