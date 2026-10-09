@@ -188,13 +188,23 @@ impl State {
 /// is pinned rather than left to the default, so that the amount a caller must
 /// have free does not change with the `wasmtime` version.
 ///
-/// Every other proposal the plugin world has no use for is off as well, so
-/// that what a guest may use does not widen when `wasmtime` changes a default:
-/// 64-bit memories, garbage collection, exception handling (whose objects
-/// live on the garbage-collected heap) and the component model's async ABI
-/// (which schedules guest tasks beyond the fuel of any one call). Backtrace
-/// details are off so that the text of a trap does not depend on an
-/// environment variable or on debug information the guest supplies.
+/// Four proposals the plugin world has no use for are off as well: 64-bit
+/// memories, garbage collection, exception handling (whose objects live on
+/// the garbage-collected heap) and the component model's async ABI (which
+/// schedules guest tasks beyond the fuel of any one call). Seven others stay
+/// at `wasmtime` 49's defaults, which turn them on:
+/// tail calls,
+/// function references,
+/// wide arithmetic,
+/// SIMD,
+/// relaxed SIMD (made deterministic above),
+/// multi-memory,
+/// and extended-const.
+/// A `wasmtime` upgrade that changes one of those defaults widens what a
+/// guest may use without a diff here, so the plugin-api specification pins
+/// the set it admits. Backtrace details are off so that the text of a trap
+/// does not depend on an environment variable or on debug information the
+/// guest supplies.
 fn config() -> Config {
     let mut config = Config::new();
     config

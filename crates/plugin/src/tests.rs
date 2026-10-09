@@ -106,6 +106,42 @@ fn an_import_the_host_does_not_provide_fails_to_instantiate() {
     );
 }
 
+/// AGENTS.md I3: a component that imports a clock, randomness, or the file
+/// system never instantiates, however complete the rest of its world is. The
+/// control is the full world; each case adds one WASI instance import that
+/// carries a function (an empty instance import needs nothing from the
+/// linker and is admitted), so a linker that tolerated unknown imports would
+/// load every case.
+#[test]
+fn wasi_imports_fail_to_instantiate() {
+    let host = host();
+    assert!(
+        host.load(&world("(local.get 0)", "(i64.const 0)")).is_ok(),
+        "the control loads"
+    );
+    for (name, item) in [
+        ("wasi:clocks/monotonic-clock@0.2.0", "now"),
+        ("wasi:random/random@0.2.0", "get-random-u64"),
+        ("wasi:filesystem/types@0.2.0", "filesystem-error-code"),
+    ] {
+        let text = WORLD
+            .replacen(
+                "(core module $m",
+                &format!(
+                    "(import \"{name}\" (instance (export \"{item}\" (func (result u64)))))\n      (core module $m"
+                ),
+                1,
+            )
+            .replace("{step}", "(local.get 0)")
+            .replace("{nan_bits}", "(i64.const 0)");
+        let loaded = host.load(&assemble(&text)).err();
+        assert!(
+            matches!(loaded, Some(Error::Instantiate { .. })),
+            "{name}: load returned {loaded:?}"
+        );
+    }
+}
+
 #[test]
 fn a_component_that_lacks_the_world_fails_to_instantiate() {
     let loaded = host().load(&assemble("(component)")).err();
