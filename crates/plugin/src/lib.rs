@@ -12,13 +12,23 @@
 //! The host's linker defines the `host` interface and nothing else, and the
 //! crate links no system interface, so a component that imports a clock, a
 //! source of randomness, or the file system compiles but does not instantiate.
+//!
+//! A component is untrusted, so the host also holds it to limits that no
+//! caller can change. Input over `COMPONENT_MAX_BYTES` (16 MiB) is refused
+//! before it is compiled. Instantiation, which runs start functions, has a
+//! fuel budget of its own, `INSTANTIATE_FUEL`. Each store caps a linear memory
+//! at `MEMORY_LIMIT_BYTES` (64 MiB) and a table at `TABLE_ELEMENTS` elements,
+//! and allows `MAX_INSTANCES` instances, `MAX_MEMORIES` memories and
+//! `MAX_TABLES` tables. Guest code may use `MAX_WASM_STACK_BYTES` (256 KiB) of
+//! native stack, and one crossing of the boundary lifts at most
+//! `HOSTCALL_FUEL` (64 KiB) of data from the guest.
 
 use std::fmt;
 
 use wasmtime::component::{
-    Component, ComponentNamedList, Instance, Lift, Linker, Lower, TypedFunc,
+    Component, ComponentNamedList, Instance, Lift, Linker, Lower, TypedFunc, WasmStr,
 };
-use wasmtime::{Config, Engine, Store, Strategy, Trap};
+use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder, Strategy, Trap};
 
 /// The one interface the host provides to a plugin.
 const HOST_INTERFACE: &str = "supercom:engine/host@0.1.0";
@@ -29,26 +39,49 @@ const HOST_INTERFACE: &str = "supercom:engine/host@0.1.0";
 /// two apart before any compiling.
 const CORE_MODULE_PREAMBLE: [u8; 8] = [0, 0x61, 0x73, 0x6d, 1, 0, 0, 0];
 
-/// The fuel [`Host::load`] gives a new store before instantiating. A fresh
-/// store holds none, and instantiation runs guest code, so without this the
-/// guest traps before it is up. It is all the fuel there is: instantiation is
-/// not bounded.
-const INSTANTIATE_FUEL: u64 = u64::MAX;
+/// Fuel for instantiation, which runs start functions that would otherwise stall `Host::load`.
+const INSTANTIATE_FUEL: u64 = 10_000_000;
 
 /// The fuel [`Plugin::describe`] runs under, since it takes no budget.
 const DESCRIBE_FUEL: u64 = 1_000_000;
+
+/// The most a linear memory may reach, so a guest cannot exhaust the host's memory by growing.
+const MEMORY_LIMIT_BYTES: usize = 64 * 1024 * 1024;
+
+/// The most elements a table may hold, so a guest cannot exhaust the host's memory with a table.
+const TABLE_ELEMENTS: usize = 10_000;
+
+/// The most instances one store may create, so a component cannot instantiate without end.
+const MAX_INSTANCES: usize = 16;
+
+/// The most linear memories one store may create, each a reservation of address space.
+const MAX_MEMORIES: usize = 4;
+
+/// The most tables one store may create, each a further allocation.
+const MAX_TABLES: usize = 4;
+
+/// The native stack guest code may use, so unbounded recursion traps instead of overrunning a thread.
+const MAX_WASM_STACK_BYTES: usize = 256 * 1024;
+
+/// The bytes one crossing may lift from the guest, so a huge string cannot make the host copy it.
+const HOSTCALL_FUEL: usize = 64 * 1024;
+
+/// The largest input the host will compile, so the compiler is never fed an unbounded component.
+const COMPONENT_MAX_BYTES: usize = 16 * 1024 * 1024;
 
 /// Why a component could not be loaded or run.
 #[derive(Debug)]
 pub enum Error {
     /// The bytes do not compile as a component under the host's
-    /// configuration, or the host's compiler could not be set up.
+    /// configuration, are longer than the host will compile, or the host's
+    /// compiler could not be set up.
     Compile {
         /// What the compiler reported.
         reason: String,
     },
     /// The component compiled but could not be instantiated, for example
-    /// because it imports an interface the host does not provide.
+    /// because it imports an interface the host does not provide or asks for
+    /// more memory, tables or instances than a store allows.
     Instantiate {
         /// What the linker or the instantiation reported.
         reason: String,
@@ -58,9 +91,10 @@ pub enum Error {
         /// What the trap reported.
         reason: String,
     },
-    /// The guest used all the fuel it was given, which is how the host stops
-    /// a guest that does not return. Exhaustion is deterministic: the same
-    /// component and the same fuel always stop at the same point.
+    /// The guest used all the fuel it was given, in a call or while it was
+    /// being instantiated, which is how the host stops a guest that does not
+    /// return. Exhaustion is deterministic: the same component and the same
+    /// fuel always stop at the same point.
     OutOfFuel,
     /// The bytes are a core WebAssembly module, which has not been encoded as
     /// a component.
@@ -93,22 +127,51 @@ impl Error {
         }
     }
 
-    /// A linker or instantiation failure.
+    /// A linker or instantiation failure. A start function that ran out of
+    /// fuel is [`Error::OutOfFuel`], as it is in a call.
     fn instantiate(err: &wasmtime::Error) -> Self {
-        Self::Instantiate {
-            reason: format!("{err:#}"),
+        if out_of_fuel(err) {
+            Self::OutOfFuel
+        } else {
+            Self::Instantiate {
+                reason: format!("{err:#}"),
+            }
         }
     }
 
     /// What a failed guest call reported: exhausted fuel is its own variant
     /// and every other trap is a [`Error::Trap`].
     fn call(err: &wasmtime::Error) -> Self {
-        if err.downcast_ref::<Trap>() == Some(&Trap::OutOfFuel) {
+        if out_of_fuel(err) {
             Self::OutOfFuel
         } else {
             Self::Trap {
                 reason: format!("{err:#}"),
             }
+        }
+    }
+}
+
+/// Whether `err` is the trap that metered fuel raises when it runs out.
+fn out_of_fuel(err: &wasmtime::Error) -> bool {
+    err.downcast_ref::<Trap>() == Some(&Trap::OutOfFuel)
+}
+
+/// What every store holds besides the guest: the limits its limiter enforces.
+struct State {
+    limits: StoreLimits,
+}
+
+impl State {
+    fn new() -> Self {
+        Self {
+            limits: StoreLimitsBuilder::new()
+                .memory_size(MEMORY_LIMIT_BYTES)
+                .table_elements(TABLE_ELEMENTS)
+                .instances(MAX_INSTANCES)
+                .memories(MAX_MEMORIES)
+                .tables(MAX_TABLES)
+                .build(),
         }
     }
 }
@@ -119,7 +182,9 @@ impl Error {
 /// of its settings, so a change of the default compiler cannot drop it. The
 /// threads proposal is off because a guest that waits on a shared memory
 /// blocks its thread where fuel cannot reach it, and nothing in the host
-/// spawns the threads that would wake it.
+/// spawns the threads that would wake it. The native stack guest code may use
+/// is pinned rather than left to the default, so that the amount a caller must
+/// have free does not change with the `wasmtime` version.
 fn config() -> Config {
     let mut config = Config::new();
     config
@@ -127,6 +192,7 @@ fn config() -> Config {
         .cranelift_nan_canonicalization(true)
         .relaxed_simd_deterministic(true)
         .consume_fuel(true)
+        .max_wasm_stack(MAX_WASM_STACK_BYTES)
         .wasm_threads(false);
     config
 }
@@ -135,7 +201,7 @@ fn config() -> Config {
 /// deterministic, fuel-metered configuration and instantiates them.
 pub struct Host {
     engine: Engine,
-    linker: Linker<()>,
+    linker: Linker<State>,
 }
 
 impl Host {
@@ -149,9 +215,12 @@ impl Host {
     pub fn new() -> Result<Self, Error> {
         let engine = Engine::new(&config()).map_err(|err| Error::compile(&err))?;
         let mut linker = Linker::new(&engine);
+        // The message is taken as a `WasmStr` and never read: the host checks
+        // that it lies inside the guest's memory and charges it against the
+        // hostcall fuel, but does not copy or decode it.
         linker
             .instance(HOST_INTERFACE)
-            .and_then(|mut host| host.func_wrap("log", |_, (_message,): (String,)| Ok(())))
+            .and_then(|mut host| host.func_wrap("log", |_, (_message,): (WasmStr,)| Ok(())))
             .map_err(|err| Error::compile(&err))?;
         Ok(Self { engine, linker })
     }
@@ -161,18 +230,20 @@ impl Host {
     /// `plugin` world, and it owns its own store, so loading the same bytes
     /// twice gives two independent plugins.
     ///
-    /// Instantiation runs guest code under all the fuel there is; only calls
-    /// into the returned [`Plugin`] are bounded.
+    /// Instantiation runs guest code, so it has a fuel budget of its own;
+    /// calls into the returned [`Plugin`] are metered separately.
     ///
     /// # Errors
     ///
     /// [`Error::NotAComponent`] if `bytes` is a core module,
-    /// [`Error::Compile`] if it is not valid, [`Error::Instantiate`] if the
-    /// component imports anything the host does not provide or lacks an
-    /// export of the world.
+    /// [`Error::Compile`] if it is not valid or is longer than 16 MiB,
+    /// [`Error::OutOfFuel`] if a start function does not return within the
+    /// instantiation budget, [`Error::Instantiate`] if the component imports
+    /// anything the host does not provide, lacks an export of the world, or
+    /// asks for more memory, tables or instances than a store allows.
     pub fn load(&self, bytes: &[u8]) -> Result<Plugin, Error> {
         let component = self.compile(bytes)?;
-        let mut store = Store::new(&self.engine, ());
+        let mut store = self.store();
         store
             .set_fuel(INSTANTIATE_FUEL)
             .map_err(|err| Error::instantiate(&err))?;
@@ -200,10 +271,28 @@ impl Host {
             .collect())
     }
 
+    /// A new store with every limit in place. Every store comes from here, so
+    /// none runs a guest under the defaults.
+    fn store(&self) -> Store<State> {
+        let mut store = Store::new(&self.engine, State::new());
+        store.set_hostcall_fuel(HOSTCALL_FUEL);
+        store.limiter(|state| &mut state.limits);
+        store
+    }
+
     /// Compiles `bytes`, telling a core module from a component by its
     /// preamble alone rather than by the text of a compiler error. Only the
-    /// binary format is read, never the text format.
+    /// binary format is read, never the text format. Input over the size limit
+    /// is refused first, so the work that follows is bounded.
     fn compile(&self, bytes: &[u8]) -> Result<Component, Error> {
+        if bytes.len() > COMPONENT_MAX_BYTES {
+            return Err(Error::Compile {
+                reason: format!(
+                    "the input is {} bytes, over the limit of {COMPONENT_MAX_BYTES}",
+                    bytes.len()
+                ),
+            });
+        }
         if bytes.starts_with(&CORE_MODULE_PREAMBLE) {
             return Err(Error::NotAComponent);
         }
@@ -212,8 +301,14 @@ impl Host {
 }
 
 /// One instance of a plugin component, with its own state and fuel.
+///
+/// Guest code runs on the stack of the thread that calls it, and may use up to
+/// `MAX_WASM_STACK_BYTES` (256 KiB) of it before it traps. A caller therefore
+/// needs at least that much free stack plus the host's own frames: on a
+/// thread with less, a guest that recurses without bound overruns the thread,
+/// and that aborts the process.
 pub struct Plugin {
-    store: Store<()>,
+    store: Store<State>,
     exports: Exports,
 }
 
@@ -227,7 +322,7 @@ struct Exports {
 }
 
 impl Exports {
-    fn new(instance: &Instance, store: &mut Store<()>) -> Result<Self, Error> {
+    fn new(instance: &Instance, store: &mut Store<State>) -> Result<Self, Error> {
         Ok(Self {
             describe: export(instance, store, "describe")?,
             step: export(instance, store, "step")?,
@@ -241,7 +336,7 @@ impl Exports {
 /// export in the error, which `wasmtime` does not.
 fn export<Params, Results>(
     instance: &Instance,
-    store: &mut Store<()>,
+    store: &mut Store<State>,
     name: &str,
 ) -> Result<TypedFunc<Params, Results>, Error>
 where
@@ -256,12 +351,13 @@ where
 }
 
 impl Plugin {
-    /// Calls the plugin's `describe` export.
+    /// Calls the plugin's `describe` export. The text it answers may be at
+    /// most 64 KiB, the most the host lifts from the guest in one crossing.
     ///
     /// # Errors
     ///
     /// [`Error::OutOfFuel`] if the call exhausts its fuel, [`Error::Trap`] if
-    /// the guest traps otherwise.
+    /// the guest traps otherwise or answers with more text than the host lifts.
     pub fn describe(&mut self) -> Result<String, Error> {
         let describe = self.exports.describe;
         self.run(DESCRIBE_FUEL, |store| describe.call(store, ()))
@@ -308,7 +404,7 @@ impl Plugin {
     fn run<Output>(
         &mut self,
         fuel: u64,
-        call: impl FnOnce(&mut Store<()>) -> wasmtime::Result<Output>,
+        call: impl FnOnce(&mut Store<State>) -> wasmtime::Result<Output>,
     ) -> Result<Output, Error> {
         self.store.set_fuel(fuel).map_err(|err| Error::call(&err))?;
         call(&mut self.store).map_err(|err| Error::call(&err))
