@@ -1060,6 +1060,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "supercom-scmap"
+version = "0.0.1"
+dependencies = [
+ "supercom-dds",
+ "supercom-scd",
+ "supercom-testkit",
+]
+
+[[package]]
 name = "supercom-testkit"
 version = "0.0.1"
 

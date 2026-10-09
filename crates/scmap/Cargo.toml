@@ -1,0 +1,19 @@
+[package]
+description  = "Loader for the installed game's binary .scmap map files"
+edition      = { workspace = true }
+license      = { workspace = true }
+name         = "supercom-scmap"
+publish      = false
+repository   = { workspace = true }
+rust-version = { workspace = true }
+version      = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+supercom-dds     = { path = "../dds", version = "0.0.1" }
+supercom-scd     = { path = "../scd", version = "0.0.1" }
+supercom-testkit = { path = "../testkit", version = "0.0.1" }
