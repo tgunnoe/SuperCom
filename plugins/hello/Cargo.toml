@@ -1,0 +1,27 @@
+[package]
+description = "Fixture plugin component for the sandbox suite of supercom-plugin"
+edition     = "2024"
+license     = "GPL-3.0-or-later"
+name        = "hello"
+publish     = false
+repository  = "https://github.com/tgunnoe/SuperCom"
+version     = "0.0.1"
+
+# A standalone project: it builds for wasm32-unknown-unknown and keeps its own
+# lockfile, so it stays outside the engine workspace.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.62"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+codegen-units = 1
+lto           = true
+opt-level     = "s"
+panic         = "abort"

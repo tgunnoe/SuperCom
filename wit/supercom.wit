@@ -1,0 +1,32 @@
+// The engine API a plugin component is written against, version 0.1.0.
+//
+// This world is deliberately small: it carries only what the sandbox suite
+// of `supercom-plugin` needs. The plugin API specification designs the real
+// interfaces against its shape.
+package supercom:engine@0.1.0;
+
+/// What the engine offers a plugin. A plugin imports nothing else: the host
+/// provides no clock, no randomness, and no files.
+interface host {
+    /// Records a diagnostic message from the plugin.
+    log: func(message: string);
+}
+
+/// A plugin component.
+world plugin {
+    import host;
+
+    /// A short description of the plugin.
+    export describe: func() -> string;
+
+    /// Advances the plugin to `tick` and returns its result.
+    export step: func(tick: u64) -> u64;
+
+    /// The bit pattern of the `NaN` the guest gets from dividing zero by zero
+    /// as an `f64`. The host canonicalizes `NaN`s, so it is the same on every
+    /// platform.
+    export nan-bits: func() -> u64;
+
+    /// Loops forever. A fixture for fuel exhaustion: the host must stop it.
+    export spin: func();
+}

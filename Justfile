@@ -33,9 +33,10 @@ scan:
     python3 tools/cleanroom_scan.py --self-test
     python3 tools/cleanroom_scan.py --check
 
-# Audit dependency licenses, bans, and sources (no network needed)
+# Audit dependency licenses, bans, and sources (the fixture's packages are fetched by the gate's tests first)
 deny:
     cargo deny check licenses bans sources
+    cargo deny --manifest-path plugins/hello/Cargo.toml --config deny.toml --locked check licenses bans sources
 
 # Audit dependencies against the advisory database (needs network)
 audit:
