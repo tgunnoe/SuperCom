@@ -126,8 +126,9 @@ Each item: statement · grounding (why unresolved) · signpost (what resolves it
 - Environment: `direnv allow` or `nix-shell` (no flakes). If `IN_NIX_SHELL`
   is set, every tool below is already on PATH; do not nest `nix-shell`.
 - Commands: `just check`, `just test`, `just clippy`, `just fmt`, `just lint`
-  (the specification lint: self-test, check, run), `just gate` (the CI gate:
-  format check, lint, clippy with `-D warnings`, tests, license audit).
+  (the specification lint: self-test, check, run), `just scan` (the clean-room
+  content scan), `just gate` (the CI gate: format check, lint, scan, clippy
+  with `-D warnings`, tests, license audit).
 - Game data: `SUPERCOM_FA_DIR` (defaults to the Steam install path).
 - Predicate arsenal by moment: `rust` for all code; `spec` and `form` for the
   reverse-engineered specification; `prior-art` before any format loader or
@@ -140,7 +141,8 @@ Each item: statement · grounding (why unresolved) · signpost (what resolves it
 
 ## Structure
 
-Core (planned; only `crates/supercom` exists today — WIP):
+Core (planned; `crates/supercom`, `crates/scd`, `crates/testkit`, and
+`crates/plugin` with `wit/` exist today — WIP):
 
 - `crates/supercom` — binary: configuration, wiring, launches a skirmish.
 - `crates/scd` — `.scd` archive virtual filesystem and mount order.
