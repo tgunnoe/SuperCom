@@ -142,14 +142,15 @@ Each item: statement · grounding (why unresolved) · signpost (what resolves it
 ## Structure
 
 Core (planned; `crates/supercom`, `crates/scd`, `crates/testkit`,
-`crates/plugin` with `wit/`, and `crates/detbench` exist today — WIP):
+`crates/plugin` with `wit/`, `crates/detbench`, `crates/scm`, `crates/dds`,
+and `crates/scmap` exist today — WIP):
 
 - `crates/supercom` — binary: configuration, wiring, launches a skirmish.
 - `crates/scd` — `.scd` archive virtual filesystem and mount order.
 - `crates/data` — Nickel contracts and the typed blueprint model;
   `crates/bp-import` — `.bp` to Nickel importer and cache.
-- `crates/scm`, `crates/scmap`, `crates/xact` — mesh/animation, map, and
-  sound-bank loaders.
+- `crates/scm`, `crates/dds`, `crates/scmap`, `crates/xact` — mesh/animation,
+  texture-header, map, and sound-bank loaders.
 - `crates/sim` — deterministic simulation (economy, units, orders, weapons,
   projectiles, pathfinding, damage); `crates/ai` — built-in skirmish AI.
 - `crates/plugin` — wasmtime host and plugin SDK; `wit/` — the engine API.

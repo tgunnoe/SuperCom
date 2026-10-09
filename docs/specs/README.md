@@ -19,8 +19,8 @@ source.
 | determinism | lockstep command stream, replay format, float strategy, desync detection                                                                                                        | landed |
 | render      | terrain, decals, props, shadows, water, units, fog of war, strategic icons, post-processing                                                                                     | WIP    |
 | plugin-api  | WIT worlds, host imports, versioning, sandbox policy                                                                                                                            | landed |
-| ai          | the skirmish AI interface and the built-in AI's contract                                                                                                                        | WIP    |
-| ui          | basic HUD and input behaviour                                                                                                                                                   | WIP    |
+| ai          | the skirmish AI interface and the built-in AI's contract                                                                                                                        | landed |
+| ui          | basic HUD and input behaviour                                                                                                                                                   | landed |
 
 Each domain gets its own file in this directory, authored by the spec campaign.
 
