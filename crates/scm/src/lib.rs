@@ -114,9 +114,13 @@ impl<'a> Reader<'a> {
     }
 }
 
-/// The longest bone name read. The installed names are far shorter; the
-/// bound keeps many bones that name one long string from multiplying it into
-/// an allocation larger than the file.
+/// The longest bone name read. The installed names are far shorter (34
+/// bytes at most). Every bone record carries its own name offset, so many
+/// records may point at one string and each read decodes its own copy; the
+/// bound keeps that memory linear in the file (at most about 1024 bytes of
+/// name per 108-byte record) rather than below the file's size. A budget on
+/// the decoded bytes is the remaining hardening, tracked in the repository's
+/// issues.
 const MAX_NAME_LEN: usize = 1024;
 /// The only format version either parser reads.
 const VERSION: u32 = 5;
@@ -223,8 +227,8 @@ fn malformed(reason: impl Into<String>) -> Error {
 /// words that are not read.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Bone {
-    /// The bone's name: the NUL-terminated ASCII string at the record's name
-    /// offset.
+    /// The bone's name: the NUL-terminated string at the record's name
+    /// offset, decoded as ISO-8859-1 (one `char` per byte).
     pub name: String,
     /// Index of the parent bone, or `None` for a root (stored as -1).
     pub parent: Option<usize>,
