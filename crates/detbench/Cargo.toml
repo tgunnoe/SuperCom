@@ -1,0 +1,21 @@
+[package]
+description  = "Evidence for the determinism specification: golden-vector tests and a throughput micro-benchmark"
+edition      = { workspace = true }
+license      = { workspace = true }
+name         = "supercom-detbench"
+publish      = false
+repository   = { workspace = true }
+rust-version = { workspace = true }
+version      = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+fixed = "1"
+# libm's `arch` feature swaps in assembly for sqrt, fma, and rounding, which are
+# exact either way. Cargo turns it on in workspace builds (cranelift-codegen
+# depends on libm with default features), so the golden vectors must, and do,
+# hold with it on and off.
+libm = { default-features = false, version = "0.2" }
+sha2 = "0.10"
