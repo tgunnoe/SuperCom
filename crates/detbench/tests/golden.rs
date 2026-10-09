@@ -3,11 +3,12 @@
 //! Every golden constant below was produced on x86_64-linux by
 //! `cargo run -p supercom-detbench --example golden`, which calls the same
 //! library functions the tests call, and was recorded on 2026-10-08 with
-//! rustc 1.99.0. No test here claims a result from another architecture. The
-//! `libm` vectors hold with that crate's `arch` feature off
-//! (`cargo nextest run -p supercom-detbench`) and on (`cargo nextest run
-//! --workspace`, where Cargo unifies it in through the plugin host's
-//! dependencies).
+//! rustc 1.99.0, `libm` 0.2.16 and `fixed` 1.30.0 as `Cargo.lock` locks them; a
+//! change of the `libm` lock entry is a re-golden event. No test here claims a
+//! result from another architecture. The `libm` vectors hold with that crate's
+//! `arch` feature off (`cargo nextest run -p supercom-detbench`) and on
+//! (`cargo nextest run --workspace`, where Cargo unifies it in through the
+//! plugin host's dependencies).
 
 use std::hint::black_box;
 
@@ -19,7 +20,7 @@ use supercom_detbench::floats::{
     libm_sin_bits, libm_sqrt_bits, std_sqrt_bits,
 };
 use supercom_detbench::hash::{
-    GENESIS, chain, chain_all, first_divergence, hex, scheduled_run, synthetic_states,
+    chain, chain_all, first_divergence, hex, scheduled_run, synthetic_states,
 };
 
 const SQRT_GOLDEN: [u64; 12] = [
@@ -196,8 +197,25 @@ fn detbench_schedule_applies_at_stamped_tick() {
         assert!(cmds.iter().all(|c| c.tick == *tick));
     }
 
+    // A set that is both late and duplicate: the same refusal, late, over every
+    // arrival order, because the earliest stamp is checked before the duplicate
+    // scan.
+    let mut late_dup = synthetic_commands();
+    late_dup.push(cmd(4, 1, 0, &[0xFF]));
+    let mut late_dup_orders = 0;
+    for order in permutations(&late_dup) {
+        assert_eq!(
+            schedule(&order, 3),
+            Err(ScheduleError::Late {
+                tick: 0,
+                next_tick: 3
+            })
+        );
+        late_dup_orders += 1;
+    }
+    assert_eq!(late_dup_orders, 5040);
+
     // A command stamped for the next tick is on time; one before it is late.
-    assert!(schedule(&all, 0).is_ok());
     assert_eq!(
         schedule(&all, 3),
         Err(ScheduleError::Late {
@@ -215,47 +233,44 @@ fn detbench_schedule_applies_at_stamped_tick() {
         })
     );
 
-    // Source 1 reuses sequence number 0 at a different tick.
+    // Source 1 reuses sequence number 0 at a different tick: refused as a
+    // duplicate over every arrival order of the seven commands.
     let mut dup = synthetic_commands();
     dup.push(cmd(4, 1, 0, &[0xFF]));
-    for order in permutations(&dup[..4]) {
-        let mut set = order;
-        set.push(dup[4].clone());
-        set.push(dup[5].clone());
-        set.push(dup[6].clone());
+    let mut dup_orders = 0;
+    for order in permutations(&dup) {
         assert_eq!(
-            schedule(&set, 0),
+            schedule(&order, 0),
             Err(ScheduleError::Duplicate { source: 1, seq: 0 })
         );
+        dup_orders += 1;
     }
+    assert_eq!(dup_orders, 5040);
 }
 
 /// The hash chain over a 16-tick synthetic run has the committed first and
 /// last values, and a link is `SHA-256(prev || tick || length || state)`.
 #[test]
 fn detbench_tick_hash_chain_bits() {
+    // The layout, rebuilt by hand with a different code path: a nonzero
+    // previous digest, a tick that differs from the length, and a two-byte
+    // state, so that a swapped field or a dropped byte changes the digest.
+    let prev: [u8; 32] =
+        core::array::from_fn(|i| 0x5A ^ u8::try_from(i).expect("an index below 32 fits a byte"));
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&prev);
+    bytes.extend_from_slice(&3u64.to_le_bytes());
+    bytes.extend_from_slice(&2u64.to_le_bytes());
+    bytes.extend_from_slice(&[0xAB, 0xCD]);
+    assert_eq!(
+        chain(&prev, 3, &[0xAB, 0xCD]),
+        <[u8; 32]>::from(Sha256::digest(&bytes))
+    );
+
     let hashes = chain_all(&synthetic_states(16));
     assert_eq!(hashes.len(), 16);
     assert_eq!(hex(&hashes[0]), CHAIN_FIRST_HEX);
     assert_eq!(hex(&hashes[15]), CHAIN_LAST_HEX);
-
-    // The layout, rebuilt by hand with a different code path.
-    let mut manual = [0u8; 48];
-    manual[..32].copy_from_slice(&GENESIS);
-    assert_eq!(
-        chain(&GENESIS, 0, &[]),
-        <[u8; 32]>::from(Sha256::digest(manual))
-    );
-    let prev = hashes[0];
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(&prev);
-    bytes.extend_from_slice(&1u64.to_le_bytes());
-    bytes.extend_from_slice(&1u64.to_le_bytes());
-    bytes.push(0xFF);
-    assert_eq!(
-        chain(&prev, 1, &[0xFF]),
-        <[u8; 32]>::from(Sha256::digest(&bytes))
-    );
 }
 
 /// The primitive under the chain is SHA-256: the FIPS 180-4 "abc" vector.
@@ -348,9 +363,11 @@ fn detbench_libm_exp_bits() {
     assert_eq!(libm_exp_bits(), EXP_GOLDEN);
 }
 
-/// The committed constants are not garbage: each `libm` result lies within
-/// four units in the last place of the platform's own result, and the exact
-/// cases are exact.
+/// Each live `libm` result lies within four units in the last place of the
+/// platform's own result, and the exact cases are exact. This compares `libm`
+/// with the platform's own library, not with the committed constants, so a
+/// failure here indicts the platform's `libm` or a change of the `libm` crate,
+/// not the determinism contract.
 #[test]
 fn detbench_libm_within_ulps_of_std() {
     fn ordered(bits: u64) -> i64 {
