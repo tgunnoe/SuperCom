@@ -28,7 +28,9 @@ use std::fmt;
 use wasmtime::component::{
     Component, ComponentNamedList, Instance, Lift, Linker, Lower, TypedFunc, WasmStr,
 };
-use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder, Strategy, Trap};
+use wasmtime::{
+    Config, Engine, Store, StoreLimits, StoreLimitsBuilder, Strategy, Trap, WasmBacktraceDetails,
+};
 
 /// The one interface the host provides to a plugin.
 const HOST_INTERFACE: &str = "supercom:engine/host@0.1.0";
@@ -185,6 +187,14 @@ impl State {
 /// spawns the threads that would wake it. The native stack guest code may use
 /// is pinned rather than left to the default, so that the amount a caller must
 /// have free does not change with the `wasmtime` version.
+///
+/// Every other proposal the plugin world has no use for is off as well, so
+/// that what a guest may use does not widen when `wasmtime` changes a default:
+/// 64-bit memories, garbage collection, exception handling (whose objects
+/// live on the garbage-collected heap) and the component model's async ABI
+/// (which schedules guest tasks beyond the fuel of any one call). Backtrace
+/// details are off so that the text of a trap does not depend on an
+/// environment variable or on debug information the guest supplies.
 fn config() -> Config {
     let mut config = Config::new();
     config
@@ -193,7 +203,12 @@ fn config() -> Config {
         .relaxed_simd_deterministic(true)
         .consume_fuel(true)
         .max_wasm_stack(MAX_WASM_STACK_BYTES)
-        .wasm_threads(false);
+        .wasm_threads(false)
+        .wasm_memory64(false)
+        .wasm_gc(false)
+        .wasm_exceptions(false)
+        .concurrency_support(false)
+        .wasm_backtrace_details(WasmBacktraceDetails::Disable);
     config
 }
 

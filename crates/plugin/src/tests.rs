@@ -471,3 +471,49 @@ fn a_component_over_the_size_limit_is_refused_before_it_compiles() {
         "a component of exactly the limit is compiled, but imports returned {listed:?}"
     );
 }
+
+/// Asserts that no component written in `candidates` gets past compiling. Each
+/// is one use of a proposal the host pins off, and `wasmtime` would accept it
+/// with its defaults: it would then be refused only for lacking the world.
+fn none_compile(candidates: &[&str]) {
+    let accepted: Vec<_> = candidates
+        .iter()
+        .filter(|text| {
+            !matches!(
+                host().load(&assemble(text)).err(),
+                Some(Error::Compile { .. })
+            )
+        })
+        .collect();
+    assert!(
+        accepted.is_empty(),
+        "these components were not refused at compile time: {accepted:?}"
+    );
+}
+
+#[test]
+fn memory64_does_not_compile() {
+    none_compile(&["(component (core module (memory i64 1)))"]);
+}
+
+#[test]
+fn garbage_collected_types_do_not_compile() {
+    none_compile(&[
+        "(component (core module (type (struct (field i32)))))",
+        "(component (core module (type (array i8))))",
+    ]);
+}
+
+#[test]
+fn exception_handling_does_not_compile() {
+    none_compile(&["(component (core module (tag (param i32))))"]);
+}
+
+#[test]
+fn the_async_abi_does_not_compile() {
+    none_compile(&[
+        "(component (core func (canon waitable-set.new)))",
+        "(component (type (future u8)))",
+        "(component (type (stream u8)))",
+    ]);
+}
