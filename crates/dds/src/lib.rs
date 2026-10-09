@@ -10,11 +10,41 @@
 //! 28, the pixel format at 76 (its flags at 80, FOURCC at 84, RGB bit count
 //! at 88).
 //!
-//! This crate is a skeleton: [`Header::parse`] returns
-//! [`Error::Unimplemented`], and the test suites under `tests/` are written
-//! to fail against it.
+//! [`Header::parse`] reads the header and nothing after it: the number of
+//! bytes that follow is reported as [`Header::data_len`], and their layout
+//! is the renderer's concern.
 
 use std::fmt;
+
+/// Length of the magic plus the `DDS_HEADER`: the pixel data starts here.
+const HEADER_LEN: usize = 128;
+/// The file's first four bytes.
+const MAGIC: [u8; 4] = *b"DDS ";
+/// The only `dwSize` the format allows: the length of `DDS_HEADER`.
+const HEADER_SIZE: u32 = 124;
+
+// Byte offsets of the header fields this crate reads; all are `u32` words
+// except the FOURCC, which is four bytes. See the module documentation.
+const SIZE_AT: usize = 4;
+const FLAGS_AT: usize = 8;
+const HEIGHT_AT: usize = 12;
+const WIDTH_AT: usize = 16;
+const MIP_COUNT_AT: usize = 28;
+const PIXEL_FLAGS_AT: usize = 80;
+const FOURCC_AT: usize = 84;
+const RGB_BIT_COUNT_AT: usize = 88;
+
+/// `DDSD_MIPMAPCOUNT`: the header's mip-count word is meaningful.
+const MIPMAPCOUNT: u32 = 0x2_0000;
+/// `DDPF_FOURCC`: the pixel format is named by its FOURCC.
+const PIXEL_FOURCC: u32 = 0x4;
+
+/// The little-endian word at offset `AT` of the header. The bound is checked
+/// when the crate compiles, so the read cannot fail at run time.
+fn word<const AT: usize>(head: &[u8; HEADER_LEN]) -> u32 {
+    const { assert!(AT + 4 <= HEADER_LEN) };
+    u32::from_le_bytes([head[AT], head[AT + 1], head[AT + 2], head[AT + 3]])
+}
 
 /// How the pixels of a texture are stored.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -63,10 +93,54 @@ impl Header {
     ///
     /// [`Error::Truncated`] when `bytes` is shorter than the 128-byte header;
     /// [`Error::BadMagic`] when the file does not start with `DDS `;
-    /// [`Error::Malformed`] when `dwSize` is not 124. The skeleton always
-    /// returns [`Error::Unimplemented`].
-    pub fn parse(_bytes: &[u8]) -> Result<Self, Error> {
-        Err(Error::Unimplemented)
+    /// [`Error::Malformed`] when `dwSize` is not 124.
+    pub fn parse(bytes: &[u8]) -> Result<Self, Error> {
+        let Some(head) = bytes.first_chunk::<HEADER_LEN>() else {
+            return Err(Error::Truncated {
+                needed: HEADER_LEN,
+                len: bytes.len(),
+            });
+        };
+        let magic = [head[0], head[1], head[2], head[3]];
+        if magic != MAGIC {
+            return Err(Error::BadMagic { found: magic });
+        }
+        let size = word::<SIZE_AT>(head);
+        if size != HEADER_SIZE {
+            return Err(Error::Malformed {
+                reason: format!("dwSize is {size}, not {HEADER_SIZE}"),
+            });
+        }
+        let mip_count = if word::<FLAGS_AT>(head) & MIPMAPCOUNT != 0 {
+            word::<MIP_COUNT_AT>(head)
+        } else {
+            1
+        };
+        let format = if word::<PIXEL_FLAGS_AT>(head) & PIXEL_FOURCC != 0 {
+            let fourcc = [
+                head[FOURCC_AT],
+                head[FOURCC_AT + 1],
+                head[FOURCC_AT + 2],
+                head[FOURCC_AT + 3],
+            ];
+            match &fourcc {
+                b"DXT1" => Format::Dxt1,
+                b"DXT3" => Format::Dxt3,
+                b"DXT5" => Format::Dxt5,
+                _ => Format::Other { fourcc },
+            }
+        } else {
+            Format::Uncompressed {
+                bits_per_pixel: word::<RGB_BIT_COUNT_AT>(head),
+            }
+        };
+        Ok(Self {
+            width: word::<WIDTH_AT>(head),
+            height: word::<HEIGHT_AT>(head),
+            mip_count,
+            format,
+            data_len: bytes.len() - HEADER_LEN,
+        })
     }
 }
 
@@ -97,9 +171,6 @@ pub enum Error {
         /// What disagreed, for the reader of the message.
         reason: String,
     },
-    /// Reserved for the skeleton: the operation is not written yet. Nothing
-    /// returns it once the parser exists.
-    Unimplemented,
 }
 
 impl fmt::Display for Error {
@@ -111,7 +182,6 @@ impl fmt::Display for Error {
                 write!(f, "truncated: needs {needed} bytes, has {len}")
             }
             Self::Malformed { reason } => write!(f, "malformed: {reason}"),
-            Self::Unimplemented => f.write_str("not implemented"),
         }
     }
 }
