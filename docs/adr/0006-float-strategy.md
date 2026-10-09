@@ -27,9 +27,12 @@ Four hazards decide the question:
   `mul_add` as fused and exact (DET-015); whether the compiler also fuses a
   separate multiply and add is a property of the toolchain, which DET-018
   checks on x86_64 only.
-- Plugins run under wasmtime with NaN canonicalization (ADR-0001), so every NaN
-  a plugin returns is the canonical quiet NaN, `0x7ff8000000000000`. The sim
-  has to hash a plugin's result and its own arithmetic alike.
+- Plugins run under wasmtime with NaN canonicalization (ADR-0001), which
+  canonicalizes the results of float arithmetic only; a NaN a guest builds by a
+  sign operation, a reinterpretation, a constant, or a load keeps its bits.
+  Those bits are the same on every host, and the sim canonicalizes every `f64`
+  at the serialization boundary whatever its origin (DET-022), so a plugin's
+  result and the sim's own arithmetic still hash alike.
 
 ## Decision
 
@@ -50,9 +53,10 @@ ratify; nothing here changes ADR-0001 through ADR-0005.
   `clippy.toml`; that file is outside this change.
 - A NaN never reaches hashed state or a replay unchanged. The sim either never
   produces one, by validating inputs, or maps every NaN to the canonical pattern
-  `0x7ff8000000000000` at the serialization boundary (DET-022). That is the
-  pattern the plugin host expects of a guest, so plugin results and sim
-  arithmetic compose: both hash as one pattern.
+  `0x7ff8000000000000` at the serialization boundary (DET-022). The plugin
+  host's canonicalization covers only a guest's arithmetic results, so this
+  boundary canonicalization is what makes a plugin's result and the sim's own
+  arithmetic hash as one pattern.
 - The 64-bit fixed-point format with 32 fractional bits (`I32F32`) stays
   available for a quantity that must be exact without floating point, chosen
   per quantity in the sim specification (DET-021). It is also the fallback if
@@ -60,9 +64,10 @@ ratify; nothing here changes ADR-0001 through ADR-0005.
   float path cannot close.
 - Algebraic float operators, which license reassociation, and any build flag
   that relaxes IEEE semantics are forbidden in the sim crate.
-- U1 stays open. It closes when the replay comparison of DET-024 passes on
-  x86_64 and aarch64; until then this ADR is PROPOSED and the claims below are
-  x86_64 claims.
+- U1 stays open as verification: it closes when the replay comparison of
+  DET-024 passes on x86_64 and aarch64. This ADR becomes ACCEPTED when the head
+  ratifies it, and a DET-024 failure reopens it; the claims below are x86_64
+  claims.
 
 ## Evidence
 
