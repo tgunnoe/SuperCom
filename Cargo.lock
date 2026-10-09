@@ -1019,6 +1019,14 @@ name = "supercom"
 version = "0.0.1"
 
 [[package]]
+name = "supercom-dds"
+version = "0.0.1"
+dependencies = [
+ "supercom-scd",
+ "supercom-testkit",
+]
+
+[[package]]
 name = "supercom-detbench"
 version = "0.0.1"
 dependencies = [
