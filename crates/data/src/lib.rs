@@ -18,10 +18,11 @@ use nickel_lang_core::eval::cache::lazy::CBNCache;
 use nickel_lang_core::label::ty_path::Elem;
 use nickel_lang_core::repl::{Repl as _, ReplImpl};
 
+use serde::{Deserialize, Serialize};
 use supercom_bp::{Key, Value};
 
 /// A unit's economy block.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Economy {
     /// Energy cost to build.
     pub build_cost_energy: f64,
@@ -42,7 +43,7 @@ pub struct Economy {
 }
 
 /// A unit's physics block.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Physics {
     /// The motion type, such as `RULEUMT_Land`.
     pub motion_type: String,
@@ -53,7 +54,7 @@ pub struct Physics {
 }
 
 /// A unit's defence block.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Defense {
     /// Starting health.
     pub health: f64,
@@ -66,7 +67,7 @@ pub struct Defense {
 }
 
 /// A unit's intel block; present in 395 of 568 installed units.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Intel {
     /// Vision radius; absent in 4 of 395 installed blocks.
     pub vision_radius: Option<f64>,
@@ -75,7 +76,7 @@ pub struct Intel {
 }
 
 /// One entry of a unit's weapon table.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Weapon {
     /// The weapon's label.
     pub label: Option<String>,
@@ -90,7 +91,7 @@ pub struct Weapon {
 }
 
 /// A unit blueprint's v0 fields.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Unit {
     /// The blueprint id, such as the file stem without `_unit`.
     pub id: String,
@@ -109,7 +110,7 @@ pub struct Unit {
 }
 
 /// A projectile blueprint's v0 fields.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Projectile {
     /// The blueprint id.
     pub id: String,
@@ -118,7 +119,7 @@ pub struct Projectile {
 }
 
 /// A prop blueprint's v0 fields.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Prop {
     /// The blueprint id.
     pub id: String,

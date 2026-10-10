@@ -1751,6 +1751,8 @@ dependencies = [
 name = "supercom-bp-import"
 version = "0.0.1"
 dependencies = [
+ "serde",
+ "serde_json",
  "supercom-bp",
  "supercom-data",
  "supercom-scd",
@@ -1763,6 +1765,7 @@ name = "supercom-data"
 version = "0.0.1"
 dependencies = [
  "nickel-lang-core",
+ "serde",
  "supercom-bp",
  "supercom-scd",
  "supercom-testkit",
