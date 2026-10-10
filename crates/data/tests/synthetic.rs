@@ -251,9 +251,9 @@ fn projectile_and_prop_contracts_allow_absent_categories() {
         );
     }
     let projectile = projectile_from_value("xyz_proj", &bare).expect("projectile projects");
-    assert!(projectile.categories.is_empty());
+    assert_eq!(projectile.categories, Vec::<String>::new());
     let prop = prop_from_value("xyz_prop", &bare).expect("prop projects");
-    assert!(prop.categories.is_empty());
+    assert_eq!(prop.categories, Vec::<String>::new());
 }
 
 /// Pins the unit contract: unlike projectiles and props, a unit body
