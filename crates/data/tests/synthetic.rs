@@ -235,20 +235,35 @@ fn projectile_and_prop_project_id_and_categories() {
 }
 
 /// Pins the projectile and prop contracts: a body with a `Categories` list
-/// passes `Kind::Projectile` and `Kind::Prop`, and one without it is
-/// `Missing { field: "Categories" }`.
+/// passes `Kind::Projectile` and `Kind::Prop`, and one without it passes
+/// too and projects to an empty category list (90 of 365 installed
+/// projectiles and 37 of 336 props carry no `Categories` table).
 #[test]
-fn projectile_and_prop_contracts_require_categories() {
+fn projectile_and_prop_contracts_allow_absent_categories() {
     let good = table(vec![("Categories", list(vec![s("ANY")]))]);
-    let bad = table(vec![("Other", num(1.0))]);
+    let bare = table(vec![("Other", num(1.0))]);
     for kind in [Kind::Projectile, Kind::Prop] {
         assert_eq!(validate(kind, &good), Ok(()), "{kind:?} good body");
         assert_eq!(
-            validate(kind, &bad),
-            Err(Error::Missing {
-                field: "Categories".into()
-            }),
-            "{kind:?} bad body"
+            validate(kind, &bare),
+            Ok(()),
+            "{kind:?} body without Categories"
         );
     }
+    let projectile = projectile_from_value("xyz_proj", &bare).expect("projectile projects");
+    assert!(projectile.categories.is_empty());
+    let prop = prop_from_value("xyz_prop", &bare).expect("prop projects");
+    assert!(prop.categories.is_empty());
+}
+
+/// Pins the unit contract: unlike projectiles and props, a unit body
+/// without `Categories` is `Missing { field: "Categories" }`.
+#[test]
+fn unit_contract_requires_categories() {
+    let body = without(minimal_unit(), "Categories");
+    let missing = Err(Error::Missing {
+        field: "Categories".into(),
+    });
+    assert_eq!(validate(Kind::Unit, &body), missing);
+    assert_eq!(unit_from_value("xyz0006", &body).map(|_| ()), missing);
 }
