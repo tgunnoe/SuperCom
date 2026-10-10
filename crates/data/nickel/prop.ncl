@@ -4,7 +4,7 @@ let categories = import "categories.ncl" in
 
 {
   Prop = {
-    Categories | Array String,
+    Categories | Array String | optional,
     ..
   },
 }

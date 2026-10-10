@@ -4,7 +4,7 @@ let categories = import "categories.ncl" in
 
 {
   Projectile = {
-    Categories | Array String,
+    Categories | Array String | optional,
     ..
   },
 }

@@ -484,6 +484,15 @@ fn opt_string(table: &Value, key: &str, parent: &str) -> Result<Option<String>, 
     }
 }
 
+/// As [`categories_of`], but an absent table is an empty list (projectiles
+/// and props omit it in the installed data).
+fn optional_categories_of(body: &Value) -> Result<Vec<String>, Error> {
+    match body.get("Categories") {
+        None | Some(Value::Nil) => Ok(Vec::new()),
+        Some(_) => categories_of(body),
+    }
+}
+
 fn categories_of(body: &Value) -> Result<Vec<String>, Error> {
     let list = required(body, "Categories", "Categories")?;
     if !matches!(list, Value::Table(_)) {
@@ -582,7 +591,7 @@ pub fn validate(kind: Kind, body: &Value) -> Result<(), Error> {
             unit_from_value("", body)?;
         }
         Kind::Projectile | Kind::Prop => {
-            categories_of(body)?;
+            optional_categories_of(body)?;
         }
     }
     nickel_check(kind, body)
@@ -614,7 +623,7 @@ pub fn unit_from_value(id: &str, body: &Value) -> Result<Unit, Error> {
 pub fn projectile_from_value(id: &str, body: &Value) -> Result<Projectile, Error> {
     Ok(Projectile {
         id: id.to_owned(),
-        categories: categories_of(body)?,
+        categories: optional_categories_of(body)?,
     })
 }
 
@@ -626,6 +635,6 @@ pub fn projectile_from_value(id: &str, body: &Value) -> Result<Projectile, Error
 pub fn prop_from_value(id: &str, body: &Value) -> Result<Prop, Error> {
     Ok(Prop {
         id: id.to_owned(),
-        categories: categories_of(body)?,
+        categories: optional_categories_of(body)?,
     })
 }
