@@ -303,19 +303,23 @@ fn nickel_decl(out: &mut String, value: &Value, decl: Decl, tags: bool) {
                     }
                     out.push(']');
                 }
-                // A positional table where a record is declared: the
-                // contract rejects it by type, so its contents are moot.
-                (Decl::Record(_), true) => out.push_str("[]"),
                 // A leaf, or a record where a list is declared: rejected by type.
                 (Decl::Leaf, _) | (Decl::Categories | Decl::Records(_), false) => {
                     out.push_str("{}");
                 }
-                (Decl::Record(fields), false) => {
+                // A record of its declared named fields, whether the table is
+                // empty, positional, or mixed (a positional entry is undeclared);
+                // a declared field holding nil is absent, as the Rust checks
+                // read it.
+                (Decl::Record(fields), _) => {
                     out.push('{');
                     let mut seen = BTreeSet::new();
                     for (key, v) in entries {
                         let Key::Name(name) = key else { continue };
-                        if !fields.contains(&name.as_str()) || !seen.insert(name.as_str()) {
+                        if matches!(v, Value::Nil)
+                            || !fields.contains(&name.as_str())
+                            || !seen.insert(name.as_str())
+                        {
                             continue;
                         }
                         nickel_string(out, name);
@@ -415,9 +419,11 @@ fn first_line(repl: &mut ReplImpl<CBNCache>, error: NickelError) -> String {
 }
 
 /// Evaluates `body | contract` in-process and maps a blame to
-/// [`Error::Contract`]. After the Rust checks, the only constraint left for
-/// Nickel to decide is the category vocabulary, so a blame whose path does
-/// not name a field is attributed to `Categories`.
+/// [`Error::Contract`]. The Rust checks reject every body the contract
+/// rejects except a category outside the vocabulary (the agreement tests
+/// under `tests/` pin this), so the only constraint left for Nickel to
+/// decide is the vocabulary, and a blame whose path does not name a field
+/// is attributed to `Categories`.
 fn nickel_check(kind: Kind, body: &Value) -> Result<(), Error> {
     let keys = if kind == Kind::Unit {
         UNIT_KEYS
@@ -477,8 +483,13 @@ fn type_error(path: &str, expected: &str) -> Error {
     }
 }
 
+/// A finite number; Lua reads `1e999` as infinity, which the model refuses
+/// as it refuses any value the contract's `Number` would reject.
 fn number_at(value: &Value, path: &str) -> Result<f64, Error> {
-    value.as_f64().ok_or_else(|| type_error(path, "Number"))
+    value
+        .as_f64()
+        .filter(|n| n.is_finite())
+        .ok_or_else(|| type_error(path, "Number"))
 }
 
 fn string_at(value: &Value, path: &str) -> Result<String, Error> {
@@ -532,11 +543,19 @@ fn optional_categories_of(body: &Value) -> Result<Vec<String>, Error> {
     }
 }
 
-fn categories_of(body: &Value) -> Result<Vec<String>, Error> {
-    let list = required(body, "Categories", "Categories")?;
-    if !matches!(list, Value::Table(_)) {
-        return Err(type_error("Categories", "Array"));
+/// A table declared as an array must carry only positional entries, the
+/// shape the contract's `Array` accepts.
+fn array_at<'a>(value: &'a Value, path: &str) -> Result<&'a Value, Error> {
+    match value {
+        Value::Table(entries) if entries.iter().all(|(k, _)| matches!(k, Key::Index(_))) => {
+            Ok(value)
+        }
+        _ => Err(type_error(path, "Array")),
     }
+}
+
+fn categories_of(body: &Value) -> Result<Vec<String>, Error> {
+    let list = array_at(required(body, "Categories", "Categories")?, "Categories")?;
     list.entries()
         .iter()
         .enumerate()
@@ -593,7 +612,7 @@ fn intel_of(body: &Value) -> Result<Option<Intel>, Error> {
 fn weapons_of(body: &Value) -> Result<Vec<Weapon>, Error> {
     let list = match body.get("Weapon") {
         None | Some(Value::Nil) => return Ok(Vec::new()),
-        Some(v) => record_at(v, "Weapon")?,
+        Some(v) => array_at(v, "Weapon")?,
     };
     list.entries()
         .iter()
