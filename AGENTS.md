@@ -98,10 +98,11 @@ Each item: statement · grounding · signpost (what would violate it).
 
 Each item: statement · grounding (why unresolved) · signpost (what resolves it).
 
-- **U1 Float strategy for lockstep.** Fixed-point sim versus IEEE floats with
-  deterministic transcendental functions. Grounding: transcendental and FMA
-  behaviour differs across x86_64 and aarch64. Signpost: a cross-architecture
-  replay comparison in CI.
+- **U1 Cross-architecture float determinism.** ADR-0006 chose binary64 with
+  the exactly specified operations, `libm` transcendentals, and NaN
+  canonicalization at the serialization boundary; every measurement behind it
+  is x86_64. Grounding: docs/adr/0006-float-strategy.md, the aarch64 gap.
+  Signpost: the DET-024 replay comparison passing on x86_64 and aarch64 in CI.
 - **U2 Nickel load cost.** Evaluating ~580 blueprints with contracts.
   Grounding: no benchmark yet. Signpost: measured cold and cached load time
   against a budget set in the data-model spec.

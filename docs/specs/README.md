@@ -11,16 +11,16 @@ published references; a reference without a licence is read for understanding
 only and quoted at most three lines. It never reproduces game or FAF Lua
 source.
 
-| Domain      | Scope                                                                                                                                                                           | Status |
-| :---------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :----- |
-| formats     | `.scd` archives and mount order; the data subset of the GPG Lua dialect in `.bp`; `.scm` and `.sca`; `.scmap` with `_scenario.lua` and `_save.lua`; DDS; XACT `.xwb` and `.xsb` | WIP    |
-| data-model  | Nickel contracts for the blueprint families; mod overlay semantics; the import cache                                                                                            | WIP    |
-| sim         | tick model, economy, units and categories, orders and build queues, weapons and projectiles, damage and armour, pathfinding, veterancy, intel                                   | landed |
-| determinism | lockstep command stream, replay format, float strategy, desync detection                                                                                                        | landed |
-| render      | terrain, decals, props, shadows, water, units, fog of war, strategic icons, post-processing                                                                                     | WIP    |
-| plugin-api  | WIT worlds, host imports, versioning, sandbox policy                                                                                                                            | landed |
-| ai          | the skirmish AI interface and the built-in AI's contract                                                                                                                        | landed |
-| ui          | basic HUD and input behaviour                                                                                                                                                   | landed |
+| Domain      | Scope                                                                                                                                                                           | Status   |
+| :---------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :------- |
+| formats     | `.scd` archives and mount order; the data subset of the GPG Lua dialect in `.bp`; `.scm` and `.sca`; `.scmap` with `_scenario.lua` and `_save.lua`; DDS; XACT `.xwb` and `.xsb` | WIP      |
+| data-model  | Nickel contracts for the blueprint families; mod overlay semantics; the import cache                                                                                            | WIP      |
+| sim         | tick model, economy, units and categories, orders and build queues, weapons and projectiles, damage and armour, pathfinding, veterancy, intel                                   | landed   |
+| determinism | lockstep command stream, replay format, float strategy, desync detection                                                                                                        | landed   |
+| render      | terrain, decals, props, shadows, water, units, fog of war, strategic icons, post-processing                                                                                     | deferred |
+| plugin-api  | WIT worlds, host imports, versioning, sandbox policy                                                                                                                            | landed   |
+| ai          | the skirmish AI interface and the built-in AI's contract                                                                                                                        | landed   |
+| ui          | basic HUD and input behaviour                                                                                                                                                   | landed   |
 
 Each domain gets its own file in this directory, authored by the spec campaign.
 

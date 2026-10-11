@@ -1,6 +1,7 @@
 # ADR-0006: Float strategy for the deterministic sim
 
-**Status:** PROPOSED
+**Status:** ACCEPTED (ratified by the head on 2026-10-10; U1 stays open as
+verification until the DET-024 replay comparison passes on aarch64)
 
 **Date:** 2026-10-09
 
@@ -36,8 +37,8 @@ Four hazards decide the question:
 
 ## Decision
 
-This is a recommendation for the architect seat to finalize and the head to
-ratify; nothing here changes ADR-0001 through ADR-0005.
+Ratified by the head on 2026-10-10 after the architect seat's review; nothing
+here changes ADR-0001 through ADR-0005.
 
 - The v0 sim computes in binary64 IEEE arithmetic with a restricted
   vocabulary: `+`, `-`, `*`, `/`, `sqrt`, and `mul_add`, which the standard
@@ -65,9 +66,8 @@ ratify; nothing here changes ADR-0001 through ADR-0005.
 - Algebraic float operators, which license reassociation, and any build flag
   that relaxes IEEE semantics are forbidden in the sim crate.
 - U1 stays open as verification: it closes when the replay comparison of
-  DET-024 passes on x86_64 and aarch64. This ADR becomes ACCEPTED when the head
-  ratifies it, and a DET-024 failure reopens it; the claims below are x86_64
-  claims.
+  DET-024 passes on x86_64 and aarch64. This ADR was ACCEPTED on 2026-10-10, and a
+  DET-024 failure reopens it; the claims below are x86_64 claims.
 
 ## Evidence
 
