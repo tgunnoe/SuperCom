@@ -41,7 +41,7 @@ Commander Forged Alliance/` (`gamedata/*.scd` store-only zips: 568 unit
   that the WIT world cannot express.
 - **R4 Canonical data in Nickel.** Blueprints, balance, and mod overlays are
   Nickel records validated by contracts; an importer converts installed `.bp`
-  files into that model and caches it in the user data directory. Grounding:
+  files into that model and caches it in the user cache directory. Grounding:
   docs/adr/0002-data-model-nickel.md. Signpost: full-set evaluation exceeds
   the load budget even with the cache, or imports fail through
   `nickel-lang-core`.
@@ -103,20 +103,12 @@ Each item: statement · grounding (why unresolved) · signpost (what resolves it
   canonicalization at the serialization boundary; every measurement behind it
   is x86_64. Grounding: docs/adr/0006-float-strategy.md, the aarch64 gap.
   Signpost: the DET-024 replay comparison passing on x86_64 and aarch64 in CI.
-- **U2 Nickel load cost.** Evaluating ~580 blueprints with contracts.
-  Grounding: no benchmark yet. Signpost: measured cold and cached load time
-  against a budget set in the data-model spec.
-- **U3 Engine/Lua split.** Which behaviours the original C++ engine owned
-  versus its Lua layer, which fixes the Rust sim surface. Grounding: the FAF
-  engine docs list about 60 exposed classes; the split is not yet inventoried.
-  Signpost: the spec's engine-API inventory is complete.
-- **U5 Map format coverage.** `.scmap` inner versions 56 and 60 are documented;
-  installed maps are untested. Signpost: the loader parses all 60 installed
-  maps.
-- **U6 Audio codecs.** Which codecs the installed XACT banks use. Signpost: a
-  codec inventory across `sounds/*.xwb`.
+- **U6 Audio codecs.** Which codecs the 89 installed XACT wave banks use
+  (docs/specs/formats.md inventories the banks only). Signpost: a codec
+  inventory across `sounds/**/*.xwb` (issue 28).
 - **U7 macOS.** wgpu (Metal) and wasmtime are known good on aarch64-darwin;
-  the rest of the dependency set is untested. Signpost: a green macOS build.
+  the rest of the dependency set is untested (issue 27). Signpost: a green
+  macOS build.
 - **U8 Built-in versus plugin.** Which v0 behaviours (AI in particular) ship
   as first-party Wasm plugins rather than built-in Rust. Signpost: an ADR
   after the spec campaign.
@@ -164,7 +156,8 @@ Core (planned; `crates/supercom`, `crates/scd`, `crates/testkit`,
 
 Context-sensitive: `docs/specs/` (authority), `docs/adr/` (decisions),
 `docs/models/` (formal models), `tools/` (the specification lint and the
-census scripts over the installed game).
+clean-room scan with their red fixtures, `spec_eval/` evaluator scripts per
+specification domain, `survey/` census scripts over the installed game).
 
 ## Spec Pointers
 
