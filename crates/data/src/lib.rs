@@ -677,3 +677,63 @@ pub fn prop_from_value(id: &str, body: &Value) -> Result<Prop, Error> {
         categories: optional_categories_of(body)?,
     })
 }
+
+#[cfg(test)]
+mod declared_fields {
+    //! The field names the unit contract declares, read from its text,
+    //! equal the renderer's lists, so the two cannot drift apart silently.
+
+    use std::collections::BTreeSet;
+
+    use super::{DEFENSE, ECONOMY, INTEL, PHYSICS, UNIT_KEYS, UNIT_NCL, WEAPON};
+
+    /// The identifiers `unit.ncl` declares, keyed by top-level block.
+    fn declared() -> Vec<(String, BTreeSet<String>)> {
+        let mut blocks: Vec<(String, BTreeSet<String>)> = Vec::new();
+        for line in UNIT_NCL.lines() {
+            let indent = line.len() - line.trim_start().len();
+            let word: String = line
+                .trim_start()
+                .chars()
+                .take_while(char::is_ascii_alphabetic)
+                .collect();
+            if word.is_empty() {
+                continue;
+            }
+            match (indent, blocks.last_mut()) {
+                (4, _) => blocks.push((word, BTreeSet::new())),
+                (8, Some((_, fields))) => {
+                    fields.insert(word);
+                }
+                _ => {}
+            }
+        }
+        blocks
+    }
+
+    fn set(list: &[&str]) -> BTreeSet<String> {
+        list.iter().map(|f| (*f).to_owned()).collect()
+    }
+
+    #[test]
+    fn the_unit_contract_declares_the_rendered_keys() {
+        let blocks = declared();
+        let keys: BTreeSet<String> = blocks.iter().map(|(k, _)| k.clone()).collect();
+        let rendered: BTreeSet<String> = UNIT_KEYS.iter().map(|(k, _)| (*k).to_owned()).collect();
+        assert_eq!(keys, rendered);
+        for (block, list) in [
+            ("Economy", ECONOMY),
+            ("Physics", PHYSICS),
+            ("Defense", DEFENSE),
+            ("Intel", INTEL),
+            ("Weapon", WEAPON),
+        ] {
+            let fields = blocks
+                .iter()
+                .find(|(k, _)| k == block)
+                .map(|(_, f)| f.clone())
+                .unwrap_or_default();
+            assert_eq!(fields, set(list), "{block}");
+        }
+    }
+}
