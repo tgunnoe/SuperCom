@@ -117,3 +117,113 @@ fn conformance_import_cache_key_is_stable() {
     );
     assert_eq!(first.ok(), second.ok());
 }
+
+/// The ids of a family are pairwise distinct and listed in ascending order.
+fn assert_distinct_and_sorted(family: &str, ids: &[&str]) {
+    assert!(
+        ids.windows(2).all(|w| w[0] < w[1]),
+        "{family} ids must be strictly ascending (sorted and pairwise distinct)"
+    );
+}
+
+/// Pins the id rule: a unit's id is its lower-cased file stem without
+/// `_unit`; a projectile's or prop's id is its lower-cased member path with
+/// a leading slash, the form in-data references use. Each family is
+/// pairwise distinct (568, 365, 336) and ordered by id.
+#[test]
+fn conformance_import_ids_unique_per_family() {
+    let Some(fa) = supercom_testkit::require_game() else {
+        return;
+    };
+    let catalog = import(&fa);
+    assert!(
+        catalog.is_ok(),
+        "import must succeed, got {:?}",
+        catalog.as_ref().err()
+    );
+    let catalog = catalog.expect("imported: asserted above");
+    let units: Vec<&str> = catalog.units.iter().map(|u| u.id.as_str()).collect();
+    let projectiles: Vec<&str> = catalog.projectiles.iter().map(|p| p.id.as_str()).collect();
+    let props: Vec<&str> = catalog.props.iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(units.len(), 568, "units");
+    assert_eq!(projectiles.len(), 365, "projectiles");
+    assert_eq!(props.len(), 336, "props");
+    assert_distinct_and_sorted("unit", &units);
+    assert_distinct_and_sorted("projectile", &projectiles);
+    assert_distinct_and_sorted("prop", &props);
+    for id in &units {
+        assert_eq!(*id, id.to_lowercase(), "unit id {id} must be lower-case");
+        assert!(
+            !id.contains('/') && !id.ends_with("_unit"),
+            "unit id {id} must be a bare stem without the _unit suffix"
+        );
+    }
+    for (family, ids, suffix) in [
+        ("projectile", &projectiles, "_proj.bp"),
+        ("prop", &props, "_prop.bp"),
+    ] {
+        for id in ids {
+            assert_eq!(
+                *id,
+                id.to_lowercase(),
+                "{family} id {id} must be lower-case"
+            );
+            assert!(
+                id.starts_with('/') && id.ends_with(suffix),
+                "{family} id {id} must be a leading-slash member path ending {suffix}"
+            );
+        }
+    }
+}
+
+/// Pins the references: every unit weapon's `ProjectileId`, lower-cased,
+/// equals the id of a projectile in the catalog.
+#[test]
+fn conformance_import_projectile_references_resolve() {
+    let Some(fa) = supercom_testkit::require_game() else {
+        return;
+    };
+    let catalog = import(&fa);
+    assert!(
+        catalog.is_ok(),
+        "import must succeed, got {:?}",
+        catalog.as_ref().err()
+    );
+    let catalog = catalog.expect("imported: asserted above");
+    let known: std::collections::BTreeSet<&str> =
+        catalog.projectiles.iter().map(|p| p.id.as_str()).collect();
+    let mut references = 0_usize;
+    let mut unresolved = Vec::new();
+    for unit in &catalog.units {
+        for weapon in &unit.weapons {
+            if let Some(reference) = &weapon.projectile_id {
+                references += 1;
+                let wanted = reference.to_lowercase();
+                if !known.contains(wanted.as_str()) {
+                    unresolved.push(wanted);
+                }
+            }
+        }
+    }
+    assert!(references > 0, "some unit weapon must name a projectile");
+    assert!(
+        unresolved.is_empty(),
+        "{} of {references} references do not resolve, first: {:?}",
+        unresolved.len(),
+        unresolved.first()
+    );
+}
+
+/// Pins the cache format: the key leads with `v2`, so a cache written
+/// under format 1 (key `v1;...`) never matches and is a miss.
+#[test]
+fn conformance_import_cache_format_is_two() {
+    let Some(fa) = supercom_testkit::require_game() else {
+        return;
+    };
+    let key = cache_key(&fa);
+    assert!(
+        key.as_ref().is_ok_and(|k| k.starts_with("v2;")),
+        "the key must lead with v2, got {key:?}"
+    );
+}
