@@ -287,7 +287,6 @@ fn nickel_decl(out: &mut String, value: &Value, decl: Decl, tags: bool) {
         Value::Table(entries) => {
             let positional = entries.iter().all(|(k, _)| matches!(k, Key::Index(_)));
             match (decl, positional) {
-                (Decl::Leaf, _) => out.push_str("{}"),
                 (Decl::Categories, true) => {
                     out.push('[');
                     for (_, v) in entries {
@@ -307,9 +306,11 @@ fn nickel_decl(out: &mut String, value: &Value, decl: Decl, tags: bool) {
                 // A positional table where a record is declared: the
                 // contract rejects it by type, so its contents are moot.
                 (Decl::Record(_), true) => out.push_str("[]"),
-                // A record where a list is declared: likewise rejected.
-                (Decl::Categories | Decl::Records(_), false) => out.push_str("{}"),
-                (Decl::Record(fields) | Decl::Records(fields), false) => {
+                // A leaf, or a record where a list is declared: rejected by type.
+                (Decl::Leaf, _) | (Decl::Categories | Decl::Records(_), false) => {
+                    out.push_str("{}");
+                }
+                (Decl::Record(fields), false) => {
                     out.push('{');
                     let mut seen = BTreeSet::new();
                     for (key, v) in entries {

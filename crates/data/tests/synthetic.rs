@@ -329,13 +329,12 @@ fn injection_attempts_in_strings_and_field_names_stay_data() {
         let mut entries = minimal_unit();
         entries.retain(|(k, _)| *k != "Categories");
         entries.push(("Categories", list(vec![s(text)])));
-        match validate(Kind::Unit, &table(entries)) {
-            Err(Error::Contract { path, reason }) => {
-                assert!(path.starts_with("Categories"), "path {path:?}");
-                assert!(!reason.contains("import"), "reason {reason:?}");
-            }
-            other => panic!("expected a vocabulary Contract error for {text:?}, got {other:?}"),
-        }
+        let result = validate(Kind::Unit, &table(entries));
+        assert!(
+            matches!(&result, Err(Error::Contract { path, reason })
+                if path.starts_with("Categories") && !reason.contains("import")),
+            "expected a vocabulary Contract error for {text:?}, got {result:?}"
+        );
         let body = unit_with_economy_field(text, s(text));
         assert_eq!(validate(Kind::Unit, &body), Ok(()), "field name {text:?}");
     }
