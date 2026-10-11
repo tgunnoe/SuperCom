@@ -181,18 +181,19 @@ const UNIT_NCL: &str = include_str!("../nickel/unit.ncl");
 const PROJECTILE_NCL: &str = include_str!("../nickel/projectile.ncl");
 const PROP_NCL: &str = include_str!("../nickel/prop.ncl");
 
-/// The top-level keys each contract names. The contracts are open records,
-/// so a key outside this list cannot change a verdict; handing Nickel only
-/// these keeps the program small.
-const UNIT_KEYS: &[&str] = &[
-    "Categories",
-    "Economy",
-    "Physics",
-    "Defense",
-    "Intel",
-    "Weapon",
+/// The top-level keys each contract names, with what it declares of each.
+/// The contracts are open records, so a field outside these cannot change a
+/// verdict; handing Nickel only these keeps the program small and bounds
+/// its depth whatever the body holds.
+const UNIT_KEYS: &[(&str, Decl)] = &[
+    ("Categories", Decl::Categories),
+    ("Economy", Decl::Record(ECONOMY)),
+    ("Physics", Decl::Record(PHYSICS)),
+    ("Defense", Decl::Record(DEFENSE)),
+    ("Intel", Decl::Record(INTEL)),
+    ("Weapon", Decl::Records(WEAPON)),
 ];
-const CATEGORY_KEYS: &[&str] = &["Categories"];
+const CATEGORY_KEYS: &[(&str, Decl)] = &[("Categories", Decl::Categories)];
 
 /// The Nickel expression of the contract for `kind`.
 fn contract_source(kind: Kind) -> String {
@@ -226,19 +227,51 @@ fn nickel_string(out: &mut String, text: &str) {
     out.push('"');
 }
 
-/// Writes `value` as a Nickel term. A table whose keys are all positional
-/// is an array, any other table a record (a positional key in a mixed table
-/// becomes a field named `[i]`); a call is `{ call, args }`, a `<LOC>` string
-/// `{ loc, text }`. With `tags`, the strings of the array are written as
-/// enum tags, the form the category contract takes.
-fn nickel_term(out: &mut String, value: &Value, tags: bool) {
+/// What the contracts declare of a value: the renderer writes only this and
+/// never an undeclared field or subtree, so no depth of a crafted body can
+/// reach the evaluator.
+#[derive(Clone, Copy)]
+enum Decl {
+    /// A scalar leaf; a table or call is written as `{}`, which every leaf
+    /// contract (`Number`, `String`) rejects as before.
+    Leaf,
+    /// The `Categories` list, in full for the vocabulary check; its strings
+    /// are enum tags when the flag of [`nickel_decl`] is set.
+    Categories,
+    /// A record of the named leaf fields.
+    Record(&'static [&'static str]),
+    /// An array of such records.
+    Records(&'static [&'static str]),
+}
+
+const ECONOMY: &[&str] = &[
+    "BuildCostEnergy",
+    "BuildCostMass",
+    "BuildTime",
+    "BuildRate",
+    "ProductionPerSecondEnergy",
+    "ProductionPerSecondMass",
+    "StorageEnergy",
+    "StorageMass",
+];
+const PHYSICS: &[&str] = &["MotionType", "MaxSpeed", "TurnRate"];
+const DEFENSE: &[&str] = &["Health", "MaxHealth", "ArmorType", "RegenRate"];
+const INTEL: &[&str] = &["VisionRadius", "RadarRadius"];
+const WEAPON: &[&str] = &["Label", "Damage", "RateOfFire", "MaxRadius", "ProjectileId"];
+
+/// Writes `value` as a Nickel term, limited to what `decl` declares. A table
+/// whose keys are all positional is an array, any other table a record (a
+/// positional key in a mixed table is undeclared and dropped); a `<LOC>`
+/// string is `{ loc, text }`. With `tags`, the strings of `Categories` are
+/// written as enum tags, the form the category contract takes.
+fn nickel_decl(out: &mut String, value: &Value, decl: Decl, tags: bool) {
     match value {
         Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
         Value::Number(n) if n.is_finite() => {
             let _ = write!(out, "({n})");
         }
         Value::Nil | Value::Number(_) => out.push_str("null"),
-        Value::Str(s) if tags => {
+        Value::Str(s) if tags && matches!(decl, Decl::Leaf) => {
             out.push('\'');
             nickel_string(out, s);
         }
@@ -250,56 +283,61 @@ fn nickel_term(out: &mut String, value: &Value, tags: bool) {
             nickel_string(out, text);
             out.push_str(" }");
         }
-        Value::Call { name, args } => {
-            out.push_str("{ call = ");
-            nickel_string(out, name);
-            out.push_str(", args = [");
-            for arg in args {
-                nickel_term(out, arg, false);
-                out.push_str(", ");
-            }
-            out.push_str("] }");
-        }
+        Value::Call { .. } => out.push_str("{}"),
         Value::Table(entries) => {
-            if entries.iter().all(|(k, _)| matches!(k, Key::Index(_))) {
-                out.push('[');
-                for (_, v) in entries {
-                    nickel_term(out, v, tags);
-                    out.push_str(", ");
-                }
-                out.push(']');
-            } else {
-                out.push('{');
-                let mut seen = BTreeSet::new();
-                for (key, v) in entries {
-                    let name = match key {
-                        Key::Name(n) => n.clone(),
-                        Key::Index(i) => format!("[{i}]"),
-                    };
-                    if seen.contains(&name) {
-                        continue;
+            let positional = entries.iter().all(|(k, _)| matches!(k, Key::Index(_)));
+            match (decl, positional) {
+                (Decl::Leaf, _) => out.push_str("{}"),
+                (Decl::Categories, true) => {
+                    out.push('[');
+                    for (_, v) in entries {
+                        nickel_decl(out, v, Decl::Leaf, tags);
+                        out.push_str(", ");
                     }
-                    nickel_string(out, &name);
-                    out.push_str(" = ");
-                    nickel_term(out, v, false);
-                    out.push_str(", ");
-                    seen.insert(name);
+                    out.push(']');
                 }
-                out.push('}');
+                (Decl::Records(fields), true) => {
+                    out.push('[');
+                    for (_, v) in entries {
+                        nickel_decl(out, v, Decl::Record(fields), false);
+                        out.push_str(", ");
+                    }
+                    out.push(']');
+                }
+                // A positional table where a record is declared: the
+                // contract rejects it by type, so its contents are moot.
+                (Decl::Record(_), true) => out.push_str("[]"),
+                // A record where a list is declared: likewise rejected.
+                (Decl::Categories | Decl::Records(_), false) => out.push_str("{}"),
+                (Decl::Record(fields) | Decl::Records(fields), false) => {
+                    out.push('{');
+                    let mut seen = BTreeSet::new();
+                    for (key, v) in entries {
+                        let Key::Name(name) = key else { continue };
+                        if !fields.contains(&name.as_str()) || !seen.insert(name.as_str()) {
+                            continue;
+                        }
+                        nickel_string(out, name);
+                        out.push_str(" = ");
+                        nickel_decl(out, v, Decl::Leaf, false);
+                        out.push_str(", ");
+                    }
+                    out.push('}');
+                }
             }
         }
     }
 }
 
-/// The record of the contract-named keys of `body`, as Nickel text; with
+/// The record of the contract-declared parts of `body`, as Nickel text; with
 /// `tags` the category strings are enum tags.
-fn nickel_body(body: &Value, keys: &[&str], tags: bool) -> String {
+fn nickel_body(body: &Value, keys: &[(&str, Decl)], tags: bool) -> String {
     let mut out = String::from("{");
-    for key in keys {
+    for (key, decl) in keys {
         if let Some(value) = body.get(key).filter(|v| !matches!(v, Value::Nil)) {
             nickel_string(&mut out, key);
             out.push_str(" = ");
-            nickel_term(&mut out, value, tags && *key == "Categories");
+            nickel_decl(&mut out, value, *decl, tags);
             out.push_str(", ");
         }
     }
