@@ -144,12 +144,14 @@ Each item: statement · grounding (why unresolved) · signpost (what resolves it
 
 Core (planned; `crates/supercom`, `crates/scd`, `crates/testkit`,
 `crates/plugin` with `wit/`, `crates/detbench`, `crates/scm`, `crates/dds`,
-and `crates/scmap` exist today — WIP):
+`crates/scmap`, `crates/bp`, `crates/data`, and `crates/bp-import` exist today
+— WIP):
 
 - `crates/supercom` — binary: configuration, wiring, launches a skirmish.
 - `crates/scd` — `.scd` archive virtual filesystem and mount order.
-- `crates/data` — Nickel contracts and the typed blueprint model;
-  `crates/bp-import` — `.bp` to Nickel importer and cache.
+- `crates/bp` — the data subset of the blueprint Lua dialect, parsed to a
+  value tree; `crates/data` — Nickel contracts and the typed blueprint model;
+  `crates/bp-import` — the importer and its cache.
 - `crates/scm`, `crates/dds`, `crates/scmap`, `crates/xact` — mesh/animation,
   texture-header, map, and sound-bank loaders.
 - `crates/sim` — deterministic simulation (economy, units, orders, weapons,
