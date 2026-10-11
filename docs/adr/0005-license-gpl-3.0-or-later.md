@@ -56,6 +56,15 @@ U4) until the head ruled on it.
 
 ---
 
+## Amendment 1 (2026-10-08)
+
+The head admitted LGPL-3.0 (needed by `nickel-lang-core` through `malachite`)
+and MPL-2.0 to the dependency allowlist. Both are compatible with
+GPL-3.0-or-later; both are weak copyleft, so they do not change the
+project's own licence. The allowlist in `deny.toml` is the record.
+
+---
+
 ## References
 
 - `LICENSE` at the repository root; `Cargo.toml` workspace `license` field.

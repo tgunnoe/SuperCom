@@ -27,8 +27,9 @@ Each item: statement · grounding · signpost (what defeats it).
   installed Forged Alliance (primary) or Supreme Commander (reference) data,
   read in place. Grounding: `~/.local/share/Steam/steamapps/common/Supreme
 Commander Forged Alliance/` (`gamedata/*.scd` store-only zips: 568 unit
-  blueprints, 1148 meshes, 63 maps). Signpost: a v0 feature needs an asset
-  type with no loader.
+  blueprints; 1,939 meshes across the archives, 1,148 of them in `units.scd`;
+  60 maps in 61 folders; counts from `tools/survey/`). Signpost: a v0 feature
+  needs an asset type with no loader.
 - **R2 Deterministic simulation.** The sim is a pure function of (initial
   state, command stream, tick); identical on every supported platform.
   Grounding: lockstep networking and replays are command streams
@@ -40,7 +41,7 @@ Commander Forged Alliance/` (`gamedata/*.scd` store-only zips: 568 unit
   that the WIT world cannot express.
 - **R4 Canonical data in Nickel.** Blueprints, balance, and mod overlays are
   Nickel records validated by contracts; an importer converts installed `.bp`
-  files into that model and caches it in the user data directory. Grounding:
+  files into that model and caches it in the user cache directory. Grounding:
   docs/adr/0002-data-model-nickel.md. Signpost: full-set evaluation exceeds
   the load budget even with the cache, or imports fail through
   `nickel-lang-core`.
@@ -79,7 +80,9 @@ Each item: statement · grounding · signpost (what would violate it).
   tree is formatted with `treefmt` before commit. Grounding: predicate
   `rules.md` §3. Signpost: a commit landed with `--no-verify`.
 - **I6 Library code returns `Result`.** No `unwrap`, `expect`, or `panic!` in
-  non-test library paths. Grounding: predicate `rust` skill. Signpost:
+  non-test library paths. Test support may panic by contract when a required
+  fixture is absent, under `#[expect(clippy::panic, reason = ...)]` (the test
+  kit's `require_game`). Grounding: predicate `rust` skill. Signpost:
   `clippy::unwrap_used` warnings in a library crate.
 - **I7 Game path is configuration.** The install directory comes from
   `SUPERCOM_FA_DIR` or the config file, never a hard-coded path. Grounding:
@@ -95,24 +98,25 @@ Each item: statement · grounding · signpost (what would violate it).
 
 Each item: statement · grounding (why unresolved) · signpost (what resolves it).
 
-- **U1 Float strategy for lockstep.** Fixed-point sim versus IEEE floats with
-  deterministic transcendental functions. Grounding: transcendental and FMA
-  behaviour differs across x86_64 and aarch64. Signpost: a cross-architecture
-  replay comparison in CI.
-- **U2 Nickel load cost.** Evaluating ~580 blueprints with contracts.
-  Grounding: no benchmark yet. Signpost: measured cold and cached load time
-  against a budget set in the data-model spec.
-- **U3 Engine/Lua split.** Which behaviours the original C++ engine owned
-  versus its Lua layer, which fixes the Rust sim surface. Grounding: the FAF
-  engine docs list about 60 exposed classes; the split is not yet inventoried.
-  Signpost: the spec's engine-API inventory is complete.
-- **U5 Map format coverage.** `.scmap` inner versions 56 and 60 are documented;
-  installed maps are untested. Signpost: the loader parses all 63 installed
-  maps.
-- **U6 Audio codecs.** Which codecs the installed XACT banks use. Signpost: a
-  codec inventory across `sounds/*.xwb`.
+- **U1 Cross-architecture float determinism.** ADR-0006 chose binary64 with
+  the exactly specified operations, `libm` transcendentals, and NaN
+  canonicalization at the serialization boundary; every measurement behind it
+  is x86_64. Grounding: docs/adr/0006-float-strategy.md, the aarch64 gap.
+  Signpost: the DET-024 replay comparison passing on x86_64 and aarch64 in CI.
+- **U6 Audio codecs.** Which codecs the 89 installed XACT wave banks use
+  (docs/specs/formats.md inventories the banks only). Signpost: a codec
+  inventory across `sounds/**/*.xwb` (issue 28).
 - **U7 macOS.** wgpu (Metal) and wasmtime are known good on aarch64-darwin;
-  the rest of the dependency set is untested. Signpost: a green macOS build.
+  the rest of the dependency set is untested (issue 27). Signpost: a green
+  macOS build.
+- **U9 Shadowed Lua paths.** Four `lua/` files (`lua/sim/unit.lua`,
+  `lua/sim/projectile.lua`, `lua/sim/prop.lua`, `lua/simutils.lua`) exist in
+  both `lua.scd` and `mohodata.scd` with different contents; the archive layer
+  reads the `lua.scd` copy (docs/specs/formats.md, the mount-order clause),
+  which the sim specification's citations match, but which copy the original
+  engine reads is unestablished and the sim campaign's citations rest on it.
+  Signpost: a pinned engine citation of the mount precedence, or an
+  observation of the running original reading one of the four.
 - **U8 Built-in versus plugin.** Which v0 behaviours (AI in particular) ship
   as first-party Wasm plugins rather than built-in Rust. Signpost: an ADR
   after the spec campaign.
@@ -122,8 +126,10 @@ Each item: statement · grounding (why unresolved) · signpost (what resolves it
 - Read first: this file, docs/specs/README.md, docs/adr/.
 - Environment: `direnv allow` or `nix-shell` (no flakes). If `IN_NIX_SHELL`
   is set, every tool below is already on PATH; do not nest `nix-shell`.
-- Commands: `just check`, `just test`, `just clippy`, `just fmt`, `just gate`
-  (the CI gate: format check, clippy with `-D warnings`, tests, license audit).
+- Commands: `just check`, `just test`, `just clippy`, `just fmt`, `just lint`
+  (the specification lint: self-test, check, run), `just scan` (the clean-room
+  content scan), `just gate` (the CI gate: format check, lint, scan, clippy
+  with `-D warnings`, tests, license audit).
 - Game data: `SUPERCOM_FA_DIR` (defaults to the Steam install path).
 - Predicate arsenal by moment: `rust` for all code; `spec` and `form` for the
   reverse-engineered specification; `prior-art` before any format loader or
@@ -136,23 +142,30 @@ Each item: statement · grounding (why unresolved) · signpost (what resolves it
 
 ## Structure
 
-Core (planned; only `crates/supercom` exists today — WIP):
+Core (planned; `crates/supercom`, `crates/scd`, `crates/testkit`,
+`crates/plugin` with `wit/`, `crates/detbench`, `crates/scm`, `crates/dds`,
+`crates/scmap`, `crates/bp`, `crates/data`, and `crates/bp-import` exist today
+— WIP):
 
 - `crates/supercom` — binary: configuration, wiring, launches a skirmish.
 - `crates/scd` — `.scd` archive virtual filesystem and mount order.
-- `crates/data` — Nickel contracts and the typed blueprint model;
-  `crates/bp-import` — `.bp` to Nickel importer and cache.
-- `crates/scm`, `crates/scmap`, `crates/xact` — mesh/animation, map, and
-  sound-bank loaders.
+- `crates/bp` — the data subset of the blueprint Lua dialect, parsed to a
+  value tree; `crates/data` — Nickel contracts and the typed blueprint model;
+  `crates/bp-import` — the importer and its cache.
+- `crates/scm`, `crates/dds`, `crates/scmap`, `crates/xact` — mesh/animation,
+  texture-header, map, and sound-bank loaders.
 - `crates/sim` — deterministic simulation (economy, units, orders, weapons,
   projectiles, pathfinding, damage); `crates/ai` — built-in skirmish AI.
 - `crates/plugin` — wasmtime host and plugin SDK; `wit/` — the engine API.
+- `crates/detbench` — determinism evidence: golden vectors for the float
+  strategy and the on-demand benchmark; never shipped.
 - `crates/render` — wgpu renderer; `crates/ui` — winit/egui HUD, input,
   camera and strategic zoom.
 
 Context-sensitive: `docs/specs/` (authority), `docs/adr/` (decisions),
-`docs/models/` (formal models), `tools/` (one-off importers and probes; none
-yet).
+`docs/models/` (formal models), `tools/` (the specification lint and the
+clean-room scan with their red fixtures, `spec_eval/` evaluator scripts per
+specification domain, `survey/` census scripts over the installed game).
 
 ## Spec Pointers
 

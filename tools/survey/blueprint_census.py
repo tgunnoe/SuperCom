@@ -13,7 +13,7 @@ import zipfile
 
 CATEGORIES = re.compile(r"Categories\s*=\s*\{(.*?)\}", re.S)
 INTEL = re.compile(r"^\s*Intel\s*=\s*\{", re.M)
-TOKEN = re.compile(r"'([A-Z0-9_]+)'")
+TOKEN = re.compile(r"'([A-Za-z0-9_]+)'")  # nine civilian units carry the mixed-case 'Cybran'
 
 
 def main() -> int:

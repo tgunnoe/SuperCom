@@ -1,0 +1,4 @@
+1
+red-source-fa-no-path.md:3: source install locator 'fa:' has no path
+red-source-fa-no-path.md:6: source install locator 'fa:!units/sample.bp' has no path
+red-source-fa-no-path.md:9: source install locator 'fa:gamedata/sample.scd!' has an empty member after '!'

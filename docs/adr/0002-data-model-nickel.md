@@ -49,6 +49,10 @@ layered overrides for mods, and is pure Rust.
 - Import resolution through the library, rather than the CLI, needs
   confirming.
 - Modders learn Nickel instead of editing Lua tables.
+- The v0 importer validates presence and types in Rust before Nickel and
+  caches the Rust projection, so the post-merge contract guarantee does not
+  yet hold for overlays; docs/specs/data-model.md states that pipeline as an
+  interim toward this decision (the head's ruling of 2026-10-10).
 
 ---
 

@@ -1,0 +1,5 @@
+This file quotes exactly three lines of the synthetic test archive.
+synthetic_ledger.alpha = "the first invented entry"
+synthetic_ledger.bravo = "the second invented entry"
+synthetic_ledger.charlie = "the third invented entry"
+Three lines can never form a four-line shingle with the archive.

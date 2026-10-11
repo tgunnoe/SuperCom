@@ -1,0 +1,18 @@
+[package]
+description  = "Reader for the installed game's .dds texture headers"
+edition      = { workspace = true }
+license      = { workspace = true }
+name         = "supercom-dds"
+publish      = false
+repository   = { workspace = true }
+rust-version = { workspace = true }
+version      = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+supercom-scd     = { path = "../scd", version = "0.0.1" }
+supercom-testkit = { path = "../testkit", version = "0.0.1" }

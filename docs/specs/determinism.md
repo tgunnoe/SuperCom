@@ -1,0 +1,93 @@
+# Determinism specification
+
+This file specifies the contract that makes the simulation reproducible: the command stream that is its only input, the order and tick at which commands apply, the replay format, the per-tick state hash that detects a desync, and the float strategy. The sim crate does not exist yet, so the contract binds code that will be written; the evidence is the `supercom-detbench` crate (`crates/detbench`), whose golden-vector tests run here and are cited as `test:` evaluators. A clause whose evaluator is a test is machine-verified; a clause whose evaluator is a pinned source or a repository path is cited, not run, and is agent-checked. Statements about the original engine rest on a pinned citation; the replay format, the hash, and the command order are this project's own design and say so. Tick length and the integer tick count come from `docs/specs/sim.md` (SIM-001, SIM-002) and are not restated here.
+
+Every golden constant behind a test evaluator was produced on x86_64-linux. No clause claims a result on aarch64: the clauses about cross-architecture behaviour are design clauses whose tests run on x86_64, and the gap is stated in `docs/adr/0006-float-strategy.md`, which the head ratifies and which a failure of the DET-024 comparison reopens.
+
+## Types
+
+A ⟨Command⟩ is a record of a tick stamp (a 64-bit unsigned integer), a source slot (an 8-bit unsigned integer naming the issuing player), a sequence number (a 32-bit unsigned integer counting that source's commands across the match), and a payload (bytes the ordering never inspects). A ⟨Schedule⟩ maps each tick to the ⟨Command⟩ values applied at its start. A ⟨Digest⟩ is a 32-byte SHA-256 output. The ⟨State⟩ is the sim's full state at the end of a tick.
+
+## Forbidden states
+
+The sim MUST NEVER reach these states; each names the clauses that close it. A command applied twice, at a tick other than its stamp, or in an order that depends on its arrival (DET-002, DET-003). A tick begun while a source's commands for it are still open (DET-004). A replay that holds an input the sim reads and the file does not store (DET-007). Two runs of one command log that disagree without anyone noticing, or a report that names a tick earlier than the divergence or later than the first compared tick whose digests differ (DET-010, DET-011, DET-012). A NaN reaching a serialized state with a payload or sign that depends on the platform (DET-016, DET-022). A platform transcendental function in sim code (DET-014). A claim of cross-architecture equality that no replay comparison backs (DET-024).
+
+## Command stream
+
+**DET-001** `design` `source:docs/adr/0003-render-and-sim-stack.md`
+The ⟨State⟩ at the end of tick t MUST be a pure function of the initial state and the ⟨Command⟩ values stamped for ticks 0 through t, applied in schedule order (DET-002); the sim MUST NOT read the wall clock, OS randomness, the filesystem, the network, the arrival order of commands, or the iteration order of an unordered collection, and every pseudo-random generator it holds MUST be seeded from the initial state alone. This is the command-stream interface that ADR-0003 gives the sim crate, stated as a contract; it is agent-checked until the sim crate and a replay-divergence test exist.
+
+**DET-002** `design` `test:detbench_schedule_ignores_arrival_order`
+A ⟨Schedule⟩ built from a set of ⟨Command⟩ values MUST group them by stamped tick and MUST order the commands of one tick by ascending source slot, then ascending sequence number, and the schedule MUST be identical for every arrival order of the same set. The test builds the schedule from all 720 arrival orders of six commands from four sources over three ticks, and compares each with the one expected schedule.
+
+**DET-003** `design` `test:detbench_schedule_applies_at_stamped_tick`
+A ⟨Command⟩ stamped for tick t MUST be applied exactly once, at the start of tick t, before any other update of that tick (building on DET-002 and the integer tick count of SIM-002); a command stamped for a tick that has already started MUST be refused as late and never applied at a later tick; two commands sharing a source slot and sequence number MUST be refused as duplicates; and which refusal is reported MUST NOT depend on arrival order. The test checks placement and count, the on-time and late boundary, the duplicate refusal across all 5,040 arrival orders of one bad set, and, for a set that is both late and duplicate, that the same refusal is reported over every arrival order; that a command applies before any other update of its tick waits on the sim's own test, since the reference model has no other update.
+
+**DET-004** `design` `source:docs/specs/sim.md#SIM-002`
+The sim MUST NOT begin tick t until the set of ⟨Command⟩ values stamped for t is closed for every source slot, an empty set being a valid close, and MUST NOT measure or wait on wall-clock time: simulated time is the integer tick count of SIM-002, and the pace of ticks is the application layer's concern (SIM-005). A wire protocol that closes the sets is out of scope here; this clause fixes only what the sim requires of it.
+
+## Replay
+
+**DET-005** `reference` `source:https://github.com/FAForever/faf-scfa-replay-parser/blob/9d0cb7cb4bb0cf6d8be44e5c1ea4bc357aa9a0c5/replay.ksy#L8-L12`
+The original's replays MUST be taken as a header followed by an operation stream, as the FAF replay parser's schema declares in its top-level sequence, the stream being operations repeated to the end of the data (lines 254-258); the same schema's operation types include advance, whose body is a 32-bit tick count (lines 174-177), set-command-source (179-182), verify-checksum, whose body is 20 bytes the schema does not decompose (189-192), and issue-command (204-234), and its operation enumeration runs from advance to lua-sim-callback (269-292). The schema is community reverse engineering, and it says nothing about how the original computes or checks that checksum.
+
+**DET-006** `reference` `source:https://github.com/FAForever/faf-scfa-replay-parser/blob/9d0cb7cb4bb0cf6d8be44e5c1ea4bc357aa9a0c5/replay.ksy#L113-L151`
+The original's replay header MUST be taken to hold the replay name and version, the map file, the mod list, the scenario, the number of command sources with their timeout allowances, a cheats flag, one player-data record per army, and a 32-bit random seed, as the FAF replay parser's schema declares for its header; that schema is the only source for these fields, and the project's header (DET-007) is its own design.
+
+**DET-007** `design` `source:docs/adr/0003-render-and-sim-stack.md`
+A replay MUST hold the initial state as a header (a format version, the engine version, the map, the mods or plugins, and the installed game data each identified by a SHA-256 content digest, the player slots, and the 64-bit random seed from which every generator is seeded under DET-001), then the command log, which holds every ⟨Command⟩ the match applied, then hash checkpoints (DET-008); it MUST hold nothing else that the sim reads, playback MUST need no input beyond the file and the installed game data, and a reader MUST refuse, before tick 0, a replay whose content digests do not match what is installed. The tick rate is not stored, being fixed by SIM-001.
+
+**DET-008** `design` `source:docs/adr/0003-render-and-sim-stack.md`
+The command log MUST be stored in schedule order, ascending by stamped tick, then source slot, then sequence number (DET-002), each record carrying its own stamp, so that a reader reaches tick t by binary search on the stamp; hash checkpoints MUST be stored as (tick, ⟨Digest⟩) pairs ascending by tick, one for every tick at which the writer chose to record one, and a reader MUST reject a log whose records are not in schedule order or a checkpoint list that is not ascending.
+
+## State hashing and desync detection
+
+**DET-009** `design` `source:docs/adr/0003-render-and-sim-stack.md`
+The canonical serialization S of a ⟨State⟩ MUST use a fixed field order, little-endian integers, `f64` values as the bit patterns that DET-022 gives them, and every collection in ascending identifier order, never in the iteration order of a hash table, so that two builds of the sim on any supported platform give equal bytes for equal states. The state itself is not yet specified, so this clause is agent-checked; DET-010 fixes what is done with S.
+
+**DET-010** `design` `test:detbench_tick_hash_chain_bits`
+After every tick t the sim MUST compute the ⟨Digest⟩ H(t) = SHA-256(H(t-1) || LE64(t) || LE64(length of S) || S), where S is the canonical serialization (DET-009) of the ⟨State⟩ at the end of tick t, H(-1) is thirty-two zero bytes, and LE64 is a 64-bit little-endian integer. The test computes the chain over a 16-tick synthetic state sequence, compares the first and last digests with committed values, and rebuilds two links by hand from the stated layout with an independent code path.
+
+**DET-011** `design` `test:detbench_tick_hash_localizes_divergence`
+Two runs whose states first differ at tick d MUST have equal digests at every tick before d and unequal digests at every tick from d on, so that the first unequal digest names the first divergent tick; a sequence that is a proper prefix of another MUST be reported as diverging at its own length. The test flips one byte of the state at each tick of a 40-tick sequence in turn and checks the reported tick, the equal prefix, and the unequal suffix.
+
+**DET-012** `design` `source:docs/adr/0003-render-and-sim-stack.md`
+A peer or a replay reader that finds unequal digests at tick t MUST report a desync as an interval, from the last compared tick whose digests agreed (exclusive) to the first compared tick whose digests differ (inclusive), since checkpoints exist only at the ticks a writer chose (DET-008) and the divergence lies in that interval (DET-011), and MUST NOT go on treating the run as in sync; what a lockstep session then does with the diverged peer is a policy this clause leaves open.
+
+**DET-013** `derived` `test:detbench_scheduled_run_ignores_arrival_order`
+Following from DET-002, DET-003, and DET-010, two runs of one initial state over one set of ⟨Command⟩ values MUST have equal digests at every tick whatever order the commands arrived in. The test runs a toy state, the encoding of every command applied so far, over all 720 arrival orders of six commands and expects one digest sequence with a committed last value; as a control it applies the same commands in arrival order within each tick and expects twelve distinct last digests, one for each order of three commands at tick 2 and two at tick 5, so that the digest is shown to be order sensitive.
+
+## Float strategy
+
+**DET-014** `reference` `source:https://github.com/rust-lang/rust/blob/b940084d7eb6a299eb4bfeb8e34901bc051e7ac4/library/std/src/num/f64.rs#L680-L686`
+Sim code MUST NOT call the standard library's `f64` transcendental functions, which include `sin`, `cos`, `tan`, `atan2`, `exp`, `ln`, `powf`, `powi`, `cbrt`, and `hypot`: the standard library documents the precision of `sin` as non-deterministic, varying "by platform, Rust version, and can even differ within the same execution", and gives the same text to every function of that group (lines 308 through 1249 of the same file at rustc 1.99.0).
+
+**DET-015** `reference` `source:https://github.com/rust-lang/rust/blob/b940084d7eb6a299eb4bfeb8e34901bc051e7ac4/library/core/src/primitive_docs.rs#L1223-L1236`
+Sim code MAY use binary64 addition, subtraction, multiplication, and division, which the standard library documents as rounded to nearest with ties to even under IEEE 754 (the `f64` page defers to the `f32` page, lines 1387-1391), and MAY use `sqrt` and `mul_add`, which the `f64` documentation describes as the IEEE 754 results and "guaranteed not to change" (library/std/src/num/f64.rs lines 192-196 and 364-368); the documented guarantees cover the value of a result that is not a NaN.
+
+**DET-016** `reference` `source:https://github.com/rust-lang/rust/blob/b940084d7eb6a299eb4bfeb8e34901bc051e7ac4/library/core/src/primitive_docs.rs#L1262-L1292`
+Sim code MUST treat the sign, quiet bit, and payload of any NaN, whatever its origin, as unspecified, and MUST NOT read a NaN's bits (`to_bits`, `total_cmp`, `is_sign_positive`, `is_sign_negative`, `copysign`) before DET-022 has canonicalized it: the standard library documents the sign as non-deterministic, the quiet bit and payload as chosen non-deterministically from a set of preferred, propagated, and target-specific patterns, and says that running one operation twice on the same inputs can give different bit patterns.
+
+**DET-017** `reference` `source:https://github.com/dimforge/rapier/blob/3406750a38286a0d3c7d0f4be2f9d53153e81d90/crates/rapier3d/Cargo.toml#L76`
+The float strategy MAY rely on a pure-Rust `libm` in place of the platform's as a precedent already shipped in a physics engine: the rapier3d manifest defines its `enhanced-determinism` feature as enabling `simba/libm_force` and `parry3d/enhanced-determinism`. The manifest states the feature's components and not its guarantees, so this clause is a precedent and not evidence of equality across platforms.
+
+**DET-018** `design` `test:detbench_basic_ops_bits`
+On x86_64, binary64 addition, subtraction, multiplication, division, and the square root of an absolute value MUST give the committed bit patterns over six fixed operand pairs that include a subnormal, an overflow to infinity, and an underflow to zero; `libm::sqrt` and `f64::sqrt` MUST agree bit for bit with each other and with the committed square roots of twelve inputs; and a separate multiplication and addition MUST NOT be fused, while `mul_add` is fused and exact, shown on an operand set whose fused and unfused results differ.
+
+**DET-019** `design` `test:detbench_libm_sin_bits`
+Every sine in sim code MUST be computed with the `libm` crate, and on x86_64 `libm::sin` MUST give the committed bit patterns over fourteen fixed inputs, which include an argument of 1e10 that takes the long argument-reduction path and one of 1e5 that takes the medium one, both with the crate's `arch` feature off (`cargo nextest run -p supercom-detbench`) and on (`cargo nextest run --workspace`, where Cargo enables it through the plugin host's dependencies); the feature only swaps assembly in for operations that are exact either way.
+
+**DET-020** `design` `test:detbench_libm_exp_bits`
+Every exponential in sim code MUST be computed with the `libm` crate, and on x86_64 `libm::exp` MUST give the committed bit patterns over fourteen fixed inputs, which include arguments whose results are subnormal (-740) and nearly overflow (709.5), in both feature configurations of DET-019.
+
+**DET-021** `design` `test:detbench_fixed_mac_bits`
+A quantity that needs exact reproducibility without floating point MAY be held in the 64-bit fixed-point format with 32 fractional bits; its multiplication MUST round toward negative infinity, and a multiply-accumulate sequence over eight fixed operand pairs, which includes a negative product smaller than one raw unit, MUST give the committed raw accumulator after every step and MUST equal the same sequence in 128-bit integer arithmetic.
+
+**DET-022** `design` `test:detbench_nan_canonical_bits`
+Every `f64` that enters a serialized ⟨State⟩, a ⟨Digest⟩, or a replay MUST be passed through a canonicalization that maps every NaN, of either sign and any payload, to the bit pattern 0x7ff8000000000000 and leaves every other value's bits unchanged; this is also the pattern the plugin host's test `sandbox_nan_bits_are_canonical` observes for a NaN that a guest's arithmetic produces, while a NaN a guest builds without arithmetic keeps its bits, which are the same on every host (read from the compiler's canonicalization pass, not shown by a test: the plugin test divides zero by zero), and this clause canonicalizes it too, so a NaN from a plugin and a NaN from the sim hash alike, and a sim that never produces a NaN, by construction, satisfies the clause trivially.
+
+**DET-023** `reference` `source:https://docs.rs/wasmtime/49.0.2/wasmtime/struct.Config.html#method.max_wasm_stack`
+A limit on guest recursion set as a byte budget of native stack MUST NOT be assumed to trap at the same call depth on every host: the wasmtime documentation says of `max_wasm_stack` that the number "is not super-precise" and that wasm will take at most "pretty close to this much" stack space, and the plugin host sets exactly such a budget (`MAX_WASM_STACK_BYTES` in `crates/plugin`).
+
+**DET-024** `design` `source:docs/adr/0006-float-strategy.md`
+The project MUST NOT claim bit-identical simulation across x86_64 and aarch64 until one command log, replayed on both, gives equal ⟨Digest⟩ values at every tick (DET-010); the log MUST include a payload-NaN case, in which NaNs of differing sign and payload arise in sim arithmetic and in a plugin result and the digests agree only because of DET-022, and a recursion-depth case, in which a plugin recurses to its stack budget (DET-023) and the trap falls on the same tick on both. This comparison is the signpost of AGENTS.md U1; until it passes, DET-018 through DET-022 are evidence on x86_64 alone.

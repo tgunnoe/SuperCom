@@ -9,6 +9,7 @@ check:
 # Run the test suite
 test:
     cargo nextest run --workspace
+    cargo nextest run -p supercom-detbench
 
 # Lint with the CI warning gate
 clippy:
@@ -22,13 +23,25 @@ fmt:
 fmt-check:
     treefmt --fail-on-change
 
-# Audit dependency licenses, bans, and sources (no network needed)
+# Check the specification: self-test, every clause, then run its scripts
+lint:
+    python3 tools/spec_lint.py --self-test
+    python3 tools/spec_lint.py --check docs/specs
+    python3 tools/spec_lint.py --run docs/specs
+
+# Keep game content out of the tree: self-test the rules, then check every tracked file
+scan:
+    python3 tools/cleanroom_scan.py --self-test
+    python3 tools/cleanroom_scan.py --check
+
+# Audit dependency licenses, bans, and sources (the fixture's packages are fetched by the gate's tests first)
 deny:
     cargo deny check licenses bans sources
+    cargo deny --manifest-path plugins/hello/Cargo.toml --config deny.toml --locked check licenses bans sources
 
 # Audit dependencies against the advisory database (needs network)
 audit:
     cargo deny check advisories
 
-# The CI gate: formatting, lints, tests, license audit
-gate: fmt-check clippy test deny
+# The CI gate: formatting, spec lint, clean-room check, lints, tests, license audit
+gate: fmt-check lint scan clippy test deny

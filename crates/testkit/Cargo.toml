@@ -1,0 +1,14 @@
+[package]
+description  = "Test support: locate the installed game and decide whether a game-dependent test runs, skips, or fails"
+edition      = { workspace = true }
+license      = { workspace = true }
+name         = "supercom-testkit"
+publish      = false
+repository   = { workspace = true }
+rust-version = { workspace = true }
+version      = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
