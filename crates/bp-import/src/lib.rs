@@ -95,7 +95,7 @@ const ARCHIVES: [&str; 6] = [
 const CACHE_FILE: &str = "catalog.json";
 
 /// Bump when the cached layout or the import's reading of a member changes.
-const CACHE_FORMAT: u32 = 1;
+const CACHE_FORMAT: u32 = 2;
 
 fn archive_path(install: &Path, name: &str) -> PathBuf {
     install.join("gamedata").join(name)
@@ -108,19 +108,20 @@ fn archive_error(path: &Path, source: supercom_scd::Error) -> Error {
     }
 }
 
-/// The blueprint id of a member: its file stem without the kind's suffix
-/// (`_unit`, `_proj`, `_prop`), compared without regard to case.
-fn blueprint_id(member: &str, suffix: &str) -> String {
-    let file = member.rsplit('/').next().unwrap_or(member);
-    let stem = file
-        .get(..file.len().saturating_sub(".bp".len()))
-        .unwrap_or(file);
-    let cut = stem.len().saturating_sub(suffix.len());
-    match stem.get(cut..) {
-        Some(tail) if tail.eq_ignore_ascii_case(suffix) => stem.get(..cut).unwrap_or(stem),
-        _ => stem,
+/// The blueprint id of a member, canonical and unique per family.
+///
+/// A unit's id is its lower-cased file stem without `_unit`. A projectile's
+/// or prop's id is its lower-cased member path with a leading slash, the
+/// form in-data references (`ProjectileId`) use; the bare stem is not
+/// unique there, since distinct archives and directories repeat names.
+fn blueprint_id(kind: Kind, member: &str, suffix: &str) -> String {
+    let path = member.trim_start_matches('/').to_lowercase();
+    if kind != Kind::Unit {
+        return format!("/{path}");
     }
-    .to_owned()
+    let file = path.rsplit('/').next().unwrap_or(&path);
+    let stem = file.strip_suffix(".bp").unwrap_or(file);
+    stem.strip_suffix(suffix).unwrap_or(stem).to_owned()
 }
 
 /// Reads, parses, validates, and projects every member of `archive` whose
@@ -153,7 +154,7 @@ fn read_kind<T>(
             source,
         };
         supercom_data::validate(kind, &blueprint.body).map_err(model)?;
-        let id = blueprint_id(member, suffix);
+        let id = blueprint_id(kind, member, suffix);
         out.push(project(&id, &blueprint.body).map_err(model)?);
     }
     Ok(())
@@ -163,8 +164,8 @@ fn read_kind<T>(
 /// install at `install`.
 ///
 /// Units come from `units.scd` alone; projectiles and props from every
-/// archive that holds them. The catalog's order is the mount order of the
-/// archives, then the member paths.
+/// archive that holds them. Each list is ordered by blueprint id, which is
+/// unique within its family.
 ///
 /// # Errors
 ///
@@ -205,6 +206,9 @@ pub fn import(install: &Path) -> Result<Catalog, Error> {
             &mut catalog.props,
         )?;
     }
+    catalog.units.sort_by(|a, b| a.id.cmp(&b.id));
+    catalog.projectiles.sort_by(|a, b| a.id.cmp(&b.id));
+    catalog.props.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(catalog)
 }
 
