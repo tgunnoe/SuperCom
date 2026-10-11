@@ -104,7 +104,7 @@ mod float_bits {
             f64::from_bits(1),
             1e23,
             5e-324,
-            2.2250738585072011e-308,
+            2.225_073_858_507_201e-308,
         ];
         values.extend(MISPARSED_BITS.map(f64::from_bits));
         assert_bits_equal(&values);
