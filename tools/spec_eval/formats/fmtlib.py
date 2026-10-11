@@ -1,10 +1,12 @@
 """Helpers shared by the formats and data-model evaluators. Standard library only.
 
 Everything the sim helpers already provide (install resolution, SKIP, member
-reading, the data-subset reader) is imported from simlib, never copied. This module
-adds only what the format and data-model clauses need beyond it: archive holders per
-path, a duplicate-key census over the blueprint reader, the sound-bank walk, and
-repository-source reads for the clauses that describe code.
+reading, the data-subset reader) is imported from simlib, with one exception:
+`DupReader.table` is a copy of simlib's table rule with a key counter added, and
+must change when that rule changes. This module adds only what the format and
+data-model clauses need beyond simlib: archive holders per path, the duplicate-key
+census over the blueprint reader, the sound-bank walk, and repository-source reads
+for the clauses that describe code.
 """
 
 import os
@@ -20,7 +22,9 @@ Fail = S.Fail
 expect = S.expect
 show = S.show
 
-# Constructors whose files fall inside the v0 data subset, and the two that do not.
+# Constructors whose files the reader parses and the census counts (units, projectiles
+# and props are the v0 inputs; beams and meshes parse but are not claimed as v0 inputs),
+# and the two kinds the reader does not accept.
 IN_SCOPE = ("UnitBlueprint", "ProjectileBlueprint", "PropBlueprint", "BeamBlueprint", "MeshBlueprint")
 OUT_OF_SCOPE = ("EmitterBlueprint", "TrailEmitterBlueprint")
 
@@ -63,7 +67,11 @@ def blueprint_members(game: S.Game, root: str):
 
 
 class DupReader(S._Parser):
-    """The simlib reader, counting repeated named keys per table constructor."""
+    """The simlib reader, counting repeated named keys per table constructor.
+
+    `table` is a copy of simlib's `_Parser.table` with the counter added (the
+    one copied rule in this module); it must change when simlib's rule changes.
+    """
 
     tables = 0
     repeats = 0
