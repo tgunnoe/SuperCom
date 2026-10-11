@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 serde         = { features = ["derive"], version = "1" }
-serde_json    = "1"
+serde_json    = { features = ["float_roundtrip"], version = "1" }
 supercom-bp   = { path = "../bp", version = "0.0.1" }
 supercom-data = { path = "../data", version = "0.0.1" }
 supercom-scd  = { path = "../scd", version = "0.0.1" }
