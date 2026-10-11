@@ -2,7 +2,10 @@
 //!
 //! Usage: `SUPERCOM_FA_DIR=<install> bench_import`. Prints one
 //! `name seconds` line each for the cold import, the cache write, the cached
-//! load, and the share of the cold import spent mounting the archives.
+//! load, and `mount_share`, the time to mount the whole install through the
+//! archive layer's `Vfs::from_install`, measured on its own: the import never
+//! uses the Vfs and opens the six archives it needs directly, so that line
+//! bounds the import's own mount cost rather than measuring it.
 //! Exits 1 when the cold import takes over 10 s or the cached load over 1 s,
 //! and 2 when it cannot run. Blueprints only: map Lua is never timed.
 
