@@ -109,6 +109,14 @@ Each item: statement · grounding (why unresolved) · signpost (what resolves it
 - **U7 macOS.** wgpu (Metal) and wasmtime are known good on aarch64-darwin;
   the rest of the dependency set is untested (issue 27). Signpost: a green
   macOS build.
+- **U9 Shadowed Lua paths.** Four `lua/` files (`lua/sim/unit.lua`,
+  `lua/sim/projectile.lua`, `lua/sim/prop.lua`, `lua/simutils.lua`) exist in
+  both `lua.scd` and `mohodata.scd` with different contents; the archive layer
+  reads the `lua.scd` copy (docs/specs/formats.md, the mount-order clause),
+  which the sim specification's citations match, but which copy the original
+  engine reads is unestablished and the sim campaign's citations rest on it.
+  Signpost: a pinned engine citation of the mount precedence, or an
+  observation of the running original reading one of the four.
 - **U8 Built-in versus plugin.** Which v0 behaviours (AI in particular) ship
   as first-party Wasm plugins rather than built-in Rust. Signpost: an ADR
   after the spec campaign.
