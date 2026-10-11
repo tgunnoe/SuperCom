@@ -62,3 +62,74 @@ fn load_into_a_file_instead_of_a_directory_is_not_unimplemented() {
         "expected Cache or Archive, got {result:?}"
     );
 }
+
+/// Why the cache's encoding must be correctly rounded: `serde_json` without
+/// `float_roundtrip` parses some literals one ulp off.
+#[cfg(test)]
+mod float_bits {
+    /// Encodes and decodes `values` through the cache's own serializer and
+    /// deserializer (`serde_json::to_vec` / `from_slice`).
+    fn round_trip(values: &[f64]) -> Result<Vec<f64>, serde_json::Error> {
+        let bytes = serde_json::to_vec(values)?;
+        serde_json::from_slice(&bytes)
+    }
+
+    fn assert_bits_equal(values: &[f64]) {
+        let back = round_trip(values);
+        assert!(back.is_ok(), "round trip failed: {:?}", back.as_ref().err());
+        let back = back.unwrap_or_default();
+        assert_eq!(back.len(), values.len());
+        for (a, b) in values.iter().zip(&back) {
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "{a:e} came back as {b:e}: bits {:#018x} vs {:#018x}",
+                a.to_bits(),
+                b.to_bits()
+            );
+        }
+    }
+
+    /// Pins bit-exact bits for a fixed literal set: edge values and the
+    /// literal found to misparse without `float_roundtrip`.
+    #[test]
+    fn round_trip_of_literals_keeps_bits() {
+        let mut values = vec![
+            0.0,
+            -0.0,
+            0.1,
+            1.0 / 3.0,
+            f64::MAX,
+            f64::MIN_POSITIVE,
+            f64::from_bits(1),
+            1e23,
+            5e-324,
+            2.2250738585072011e-308,
+        ];
+        values.extend(MISPARSED_BITS.map(f64::from_bits));
+        assert_bits_equal(&values);
+    }
+
+    /// Bit patterns that misparse without the feature, found by sweep:
+    /// `-1.1193133179981887e-17` (0xbc69cf4276846d19) parses as
+    /// 0xbc69cf4276846d1a.
+    const MISPARSED_BITS: [u64; 1] = [0xbc69_cf42_7684_6d19];
+
+    /// Pins bit-exact bits over 100,000 finite patterns from a seeded
+    /// linear congruential generator.
+    #[test]
+    fn round_trip_sweep_of_bit_patterns_keeps_bits() {
+        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut values = Vec::with_capacity(100_000);
+        while values.len() < 100_000 {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            let v = f64::from_bits(state);
+            if v.is_finite() {
+                values.push(v);
+            }
+        }
+        assert_bits_equal(&values);
+    }
+}
