@@ -267,3 +267,76 @@ fn unit_contract_requires_categories() {
     assert_eq!(validate(Kind::Unit, &body), missing);
     assert_eq!(unit_from_value("xyz0006", &body).map(|_| ()), missing);
 }
+
+/// A call nested `depth` deep, `C(C(...C(1)...))`, built without recursion.
+fn nested_call(depth: usize) -> Value {
+    let mut value = num(1.0);
+    for _ in 0..depth {
+        value = Value::Call {
+            name: "C".to_owned(),
+            args: vec![value],
+        };
+    }
+    value
+}
+
+/// A unit body whose `Economy` carries the undeclared field `Z` holding
+/// `extra`.
+fn unit_with_economy_field(name: &str, extra: Value) -> Value {
+    let mut entries = minimal_unit();
+    entries.retain(|(k, _)| *k != "Economy");
+    let economy = Value::Table(vec![
+        (Key::Name("BuildCostEnergy".to_owned()), num(1.0)),
+        (Key::Name("BuildCostMass".to_owned()), num(1.0)),
+        (Key::Name(name.to_owned()), extra),
+    ]);
+    let mut body = table(entries);
+    if let Value::Table(rows) = &mut body {
+        rows.push((Key::Name("Economy".to_owned()), economy));
+    }
+    body
+}
+
+/// A field no contract declares never reaches Nickel: a 200-deep nested call
+/// in an undeclared `Economy` field validates on a 2 MiB thread, where the
+/// whole subtree rendered into the evaluator once overflowed its stack and
+/// aborted the process.
+#[test]
+fn deep_nesting_in_an_undeclared_field_does_not_abort() {
+    let body = unit_with_economy_field("Z", nested_call(200));
+    let result = std::thread::Builder::new()
+        .stack_size(2 << 20)
+        .spawn(move || validate(Kind::Unit, &body))
+        .expect("spawn")
+        .join()
+        .expect("validate must not panic");
+    assert_eq!(result, Ok(()));
+}
+
+/// Crafted strings stay data: a category that tries to interpolate or close
+/// the string is a vocabulary error, never an import or evaluation error,
+/// and crafted field names in a declared block never change the verdict.
+#[test]
+fn injection_attempts_in_strings_and_field_names_stay_data() {
+    let crafted = [
+        "%{ import \"/nonexistent\" }",
+        "\" | { x = import \"/nonexistent\" } + \"",
+        "\nimport \"/nonexistent\"",
+        "\\\" } + import \"/nonexistent\"",
+        "\u{0}\u{1}\u{7f}\u{c8}\u{ff}",
+    ];
+    for text in crafted {
+        let mut entries = minimal_unit();
+        entries.retain(|(k, _)| *k != "Categories");
+        entries.push(("Categories", list(vec![s(text)])));
+        match validate(Kind::Unit, &table(entries)) {
+            Err(Error::Contract { path, reason }) => {
+                assert!(path.starts_with("Categories"), "path {path:?}");
+                assert!(!reason.contains("import"), "reason {reason:?}");
+            }
+            other => panic!("expected a vocabulary Contract error for {text:?}, got {other:?}"),
+        }
+        let body = unit_with_economy_field(text, s(text));
+        assert_eq!(validate(Kind::Unit, &body), Ok(()), "field name {text:?}");
+    }
+}
