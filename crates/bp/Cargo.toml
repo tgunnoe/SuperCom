@@ -1,0 +1,18 @@
+[package]
+description  = "Parser for the data subset of the Lua dialect the blueprint and map files use"
+edition      = { workspace = true }
+license      = { workspace = true }
+name         = "supercom-bp"
+publish      = false
+repository   = { workspace = true }
+rust-version = { workspace = true }
+version      = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+supercom-scd     = { path = "../scd", version = "0.0.1" }
+supercom-testkit = { path = "../testkit", version = "0.0.1" }

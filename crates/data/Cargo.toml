@@ -1,0 +1,21 @@
+[package]
+description  = "Nickel contracts and the typed v0 model of unit, projectile, and prop blueprints"
+edition      = { workspace = true }
+license      = { workspace = true }
+name         = "supercom-data"
+publish      = false
+repository   = { workspace = true }
+rust-version = "1.89"
+version      = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+nickel-lang-core = { default-features = false, version = "0.19" }
+serde            = { features = ["derive"], version = "1" }
+supercom-bp      = { path = "../bp", version = "0.0.1" }
+
+[dev-dependencies]
+supercom-scd     = { path = "../scd", version = "0.0.1" }
+supercom-testkit = { path = "../testkit", version = "0.0.1" }
