@@ -19,7 +19,7 @@ All 568 installed unit bodies MUST pass the unit contract and project into the t
 ## Optional fields and lists
 
 **DAT-005** `design` `test:minimal_unit_projects_with_absent_fields_as_none`
-A scalar field that the installed data omits MUST be an `Option` in the typed model and read as `None` when absent, and a list it omits MUST be an empty `Vec`; the model MUST NOT invent an engine default. The optional scalars are `BuildTime`, `BuildRate`, the production and storage fields, `MaxSpeed`, `TurnRate`, `RegenRate`, `VisionRadius`, `RadarRadius`, `RateOfFire`, `MaxRadius`, and the weapon's `Label` and `ProjectileId`; the optional blocks are `Intel` and the `Weapon` list.
+A scalar field that the installed data omits MUST be an `Option` in the typed model and read as `None` when absent, and a list it omits MUST be an empty `Vec`; the model MUST NOT invent an engine default. The optional scalars are `BuildTime`, `BuildRate`, the production and storage fields, `MaxSpeed`, `TurnRate`, `RegenRate`, `VisionRadius`, `RadarRadius`, `RateOfFire`, `MaxRadius`, and the weapon's `Label` and `ProjectileId`, together with the optional scalars that DAT-032 to DAT-036 pin (the maintenance drain, the extra physics scalars and the build restriction, the footprint's four fields, and the weapon and projectile-physics scalars and flags); the optional lists are `BuildableCategory`, `TargetPriorities`, and `FireTargetLayerCapsTable`; the optional blocks are `Intel`, `Footprint`, and the `Weapon` list. The blocks `General` (with its `CommandCaps` table) and the projectile `Physics`, and the weapon's `DamageType` and `WeaponCategory`, are required, as every installed entry carries them.
 
 **DAT-006** `game-data` `script:tools/spec_eval/data-model/absence.py DAT-006`
 The optional fields of DAT-005 are optional exactly where the installed data omits them: `BuildTime` is absent in 16 of 568 units, `VisionRadius` in 4 of 395 `Intel` blocks, `RateOfFire` in 91 and `MaxRadius` in 86 of 494 weapon entries (the 91 holding 90 and the 86 holding all 86 with `WeaponCategory` `Death`), and `Categories` in 90 of 365 projectiles and 37 of 336 props.
@@ -41,6 +41,28 @@ Whatever the projection accepts, the contract MUST accept, modulo the vocabulary
 
 **DAT-012** `design` `source:crates/data/src/lib.rs`
 The data crate SHOULD offer one public way to obtain a ⟨Unit: Unit⟩ from a parsed body, a single validated entrypoint that applies the contract and then projects. Today a consumer calls `validate` and then `unit_from_value`, two calls to be made in that order, and the public projections accept a few shapes that the contract rejects, through the vocabulary alone. Adopting the entrypoint makes the projections private, which changes the existing tests that call them directly; that change is an open frontier, with the single-schema work of DAT-029 as its signpost.
+
+## Simulation fields
+
+The fields below extend the typed model for the simulation, following the rule of DAT-005. Each count is measured over the installed Forged Alliance by a walk of the parsed value tree and pinned through the projection.
+
+**DAT-032** `game-data` `test:conformance_data_build_and_placement_fields`
+Among the 568 installed units, `Economy.BuildableCategory` MUST project for 105 units (215 expressions in all, each kept as stored), `Economy.MaintenanceConsumptionPerSecondEnergy` for 84 (integers 0 to 5000), and `Physics.BuildRestriction` for 16: `RULEUBR_OnMassDeposit` on 12 and `RULEUBR_OnHydrocarbonDeposit` on 4.
+
+**DAT-033** `game-data` `test:conformance_data_physics_and_footprint_fields`
+Among the 568 installed units, `Physics.MaxAcceleration` MUST project for 149 (0.38 to 10.5), `MaxBrake` for 124 (1 to 10), `Elevation` for 95 (-5 to 75), and `MinSpeedPercent` for 519. A top-level `Footprint` table MUST project for 402 units, `SizeX` and `SizeZ` for 363 of them, `MinWaterDepth` for 48 (0 to 2), and `MaxWaterDepth` for none: no installed footprint names it, so the field stays an `Option` that the installed data never fills.
+
+**DAT-034** `game-data` `test:conformance_data_command_caps_shape`
+All 568 installed units MUST carry a `General.CommandCaps` table whose values are all booleans, and 22 distinct keys appear across them. 21 of those keys are true on at least one unit; `RULEUCC_Teleport` appears on 4 units and is true on none, so the 21 capabilities of SIM-016 are the granted ones. The projection MUST list the true keys of each unit in ascending order, which gives 235 units granting `RULEUCC_Move`, 191 `RULEUCC_Attack`, and 294 `RULEUCC_Stop`, agreeing with SIM-016, and for the other 18 granted keys 227 `RULEUCC_Guard`, 228 `RULEUCC_Patrol`, 236 `RULEUCC_RetaliateToggle`, 137 `RULEUCC_CallTransport`, 113 `RULEUCC_Pause`, 30 `RULEUCC_Repair`, 29 `RULEUCC_Reclaim`, 27 `RULEUCC_Capture`, 21 `RULEUCC_Transport`, 13 `RULEUCC_Dive`, 42 `RULEUCC_Dock`, 10 `RULEUCC_Ferry`, 9 `RULEUCC_Nuke`, 9 `RULEUCC_SiloBuildNuke`, 8 `RULEUCC_SiloBuildTactical`, 4 `RULEUCC_Overcharge`, 4 `RULEUCC_Tactical`, and 3 `RULEUCC_Sacrifice`.
+
+**DAT-035** `game-data` `test:conformance_data_weapon_fields`
+Among the 494 weapon entries of the installed units, the projection MUST fill `DamageRadius` for 266 (0 to 20), `DamageFriendly` for 188, `MinRadius` for 87, `MuzzleVelocity` for 383 (0 to 160), `ProjectilesPerOnFire` for 255 (1 to 25), `MuzzleSalvoSize` for 402 (0 to 15), `MuzzleSalvoDelay` for 402, `RackSalvoReloadTime` and `RackSalvoChargeTime` for 393 each, `RackSalvoFiresAfterCharge` for 24, `TrackingRadius` for 309, `FiringTolerance` for 457, `TargetCheckInterval` for 404, and `Turreted` for 399. `DamageType` is on all 494 (`Normal` 484, `Overcharge` 5, `Deathnuke` 4, `EMP` 1), `WeaponCategory` on all 494 with 12 values, and `BallisticArc` on 393 (`RULEUBA_None` 294, `RULEUBA_LowArc` 83, `RULEUBA_HighArc` 16). `TargetPriorities` is on 337 entries (2,036 expressions, 21 distinct), and `FireTargetLayerCapsTable` on 395 (747 entries over the layers `Air`, `Land`, `Seabed`, `Sub`, and `Water`, sorted by layer name in the projection). `ManualFire` is on 22 entries in two stored kinds, 13 booleans and 9 numbers all equal to 1, and the projection reads all 22 as true.
+
+**DAT-036** `game-data` `test:conformance_data_projectile_physics_fields`
+All 365 installed projectiles (287 in `projectiles.scd` and 78 in `effects.scd`) MUST carry a `Physics` table. The projection MUST fill `InitialSpeed` for 287 (0 to 120), `MaxSpeed` for 175 (0 to 600), `Acceleration` for 173, `TurnRate` for 249, `Lifetime` for 150, `TrackTarget` for 153, `UseGravity` for 219, `LeadTarget` for 111, `VelocityAlign` for 327, and `DestroyOnWater` for 364.
+
+**DAT-037** `design` `test:command_caps_are_the_sorted_true_keys_for_every_order_and_assignment`
+The extended projection follows the rule of DAT-005 and the Nickel-first data model of `docs/adr/0002-data-model-nickel.md`: an absent scalar or flag reads as `None`, an absent list as empty, and an absent `Footprint` as `None`. `CommandCaps` projects to its true keys in ascending order whatever the order the table stores them in, and `ManualFire` stored as the number 1 reads as true while any other number is a type error. A required field (`General`, `CommandCaps`, `DamageType`, `WeaponCategory`, the projectile `Physics`) that is absent is `Missing`, and the contract in `crates/data/nickel` declares each new field with the kind the data shows, `ManualFire` being the one `Dyn`. The contract and the projection MUST refuse the same bodies, as DAT-011 requires.
 
 ## Catalog and ids
 
@@ -64,8 +86,8 @@ Loading a catalog twice through the cache MUST leave a cache file after the firs
 **DAT-018** `game-data` `test:conformance_import_cache_key_is_stable`
 The cache key MUST be non-empty and the same on two calls over an unchanged install.
 
-**DAT-019** `design` `test:conformance_import_cache_format_is_two`
-The cache key MUST lead with the format version (currently `v2`), so a cache written under another format version never matches and is a miss.
+**DAT-019** `design` `test:conformance_import_cache_format_is_three`
+The cache key MUST lead with the format version (currently `v3`), so a cache written under another format version never matches and is a miss.
 
 **DAT-020** `design` `test:float_bits::round_trip_sweep_of_bit_patterns_keeps_bits`
 The cache's encoding MUST round-trip every finite `f64` bit-exactly (the test sweeps 100,000 bit patterns from a seeded generator; the literal set is `float_bits::round_trip_of_literals_keeps_bits`), because the catalog is a candidate input to the lockstep initial state (DAT-024).
@@ -105,4 +127,4 @@ The target, which the interim of DAT-028 does not yet meet, is one schema: Nicke
 The category vocabulary MUST be the 152-tag base of DAT-003 plus the categories that a mod overlay declares, and the contract MUST be assembled from them per load, never fixed at compile time. Today the vocabulary is spliced into the contract once at compile time (`CATEGORIES_NCL` in `crates/data/src/lib.rs`), so an overlay cannot extend it; that is a named gap.
 
 **DAT-031** `design` `test:projection_ignores_fields_outside_the_v0_set`
-A field that neither the contract nor the projection names MUST NOT change the verdict or the projected value. Because the records are open, a misspelt optional field is such a field: it is silently absent, not an error. A consumer that needs misspelling to fail MUST be given a stricter contract; none exists in v0.
+A field that neither the contract nor the projection names MUST NOT change the verdict or the projected value, whether it sits at the top of the body or inside a block the model reads (`General`, `Footprint`, `Physics`, a `Weapon` entry, the projectile `Physics`). Because the records are open, a misspelt optional field is such a field: it is silently absent, not an error. A consumer that needs misspelling to fail MUST be given a stricter contract; none exists in v0.
