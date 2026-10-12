@@ -30,6 +30,7 @@ let categories = import "categories.ncl" in
         Elevation | Number | optional,
         MinSpeedPercent | Number | optional,
         BuildRestriction | String | optional,
+        BuildOnLayerCaps | { _ | Bool } | optional,
         ..
       },
     Defense

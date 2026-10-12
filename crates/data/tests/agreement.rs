@@ -317,3 +317,66 @@ fn a_fully_populated_unit_validates() {
     ]);
     assert_both(&body, &Ok(()));
 }
+
+/// `ManualFire` of 2 is refused by both, with the same path.
+#[test]
+fn agreement_on_a_manual_fire_of_two() {
+    assert_both(
+        &weapon_with("ManualFire", num(2.0)),
+        &type_error("Weapon[0].ManualFire", "Boolean"),
+    );
+}
+
+/// A string `ManualFire` is refused by both, with the same path.
+#[test]
+fn agreement_on_a_string_manual_fire() {
+    assert_both(
+        &weapon_with("ManualFire", s("yes")),
+        &type_error("Weapon[0].ManualFire", "Boolean"),
+    );
+}
+
+/// A `BuildOnLayerCaps` value that is not a boolean is refused by both.
+#[test]
+fn agreement_on_a_non_boolean_build_on_layer_cap() {
+    let physics = table(vec![
+        name("MotionType", s("RULEUMT_Land")),
+        name(
+            "BuildOnLayerCaps",
+            table(vec![name("LAYER_Land", s("yes"))]),
+        ),
+    ]);
+    assert_both(
+        &with("Physics", physics),
+        &type_error("Physics.BuildOnLayerCaps.LAYER_Land", "Boolean"),
+    );
+}
+
+/// A projectile with a mistyped `Physics` field gets the same verdict
+/// from `validate` as from the projection.
+#[test]
+fn agreement_on_a_mistyped_projectile_physics_field() {
+    let body = table(vec![name(
+        "Physics",
+        table(vec![name("TrackTarget", num(1.0))]),
+    )]);
+    let expected = type_error("Physics.TrackTarget", "Boolean");
+    assert_eq!(validate(Kind::Projectile, &body), expected);
+    assert_eq!(
+        supercom_data::projectile_from_value("x", &body).map(|_| ()),
+        expected
+    );
+}
+
+/// The ManualFire rule in one place: the boolean and the number 1 are
+/// accepted, the number 2 and a string are refused, by both verdicts.
+#[test]
+fn manual_fire_accepts_one_and_refuses_two_and_a_string_in_both_verdicts() {
+    assert_both(&weapon_with("ManualFire", num(1.0)), &Ok(()));
+    for refused in [num(2.0), s("yes")] {
+        assert_both(
+            &weapon_with("ManualFire", refused),
+            &type_error("Weapon[0].ManualFire", "Boolean"),
+        );
+    }
+}

@@ -365,6 +365,68 @@ fn conformance_data_command_caps_shape() {
     assert_eq!(granted, expected, "units granted each capability");
 }
 
+/// Pins the layer capabilities (DAT-039): all 568 installed units carry a
+/// `Physics.BuildOnLayerCaps` table of booleans over the six keys of
+/// SIM-030, and the projection lists the true keys of each unit, sorted.
+#[test]
+fn conformance_data_build_on_layer_caps() {
+    let Some(fa) = supercom_testkit::require_game() else {
+        return;
+    };
+    let (_, bodies) = unit_bodies(&fa);
+    let tables: Vec<_> = bodies
+        .iter()
+        .filter_map(
+            |(_, b)| match b.get("Physics").and_then(|p| p.get("BuildOnLayerCaps")) {
+                Some(Value::Table(entries)) => Some(entries.clone()),
+                _ => None,
+            },
+        )
+        .collect();
+    assert_eq!(tables.len(), 568, "units with BuildOnLayerCaps");
+    let mut true_counts: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
+    for (key, value) in tables.iter().flatten() {
+        let Key::Name(name) = key else {
+            panic!("a positional BuildOnLayerCaps key");
+        };
+        let Value::Bool(b) = value else {
+            panic!("{name} is not a boolean: {value:?}");
+        };
+        *true_counts.entry(name.clone()).or_default() += usize::from(*b);
+    }
+    let expected: std::collections::BTreeMap<String, usize> = [
+        ("LAYER_Air", 62),
+        ("LAYER_Land", 440),
+        ("LAYER_Orbit", 0),
+        ("LAYER_Seabed", 23),
+        ("LAYER_Sub", 18),
+        ("LAYER_Water", 87),
+    ]
+    .into_iter()
+    .map(|(k, n)| (k.to_owned(), n))
+    .collect();
+    assert_eq!(true_counts, expected, "true count per BuildOnLayerCaps key");
+
+    let mut projected: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
+    for unit in projected_units(&fa) {
+        let mut sorted = unit.physics.build_on_layer_caps.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(
+            unit.physics.build_on_layer_caps, sorted,
+            "{} sorted",
+            unit.id
+        );
+        for cap in &unit.physics.build_on_layer_caps {
+            *projected.entry(cap.clone()).or_default() += 1;
+        }
+    }
+    projected.entry("LAYER_Orbit".to_owned()).or_default();
+    assert_eq!(projected, expected, "units projecting each layer");
+}
+
 type WeaponNumber = fn(&supercom_data::Weapon) -> Option<f64>;
 type WeaponFlag = fn(&supercom_data::Weapon) -> Option<bool>;
 type ProjectileNumber = fn(&Projectile) -> Option<f64>;

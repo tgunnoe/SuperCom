@@ -66,6 +66,9 @@ pub struct Physics {
     pub min_speed_percent: Option<f64>,
     /// Where the unit may be built, such as `RULEUBR_OnMassDeposit`.
     pub build_restriction: Option<String>,
+    /// The `BuildOnLayerCaps` keys whose value is true, sorted ascending;
+    /// empty when the table is absent.
+    pub build_on_layer_caps: Vec<String>,
 }
 
 /// A unit's footprint table; the top-level `Footprint` of 402 of 568
@@ -357,7 +360,7 @@ enum Decl {
 fn field_decl(name: &str) -> Decl {
     match name {
         "BuildableCategory" | "TargetPriorities" => Decl::List,
-        "CommandCaps" | "FireTargetLayerCapsTable" => Decl::Map,
+        "CommandCaps" | "FireTargetLayerCapsTable" | "BuildOnLayerCaps" => Decl::Map,
         _ => Decl::Leaf,
     }
 }
@@ -383,6 +386,7 @@ const PHYSICS: &[&str] = &[
     "Elevation",
     "MinSpeedPercent",
     "BuildRestriction",
+    "BuildOnLayerCaps",
 ];
 const DEFENSE: &[&str] = &["Health", "MaxHealth", "ArmorType", "RegenRate"];
 const INTEL: &[&str] = &["VisionRadius", "RadarRadius"];
@@ -834,6 +838,7 @@ fn physics_of(body: &Value) -> Result<Physics, Error> {
         elevation: opt_number(t, "Elevation", "Physics")?,
         min_speed_percent: opt_number(t, "MinSpeedPercent", "Physics")?,
         build_restriction: opt_string(t, "BuildRestriction", "Physics")?,
+        build_on_layer_caps: Vec::new(),
     })
 }
 
@@ -1029,19 +1034,20 @@ pub fn prop_from_value(id: &str, body: &Value) -> Result<Prop, Error> {
 
 #[cfg(test)]
 mod declared_fields {
-    //! The field names the unit contract declares, read from its text,
-    //! equal the renderer's lists, so the two cannot drift apart silently.
+    //! The field names the contracts declare, read from their text, equal
+    //! the renderer's lists, so the two cannot drift apart silently.
 
     use std::collections::BTreeSet;
 
     use super::{
-        DEFENSE, ECONOMY, FOOTPRINT, GENERAL, INTEL, PHYSICS, UNIT_KEYS, UNIT_NCL, WEAPON,
+        DEFENSE, ECONOMY, FOOTPRINT, GENERAL, INTEL, PHYSICS, PROJECTILE_KEYS, PROJECTILE_NCL,
+        PROJECTILE_PHYSICS, UNIT_KEYS, UNIT_NCL, WEAPON,
     };
 
-    /// The identifiers `unit.ncl` declares, keyed by top-level block.
-    fn declared() -> Vec<(String, BTreeSet<String>)> {
+    /// The identifiers `source` declares, keyed by top-level block.
+    fn declared(source: &str) -> Vec<(String, BTreeSet<String>)> {
         let mut blocks: Vec<(String, BTreeSet<String>)> = Vec::new();
-        for line in UNIT_NCL.lines() {
+        for line in source.lines() {
             let indent = line.len() - line.trim_start().len();
             let word: String = line
                 .trim_start()
@@ -1068,7 +1074,7 @@ mod declared_fields {
 
     #[test]
     fn the_unit_contract_declares_the_rendered_keys() {
-        let blocks = declared();
+        let blocks = declared(UNIT_NCL);
         let keys: BTreeSet<String> = blocks.iter().map(|(k, _)| k.clone()).collect();
         let rendered: BTreeSet<String> = UNIT_KEYS.iter().map(|(k, _)| (*k).to_owned()).collect();
         assert_eq!(keys, rendered);
@@ -1088,5 +1094,197 @@ mod declared_fields {
                 .unwrap_or_default();
             assert_eq!(fields, set(list), "{block}");
         }
+    }
+
+    #[test]
+    fn the_projectile_contract_declares_the_rendered_keys() {
+        let blocks = declared(PROJECTILE_NCL);
+        let keys: BTreeSet<String> = blocks.iter().map(|(k, _)| k.clone()).collect();
+        let rendered: BTreeSet<String> = PROJECTILE_KEYS
+            .iter()
+            .map(|(k, _)| (*k).to_owned())
+            .collect();
+        assert_eq!(keys, rendered);
+        let physics = blocks
+            .iter()
+            .find(|(k, _)| k == "Physics")
+            .map(|(_, f)| f.clone())
+            .unwrap_or_default();
+        assert_eq!(physics, set(PROJECTILE_PHYSICS));
+    }
+}
+
+#[cfg(test)]
+mod refusals {
+    //! The contract's refuse side, exercised directly: each body below is one
+    //! the projection also refuses, so [`validate`] never reaches Nickel with
+    //! it, and only a call to [`nickel_check`] shows the contract itself
+    //! holds the line.
+
+    use supercom_bp::{Key, Value};
+
+    use super::{Kind, nickel_check};
+
+    fn table(entries: Vec<(&str, Value)>) -> Value {
+        Value::Table(
+            entries
+                .into_iter()
+                .map(|(k, v)| (Key::Name(k.to_owned()), v))
+                .collect(),
+        )
+    }
+
+    fn s(text: &str) -> Value {
+        Value::Str(text.to_owned())
+    }
+
+    fn num(n: f64) -> Value {
+        Value::Number(n)
+    }
+
+    fn flag(b: bool) -> Value {
+        Value::Bool(b)
+    }
+
+    fn unit_with_weapon_field(value: Value) -> Value {
+        unit_with_weapon("ManualFire", value)
+    }
+
+    fn unit_with_weapon(field: &str, value: Value) -> Value {
+        table(vec![
+            ("Categories", Value::Table(vec![(Key::Index(1), s("LAND"))])),
+            (
+                "Economy",
+                table(vec![
+                    ("BuildCostEnergy", num(1.0)),
+                    ("BuildCostMass", num(1.0)),
+                ]),
+            ),
+            ("Physics", table(vec![("MotionType", s("RULEUMT_Land"))])),
+            (
+                "Defense",
+                table(vec![
+                    ("Health", num(1.0)),
+                    ("MaxHealth", num(1.0)),
+                    ("ArmorType", s("Normal")),
+                ]),
+            ),
+            ("General", table(vec![("CommandCaps", table(vec![]))])),
+            (
+                "Weapon",
+                Value::Table(vec![(
+                    Key::Index(1),
+                    table(vec![
+                        ("Damage", num(1.0)),
+                        ("DamageType", s("Normal")),
+                        ("WeaponCategory", s("Direct Fire")),
+                        (field, value),
+                    ]),
+                )]),
+            ),
+        ])
+    }
+
+    fn unit_with_general(caps: Value) -> Value {
+        table(vec![
+            ("Categories", Value::Table(vec![(Key::Index(1), s("LAND"))])),
+            (
+                "Economy",
+                table(vec![
+                    ("BuildCostEnergy", num(1.0)),
+                    ("BuildCostMass", num(1.0)),
+                ]),
+            ),
+            ("Physics", table(vec![("MotionType", s("RULEUMT_Land"))])),
+            (
+                "Defense",
+                table(vec![
+                    ("Health", num(1.0)),
+                    ("MaxHealth", num(1.0)),
+                    ("ArmorType", s("Normal")),
+                ]),
+            ),
+            ("General", table(vec![("CommandCaps", caps)])),
+        ])
+    }
+
+    fn projectile_with_physics(entries: Vec<(&str, Value)>) -> Value {
+        table(vec![("Physics", table(entries))])
+    }
+
+    #[test]
+    fn the_contract_refuses_a_manual_fire_of_two() {
+        assert!(nickel_check(Kind::Unit, &unit_with_weapon_field(num(2.0))).is_err());
+    }
+
+    #[test]
+    fn the_contract_refuses_a_manual_fire_string() {
+        assert!(nickel_check(Kind::Unit, &unit_with_weapon_field(s("yes"))).is_err());
+    }
+
+    #[test]
+    fn the_contract_accepts_the_three_manual_fire_values() {
+        for v in [flag(true), flag(false), num(1.0)] {
+            assert_eq!(nickel_check(Kind::Unit, &unit_with_weapon_field(v)), Ok(()));
+        }
+    }
+
+    #[test]
+    fn the_contract_refuses_a_string_command_cap() {
+        let caps = table(vec![("RULEUCC_Move", s("yes"))]);
+        assert!(nickel_check(Kind::Unit, &unit_with_general(caps)).is_err());
+    }
+
+    #[test]
+    fn the_contract_refuses_a_numeric_fire_target_layer_cap() {
+        let table_value = table(vec![("Land", num(3.0))]);
+        let body = unit_with_weapon("FireTargetLayerCapsTable", table_value);
+        assert!(nickel_check(Kind::Unit, &body).is_err());
+    }
+
+    #[test]
+    fn the_contract_refuses_a_numeric_track_target() {
+        let body = projectile_with_physics(vec![("TrackTarget", num(1.0))]);
+        assert!(nickel_check(Kind::Projectile, &body).is_err());
+    }
+
+    #[test]
+    fn the_projectile_contract_accepts_every_declared_field() {
+        let body = table(vec![
+            (
+                "Categories",
+                Value::Table(vec![(Key::Index(1), s("PROJECTILE"))]),
+            ),
+            (
+                "Physics",
+                table(vec![
+                    ("InitialSpeed", num(1.0)),
+                    ("MaxSpeed", num(2.0)),
+                    ("Acceleration", num(3.0)),
+                    ("TurnRate", num(4.0)),
+                    ("Lifetime", num(5.0)),
+                    ("TrackTarget", flag(true)),
+                    ("UseGravity", flag(false)),
+                    ("LeadTarget", flag(true)),
+                    ("VelocityAlign", flag(false)),
+                    ("DestroyOnWater", flag(true)),
+                ]),
+            ),
+        ]);
+        assert_eq!(nickel_check(Kind::Projectile, &body), Ok(()));
+    }
+
+    #[test]
+    fn the_contract_refuses_a_non_boolean_layer_cap() {
+        let physics = table(vec![
+            ("MotionType", s("RULEUMT_Land")),
+            ("BuildOnLayerCaps", table(vec![("LAYER_Land", s("yes"))])),
+        ]);
+        let mut body = unit_with_general(table(vec![]));
+        if let Value::Table(entries) = &mut body {
+            entries.retain(|(k, _)| *k != Key::Name("Physics".to_owned()));
+            entries.push((Key::Name("Physics".to_owned()), physics));
+        }
+        assert!(nickel_check(Kind::Unit, &body).is_err());
     }
 }

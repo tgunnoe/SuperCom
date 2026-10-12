@@ -781,3 +781,94 @@ fn projection_ignores_undeclared_fields_inside_the_new_blocks() {
     );
     assert_eq!(plain, build(true));
 }
+
+/// `validate` runs the projection before the contract for a projectile, as
+/// for a unit, so a missing `Physics` is `Missing` at that path rather than
+/// a contract blame attributed to `Categories`.
+#[test]
+fn validate_reports_a_projectile_without_physics_as_missing() {
+    assert_eq!(
+        validate(Kind::Projectile, &table(vec![("Other", num(1.0))])),
+        Err(Error::Missing {
+            field: "Physics".into()
+        })
+    );
+}
+
+/// A mistyped projectile `Physics` field is a `Type` error at its path
+/// from `validate`, not a contract blame.
+#[test]
+fn validate_reports_a_mistyped_projectile_physics_field_at_its_path() {
+    let body = table(vec![("Physics", table(vec![("TrackTarget", num(1.0))]))]);
+    assert_eq!(
+        validate(Kind::Projectile, &body),
+        Err(Error::Type {
+            field: "Physics.TrackTarget".into(),
+            expected: "Boolean".into()
+        })
+    );
+}
+
+/// A projectile carrying every declared field validates.
+#[test]
+fn a_fully_populated_projectile_validates() {
+    let body = table(vec![
+        ("Categories", list(vec![s("PROJECTILE")])),
+        (
+            "Physics",
+            table(vec![
+                ("InitialSpeed", num(1.0)),
+                ("MaxSpeed", num(2.0)),
+                ("Acceleration", num(3.0)),
+                ("TurnRate", num(4.0)),
+                ("Lifetime", num(5.0)),
+                ("TrackTarget", flag(true)),
+                ("UseGravity", flag(false)),
+                ("LeadTarget", flag(true)),
+                ("VelocityAlign", flag(false)),
+                ("DestroyOnWater", flag(true)),
+            ]),
+        ),
+    ]);
+    assert_eq!(validate(Kind::Projectile, &body), Ok(()));
+}
+
+/// The layer capabilities are the true keys of the table, sorted
+/// ascending whatever the stored order, and empty when the table is absent.
+#[test]
+fn build_on_layer_caps_are_the_sorted_true_keys_and_empty_when_absent() {
+    let stored = table(vec![
+        ("LAYER_Water", flag(true)),
+        ("LAYER_Air", flag(false)),
+        ("LAYER_Land", flag(true)),
+        ("LAYER_Orbit", flag(false)),
+        ("LAYER_Seabed", flag(true)),
+    ]);
+    let physics = table(vec![
+        ("MotionType", s("RULEUMT_Land")),
+        ("BuildOnLayerCaps", stored),
+    ]);
+    let unit = unit_from_value("xyz0030", &minimal_with("Physics", physics)).expect("must project");
+    assert_eq!(
+        unit.physics.build_on_layer_caps,
+        ["LAYER_Land", "LAYER_Seabed", "LAYER_Water"]
+    );
+    let bare = unit_from_value("xyz0031", &table(minimal_unit())).expect("projects");
+    assert!(bare.physics.build_on_layer_caps.is_empty());
+}
+
+/// A layer capability that is not a boolean is a `Type` error at its path.
+#[test]
+fn a_non_boolean_build_on_layer_cap_names_its_path() {
+    let physics = table(vec![
+        ("MotionType", s("RULEUMT_Land")),
+        ("BuildOnLayerCaps", table(vec![("LAYER_Land", s("yes"))])),
+    ]);
+    assert_eq!(
+        unit_from_value("x", &minimal_with("Physics", physics)).map(|_| ()),
+        Err(Error::Type {
+            field: "Physics.BuildOnLayerCaps.LAYER_Land".into(),
+            expected: "Boolean".into()
+        })
+    );
+}
