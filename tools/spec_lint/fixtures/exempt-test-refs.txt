@@ -1,0 +1,4 @@
+# the exempt IDs of the green test-reference fixture
+FMT-001
+FMT-002
+FMT-003
