@@ -45,6 +45,10 @@ fn put_len(out: &mut Vec<u8>, len: usize) {
 /// (raw `i64` bits, LE64), then the queued orders (LE32 count, each in
 /// [`crate::Order::encode_into`]'s encoding, front to back). The chain head is
 /// not part of S.
+///
+/// A step serializes after advancing the tick, so the bytes of the tick
+/// that just ran (`t`) carry the tick field `t+1` (the state after the
+/// advance), while the chain link over them is labelled `t`.
 pub fn serialize(state: &State, out: &mut Vec<u8>) {
     out.extend_from_slice(&state.tick.0.to_le_bytes());
     out.extend_from_slice(&state.seed.to_le_bytes());
