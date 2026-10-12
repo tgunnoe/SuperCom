@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Prove that crates/sim/clippy.toml bites: a platform transcendental and a
-# filesystem read in non-test code fail `cargo clippy -D warnings`, and an
-# unwrap inside a test passes. Exits 0 only when all three behave so.
+# Prove that crates/sim/clippy.toml bites: a platform transcendental (sin, and
+# sin_cos from the second tranche) and a filesystem read in non-test code fail
+# `cargo clippy -D warnings`, and an unwrap inside a test passes. Exits 0 only
+# when all four behave so.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -33,6 +34,7 @@ run() {
 
 status=0
 run sin_in_code 'pub fn f(x: f64) -> f64 { x.sin() }' fail clippy::disallowed_methods || status=1
+run sin_cos_in_code 'pub fn f(x: f64) -> (f64, f64) { x.sin_cos() }' fail clippy::disallowed_methods || status=1
 run fs_read_in_code 'pub fn f() -> Vec<u8> { std::fs::read("x").unwrap_or_default() }' fail clippy::disallowed_methods || status=1
 run unwrap_in_test '#[cfg(test)]
 mod tests {
