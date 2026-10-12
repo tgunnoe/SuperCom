@@ -58,6 +58,7 @@ fn baseline() -> Vec<(Key, Value)> {
                 name("ArmorType", s("Normal")),
             ]),
         ),
+        name("General", table(vec![name("CommandCaps", table(vec![]))])),
     ]
 }
 
@@ -161,6 +162,8 @@ fn a_fully_populated_unit_validates() {
         table(vec![
             name("Label", s(label)),
             name("Damage", num(10.0)),
+            name("DamageType", s("Normal")),
+            name("WeaponCategory", s("Direct Fire")),
             name("RateOfFire", num(0.5)),
             name("MaxRadius", num(30.0)),
             name("ProjectileId", s("/projectiles/x/x_proj.bp")),
@@ -206,6 +209,7 @@ fn a_fully_populated_unit_validates() {
             ]),
         ),
         name("Weapon", list(vec![weapon("Gun"), weapon("Missile")])),
+        name("General", table(vec![name("CommandCaps", table(vec![]))])),
     ]);
     assert_both(&body, &Ok(()));
 }

@@ -56,6 +56,13 @@ fn minimal_unit() -> Vec<(&'static str, Value)> {
                 ("ArmorType", s("Normal")),
             ]),
         ),
+        (
+            "General",
+            table(vec![(
+                "CommandCaps",
+                table(vec![("RULEUCC_Move", Value::Bool(true))]),
+            )]),
+        ),
         ("InventedField", s("left alone")),
     ]
 }
@@ -107,11 +114,17 @@ fn optional_blocks_and_weapons_project() {
             table(vec![
                 ("Label", s("Gun")),
                 ("Damage", num(12.5)),
+                ("DamageType", s("Normal")),
+                ("WeaponCategory", s("Direct Fire")),
                 ("RateOfFire", num(2.0)),
                 ("MaxRadius", num(30.0)),
                 ("ProjectileId", s("/projectiles/Xyz/Xyz_proj.bp")),
             ]),
-            table(vec![("Damage", num(4.0))]),
+            table(vec![
+                ("Damage", num(4.0)),
+                ("DamageType", s("Normal")),
+                ("WeaponCategory", s("Death")),
+            ]),
         ]),
     ));
     let body = with(
@@ -224,6 +237,7 @@ fn unknown_unit_category_violates_the_contract() {
 fn projectile_and_prop_project_id_and_categories() {
     let body = table(vec![
         ("Categories", list(vec![s("PROJECTILE"), s("DIRECTFIRE")])),
+        ("Physics", table(vec![])),
         ("Other", num(1.0)),
     ]);
     let projectile = projectile_from_value("xyz_proj", &body).expect("projectile projects");
@@ -242,15 +256,26 @@ fn projectile_and_prop_project_id_and_categories() {
 fn projectile_and_prop_contracts_allow_absent_categories() {
     let good = table(vec![("Categories", list(vec![s("ANY")]))]);
     let bare = table(vec![("Other", num(1.0))]);
-    for kind in [Kind::Projectile, Kind::Prop] {
+    let bare_projectile = table(vec![("Physics", table(vec![]))]);
+    for (kind, bare) in [(Kind::Projectile, &bare_projectile), (Kind::Prop, &bare)] {
+        let good = if kind == Kind::Projectile {
+            with(
+                vec![("Categories", list(vec![s("ANY")]))],
+                "Physics",
+                table(vec![]),
+            )
+        } else {
+            good.clone()
+        };
         assert_eq!(validate(kind, &good), Ok(()), "{kind:?} good body");
         assert_eq!(
-            validate(kind, &bare),
+            validate(kind, bare),
             Ok(()),
             "{kind:?} body without Categories"
         );
     }
-    let projectile = projectile_from_value("xyz_proj", &bare).expect("projectile projects");
+    let projectile =
+        projectile_from_value("xyz_proj", &bare_projectile).expect("projectile projects");
     assert_eq!(projectile.categories, Vec::<String>::new());
     let prop = prop_from_value("xyz_prop", &bare).expect("prop projects");
     assert_eq!(prop.categories, Vec::<String>::new());

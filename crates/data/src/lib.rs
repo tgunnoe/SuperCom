@@ -40,6 +40,11 @@ pub struct Economy {
     pub storage_energy: Option<f64>,
     /// Mass storage.
     pub storage_mass: Option<f64>,
+    /// The `BuildableCategory` expressions as stored, one per table entry;
+    /// empty when the table is absent (present in 105 of 568 installed units).
+    pub buildable_category: Vec<String>,
+    /// Energy drained per second while active.
+    pub maintenance_consumption_per_second_energy: Option<f64>,
 }
 
 /// A unit's physics block.
@@ -51,6 +56,30 @@ pub struct Physics {
     pub max_speed: Option<f64>,
     /// Turn rate.
     pub turn_rate: Option<f64>,
+    /// Maximum acceleration.
+    pub max_acceleration: Option<f64>,
+    /// Maximum braking.
+    pub max_brake: Option<f64>,
+    /// Cruise height of an air or sea-level unit.
+    pub elevation: Option<f64>,
+    /// Minimum speed as a percentage of the maximum.
+    pub min_speed_percent: Option<f64>,
+    /// Where the unit may be built, such as `RULEUBR_OnMassDeposit`.
+    pub build_restriction: Option<String>,
+}
+
+/// A unit's footprint table; the top-level `Footprint` of 402 of 568
+/// installed units.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct Footprint {
+    /// Footprint width in cells.
+    pub size_x: Option<f64>,
+    /// Footprint depth in cells.
+    pub size_z: Option<f64>,
+    /// Shallowest water the unit may occupy.
+    pub min_water_depth: Option<f64>,
+    /// Deepest water the unit may occupy.
+    pub max_water_depth: Option<f64>,
 }
 
 /// A unit's defence block.
@@ -88,6 +117,46 @@ pub struct Weapon {
     pub max_radius: Option<f64>,
     /// The projectile blueprint it fires.
     pub projectile_id: Option<String>,
+    /// Splash radius.
+    pub damage_radius: Option<f64>,
+    /// The damage type name, such as `Normal`.
+    pub damage_type: String,
+    /// Whether the splash hurts friendly units.
+    pub damage_friendly: Option<bool>,
+    /// Minimum range.
+    pub min_radius: Option<f64>,
+    /// Muzzle velocity.
+    pub muzzle_velocity: Option<f64>,
+    /// Projectiles spawned per firing.
+    pub projectiles_per_on_fire: Option<f64>,
+    /// Shots per salvo.
+    pub muzzle_salvo_size: Option<f64>,
+    /// Delay between the shots of a salvo.
+    pub muzzle_salvo_delay: Option<f64>,
+    /// Reload time of a rack salvo.
+    pub rack_salvo_reload_time: Option<f64>,
+    /// Charge time of a rack salvo.
+    pub rack_salvo_charge_time: Option<f64>,
+    /// Whether the rack fires after charging.
+    pub rack_salvo_fires_after_charge: Option<bool>,
+    /// The ballistic arc, such as `RULEUBA_LowArc`.
+    pub ballistic_arc: Option<String>,
+    /// The target priority expressions as stored; empty when absent.
+    pub target_priorities: Vec<String>,
+    /// `(layer, caps)` pairs of `FireTargetLayerCapsTable`, sorted by layer.
+    pub fire_target_layer_caps: Vec<(String, String)>,
+    /// Tracking radius.
+    pub tracking_radius: Option<f64>,
+    /// Firing tolerance.
+    pub firing_tolerance: Option<f64>,
+    /// Seconds between target checks.
+    pub target_check_interval: Option<f64>,
+    /// The weapon category name.
+    pub weapon_category: String,
+    /// Whether the weapon turns on a turret.
+    pub turreted: Option<bool>,
+    /// Manual fire; stored as a boolean or as the number 1, which reads as true.
+    pub manual_fire: Option<bool>,
 }
 
 /// A unit blueprint's v0 fields.
@@ -107,6 +176,35 @@ pub struct Unit {
     pub intel: Option<Intel>,
     /// The weapon table, empty when the unit has none.
     pub weapons: Vec<Weapon>,
+    /// The footprint table, when the unit has one.
+    pub footprint: Option<Footprint>,
+    /// The `General.CommandCaps` keys whose value is true, sorted ascending.
+    pub command_caps: Vec<String>,
+}
+
+/// A projectile's physics block; present in all 365 installed projectiles.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ProjectilePhysics {
+    /// Speed at launch.
+    pub initial_speed: Option<f64>,
+    /// Maximum speed.
+    pub max_speed: Option<f64>,
+    /// Acceleration.
+    pub acceleration: Option<f64>,
+    /// Turn rate.
+    pub turn_rate: Option<f64>,
+    /// Lifetime in seconds.
+    pub lifetime: Option<f64>,
+    /// Whether it tracks its target.
+    pub track_target: Option<bool>,
+    /// Whether gravity acts on it.
+    pub use_gravity: Option<bool>,
+    /// Whether it leads its target.
+    pub lead_target: Option<bool>,
+    /// Whether it aligns to its velocity.
+    pub velocity_align: Option<bool>,
+    /// Whether it is destroyed on touching water.
+    pub destroy_on_water: Option<bool>,
 }
 
 /// A projectile blueprint's v0 fields.
@@ -116,6 +214,8 @@ pub struct Projectile {
     pub id: String,
     /// The category strings.
     pub categories: Vec<String>,
+    /// The physics block.
+    pub physics: ProjectilePhysics,
 }
 
 /// A prop blueprint's v0 fields.
@@ -192,6 +292,12 @@ const UNIT_KEYS: &[(&str, Decl)] = &[
     ("Defense", Decl::Record(DEFENSE)),
     ("Intel", Decl::Record(INTEL)),
     ("Weapon", Decl::Records(WEAPON)),
+    ("General", Decl::Record(GENERAL)),
+    ("Footprint", Decl::Record(FOOTPRINT)),
+];
+const PROJECTILE_KEYS: &[(&str, Decl)] = &[
+    ("Categories", Decl::Categories),
+    ("Physics", Decl::Record(PROJECTILE_PHYSICS)),
 ];
 const CATEGORY_KEYS: &[(&str, Decl)] = &[("Categories", Decl::Categories)];
 
@@ -242,6 +348,20 @@ enum Decl {
     Record(&'static [&'static str]),
     /// An array of such records.
     Records(&'static [&'static str]),
+    /// A positional list of leaves.
+    List,
+    /// A table of named leaves, whatever the names.
+    Map,
+}
+
+/// What the contracts declare of the value of a record field: the lists and
+/// maps among the leaf fields.
+fn field_decl(name: &str) -> Decl {
+    match name {
+        "BuildableCategory" | "TargetPriorities" => Decl::List,
+        "CommandCaps" | "FireTargetLayerCapsTable" => Decl::Map,
+        _ => Decl::Leaf,
+    }
 }
 
 const ECONOMY: &[&str] = &[
@@ -253,11 +373,62 @@ const ECONOMY: &[&str] = &[
     "ProductionPerSecondMass",
     "StorageEnergy",
     "StorageMass",
+    "BuildableCategory",
+    "MaintenanceConsumptionPerSecondEnergy",
 ];
-const PHYSICS: &[&str] = &["MotionType", "MaxSpeed", "TurnRate"];
+const PHYSICS: &[&str] = &[
+    "MotionType",
+    "MaxSpeed",
+    "TurnRate",
+    "MaxAcceleration",
+    "MaxBrake",
+    "Elevation",
+    "MinSpeedPercent",
+    "BuildRestriction",
+];
 const DEFENSE: &[&str] = &["Health", "MaxHealth", "ArmorType", "RegenRate"];
 const INTEL: &[&str] = &["VisionRadius", "RadarRadius"];
-const WEAPON: &[&str] = &["Label", "Damage", "RateOfFire", "MaxRadius", "ProjectileId"];
+const WEAPON: &[&str] = &[
+    "Label",
+    "Damage",
+    "RateOfFire",
+    "MaxRadius",
+    "ProjectileId",
+    "DamageRadius",
+    "DamageType",
+    "DamageFriendly",
+    "MinRadius",
+    "MuzzleVelocity",
+    "ProjectilesPerOnFire",
+    "MuzzleSalvoSize",
+    "MuzzleSalvoDelay",
+    "RackSalvoReloadTime",
+    "RackSalvoChargeTime",
+    "RackSalvoFiresAfterCharge",
+    "BallisticArc",
+    "TargetPriorities",
+    "FireTargetLayerCapsTable",
+    "TrackingRadius",
+    "FiringTolerance",
+    "TargetCheckInterval",
+    "WeaponCategory",
+    "Turreted",
+    "ManualFire",
+];
+const GENERAL: &[&str] = &["CommandCaps"];
+const FOOTPRINT: &[&str] = &["SizeX", "SizeZ", "MinWaterDepth", "MaxWaterDepth"];
+const PROJECTILE_PHYSICS: &[&str] = &[
+    "InitialSpeed",
+    "MaxSpeed",
+    "Acceleration",
+    "TurnRate",
+    "Lifetime",
+    "TrackTarget",
+    "UseGravity",
+    "LeadTarget",
+    "VelocityAlign",
+    "DestroyOnWater",
+];
 
 /// Writes `value` as a Nickel term, limited to what `decl` declares. A table
 /// whose keys are all positional is an array, any other table a record (a
@@ -287,7 +458,7 @@ fn nickel_decl(out: &mut String, value: &Value, decl: Decl, tags: bool) {
         Value::Table(entries) => {
             let positional = entries.iter().all(|(k, _)| matches!(k, Key::Index(_)));
             match (decl, positional) {
-                (Decl::Categories, true) => {
+                (Decl::Categories | Decl::List, true) => {
                     out.push('[');
                     for (_, v) in entries {
                         nickel_decl(out, v, Decl::Leaf, tags);
@@ -304,8 +475,24 @@ fn nickel_decl(out: &mut String, value: &Value, decl: Decl, tags: bool) {
                     out.push(']');
                 }
                 // A leaf, or a record where a list is declared: rejected by type.
-                (Decl::Leaf, _) | (Decl::Categories | Decl::Records(_), false) => {
+                (Decl::Leaf, _) | (Decl::Categories | Decl::Records(_) | Decl::List, false) => {
                     out.push_str("{}");
+                }
+                // The named leaves of a map; a positional entry is undeclared.
+                (Decl::Map, _) => {
+                    out.push('{');
+                    let mut seen = BTreeSet::new();
+                    for (key, v) in entries {
+                        let Key::Name(name) = key else { continue };
+                        if matches!(v, Value::Nil) || !seen.insert(name.as_str()) {
+                            continue;
+                        }
+                        nickel_string(out, name);
+                        out.push_str(" = ");
+                        nickel_decl(out, v, Decl::Leaf, false);
+                        out.push_str(", ");
+                    }
+                    out.push('}');
                 }
                 // A record of its declared named fields, whether the table is
                 // empty, positional, or mixed (a positional entry is undeclared);
@@ -324,7 +511,7 @@ fn nickel_decl(out: &mut String, value: &Value, decl: Decl, tags: bool) {
                         }
                         nickel_string(out, name);
                         out.push_str(" = ");
-                        nickel_decl(out, v, Decl::Leaf, false);
+                        nickel_decl(out, v, field_decl(name), false);
                         out.push_str(", ");
                     }
                     out.push('}');
@@ -425,10 +612,10 @@ fn first_line(repl: &mut ReplImpl<CBNCache>, error: NickelError) -> String {
 /// decide is the vocabulary, and a blame whose path does not name a field
 /// is attributed to `Categories`.
 fn nickel_check(kind: Kind, body: &Value) -> Result<(), Error> {
-    let keys = if kind == Kind::Unit {
-        UNIT_KEYS
-    } else {
-        CATEGORY_KEYS
+    let keys = match kind {
+        Kind::Unit => UNIT_KEYS,
+        Kind::Projectile => PROJECTILE_KEYS,
+        Kind::Prop => CATEGORY_KEYS,
     };
     let source = format!(
         "({}) | {}",
@@ -574,6 +761,8 @@ fn economy_of(body: &Value) -> Result<Economy, Error> {
         production_per_second_mass: opt_number(t, "ProductionPerSecondMass", "Economy")?,
         storage_energy: opt_number(t, "StorageEnergy", "Economy")?,
         storage_mass: opt_number(t, "StorageMass", "Economy")?,
+        buildable_category: Vec::new(),
+        maintenance_consumption_per_second_energy: None,
     })
 }
 
@@ -583,6 +772,11 @@ fn physics_of(body: &Value) -> Result<Physics, Error> {
         motion_type: req_string(t, "MotionType", "Physics")?,
         max_speed: opt_number(t, "MaxSpeed", "Physics")?,
         turn_rate: opt_number(t, "TurnRate", "Physics")?,
+        max_acceleration: None,
+        max_brake: None,
+        elevation: None,
+        min_speed_percent: None,
+        build_restriction: None,
     })
 }
 
@@ -626,6 +820,26 @@ fn weapons_of(body: &Value) -> Result<Vec<Weapon>, Error> {
                 rate_of_fire: opt_number(t, "RateOfFire", &parent)?,
                 max_radius: opt_number(t, "MaxRadius", &parent)?,
                 projectile_id: opt_string(t, "ProjectileId", &parent)?,
+                damage_radius: None,
+                damage_type: String::new(),
+                damage_friendly: None,
+                min_radius: None,
+                muzzle_velocity: None,
+                projectiles_per_on_fire: None,
+                muzzle_salvo_size: None,
+                muzzle_salvo_delay: None,
+                rack_salvo_reload_time: None,
+                rack_salvo_charge_time: None,
+                rack_salvo_fires_after_charge: None,
+                ballistic_arc: None,
+                target_priorities: Vec::new(),
+                fire_target_layer_caps: Vec::new(),
+                tracking_radius: None,
+                firing_tolerance: None,
+                target_check_interval: None,
+                weapon_category: String::new(),
+                turreted: None,
+                manual_fire: None,
             })
         })
         .collect()
@@ -670,6 +884,8 @@ pub fn unit_from_value(id: &str, body: &Value) -> Result<Unit, Error> {
         defense: defense_of(body)?,
         intel: intel_of(body)?,
         weapons: weapons_of(body)?,
+        footprint: None,
+        command_caps: Vec::new(),
     })
 }
 
@@ -682,6 +898,18 @@ pub fn projectile_from_value(id: &str, body: &Value) -> Result<Projectile, Error
     Ok(Projectile {
         id: id.to_owned(),
         categories: optional_categories_of(body)?,
+        physics: ProjectilePhysics {
+            initial_speed: None,
+            max_speed: None,
+            acceleration: None,
+            turn_rate: None,
+            lifetime: None,
+            track_target: None,
+            use_gravity: None,
+            lead_target: None,
+            velocity_align: None,
+            destroy_on_water: None,
+        },
     })
 }
 
@@ -704,7 +932,9 @@ mod declared_fields {
 
     use std::collections::BTreeSet;
 
-    use super::{DEFENSE, ECONOMY, INTEL, PHYSICS, UNIT_KEYS, UNIT_NCL, WEAPON};
+    use super::{
+        DEFENSE, ECONOMY, FOOTPRINT, GENERAL, INTEL, PHYSICS, UNIT_KEYS, UNIT_NCL, WEAPON,
+    };
 
     /// The identifiers `unit.ncl` declares, keyed by top-level block.
     fn declared() -> Vec<(String, BTreeSet<String>)> {
@@ -746,6 +976,8 @@ mod declared_fields {
             ("Defense", DEFENSE),
             ("Intel", INTEL),
             ("Weapon", WEAPON),
+            ("General", GENERAL),
+            ("Footprint", FOOTPRINT),
         ] {
             let fields = blocks
                 .iter()
