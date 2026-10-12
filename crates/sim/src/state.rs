@@ -1,11 +1,11 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::command::{Command, Order, QueueMode};
 use crate::error::Error;
 use crate::hash::{Digest, GENESIS, chain, serialize};
 use crate::ids::{Army, EntityId, Pos, Q, Tick};
 use crate::rng::Rng;
-use crate::schedule::Schedule;
+use crate::schedule::{Schedule, ScheduleError};
 
 /// One phase of a tick (SIM-044).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,11 +110,16 @@ impl State {
     }
 
     /// Spawn an entity at full `health` with the next id; ids ascend from 1.
+    ///
+    /// At saturation (`u32::MAX` spawns, which a match cannot reach) the
+    /// counter stays at `u32::MAX`; the id is then already live, so this
+    /// returns it without inserting and the live entity is not replaced.
     pub fn spawn(&mut self, army: Army, blueprint: &str, pos: Pos, health: Q) -> EntityId {
         let id = self.next_id;
-        // Four billion spawns cannot occur in a match; saturating keeps the
-        // counter total rather than wrapping onto a live id.
         self.next_id = EntityId(id.0.saturating_add(1));
+        if self.entities.contains_key(&id) {
+            return id;
+        }
         self.entities.insert(
             id,
             Entity {
@@ -137,7 +142,10 @@ impl State {
     ///
     /// # Errors
     ///
-    /// [`Error::TickOverflow`] if the tick counter cannot advance.
+    /// [`Error::TickOverflow`] if the tick counter cannot advance;
+    /// [`Error::WrongTick`] if a command is not stamped for this tick;
+    /// [`Error::Schedule`] if a `(source, seq)` pair repeats in the batch.
+    /// A refused tick leaves the state unchanged.
     pub fn step(&mut self, commands: &[Command]) -> Result<Digest, Error> {
         self.step_traced(commands).map(|(digest, _)| digest)
     }
@@ -147,10 +155,11 @@ impl State {
     ///
     /// # Errors
     ///
-    /// [`Error::TickOverflow`] if the tick counter cannot advance.
+    /// The errors of [`State::step`].
     pub fn step_traced(&mut self, commands: &[Command]) -> Result<(Digest, Vec<Phase>), Error> {
         let ran = self.tick;
         let next = Tick(ran.0.checked_add(1).ok_or(Error::TickOverflow)?);
+        self.check_batch(commands)?;
         let mut trace = Vec::with_capacity(PHASES.len());
         for phase in PHASES {
             trace.push(phase);
@@ -161,6 +170,29 @@ impl State {
         serialize(self, &mut bytes);
         self.head = chain(&self.head, ran, &bytes);
         Ok((self.head, trace))
+    }
+
+    /// Refuse a batch that [`crate::schedule`] would not have produced for
+    /// this tick. The batch's order stays the caller's: DET-013's control
+    /// needs to pass commands in a non-schedule order.
+    fn check_batch(&self, commands: &[Command]) -> Result<(), Error> {
+        if let Some(c) = commands.iter().find(|c| c.tick != self.tick) {
+            return Err(Error::WrongTick {
+                tick: c.tick,
+                expected: self.tick,
+            });
+        }
+        let mut seen = BTreeSet::new();
+        for c in commands {
+            if !seen.insert((c.source, c.seq)) {
+                return Err(ScheduleError::Duplicate {
+                    source: c.source,
+                    seq: c.seq,
+                }
+                .into());
+            }
+        }
+        Ok(())
     }
 
     /// Every phase but the commands is a no-op until its rules land; each
