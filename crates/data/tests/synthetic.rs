@@ -5,7 +5,7 @@
 
 use supercom_bp::{Key, Value};
 use supercom_data::{
-    Error, Kind, projectile_from_value, prop_from_value, unit_from_value, validate,
+    Error, Footprint, Kind, projectile_from_value, prop_from_value, unit_from_value, validate,
 };
 
 fn table(entries: Vec<(&str, Value)>) -> Value {
@@ -158,10 +158,35 @@ fn optional_blocks_and_weapons_project() {
 /// contract names does not change the projected unit.
 #[test]
 fn projection_ignores_fields_outside_the_v0_set() {
-    let plain = unit_from_value("xyz0003", &table(minimal_unit()));
-    let mut more = minimal_unit();
-    more.push(("AnotherInvented", table(vec![("Deep", num(1.0))])));
-    let extended = unit_from_value("xyz0003", &table(more));
+    let general = |extra: bool| {
+        let mut entries = vec![(
+            "CommandCaps",
+            table(vec![("RULEUCC_Move", Value::Bool(true))]),
+        )];
+        if extra {
+            entries.push(("Category", s("Tank")));
+        }
+        table(entries)
+    };
+    let footprint = |extra: bool| {
+        let mut entries = vec![("SizeX", num(1.0))];
+        if extra {
+            entries.push(("OccupyCaps", s("RULEUCC_Move")));
+        }
+        table(entries)
+    };
+    let body = |extra: bool| {
+        let mut entries = minimal_unit();
+        entries.retain(|(k, _)| *k != "General");
+        entries.push(("General", general(extra)));
+        entries.push(("Footprint", footprint(extra)));
+        if extra {
+            entries.push(("AnotherInvented", table(vec![("Deep", num(1.0))])));
+        }
+        table(entries)
+    };
+    let plain = unit_from_value("xyz0003", &body(false));
+    let extended = unit_from_value("xyz0003", &body(true));
     assert!(plain.is_ok(), "the plain body must project, got {plain:?}");
     assert_eq!(plain, extended);
 }
@@ -363,4 +388,397 @@ fn injection_attempts_in_strings_and_field_names_stay_data() {
         let body = unit_with_economy_field(text, s(text));
         assert_eq!(validate(Kind::Unit, &body), Ok(()), "field name {text:?}");
     }
+}
+
+fn flag(b: bool) -> Value {
+    Value::Bool(b)
+}
+
+/// The minimal unit with `key` replaced by `value`.
+fn minimal_with(key: &'static str, value: Value) -> Value {
+    with(minimal_unit(), key, value)
+}
+
+/// A weapon table holding only the required fields plus `extra`.
+fn weapon(extra: Vec<(&'static str, Value)>) -> Value {
+    let mut entries = vec![
+        ("Damage", num(5.0)),
+        ("DamageType", s("Normal")),
+        ("WeaponCategory", s("Direct Fire")),
+    ];
+    entries.extend(extra);
+    table(entries)
+}
+
+/// The minimal unit with one weapon holding `extra`.
+fn unit_with_weapon(extra: Vec<(&'static str, Value)>) -> Value {
+    minimal_with("Weapon", list(vec![weapon(extra)]))
+}
+
+/// Pins the economy additions: the build category expressions read as
+/// stored, in order, and the maintenance drain reads through; both are
+/// empty or `None` when the body omits them.
+#[test]
+fn economy_build_fields_project() {
+    let economy = table(vec![
+        ("BuildCostEnergy", num(1.0)),
+        ("BuildCostMass", num(2.0)),
+        (
+            "BuildableCategory",
+            list(vec![s("BUILTBYTIER1 * LAND"), s("ENGINEER + MOBILE")]),
+        ),
+        ("MaintenanceConsumptionPerSecondEnergy", num(75.0)),
+    ]);
+    let unit = unit_from_value("xyz0010", &minimal_with("Economy", economy));
+    let unit = unit.expect("must project");
+    assert_eq!(
+        unit.economy.buildable_category,
+        ["BUILTBYTIER1 * LAND", "ENGINEER + MOBILE"]
+    );
+    assert_eq!(
+        unit.economy.maintenance_consumption_per_second_energy,
+        Some(75.0)
+    );
+    let bare = unit_from_value("xyz0011", &table(minimal_unit())).expect("must project");
+    assert_eq!(bare.economy.buildable_category, Vec::<String>::new());
+    assert_eq!(bare.economy.maintenance_consumption_per_second_energy, None);
+}
+
+/// Pins the physics additions, including the build restriction string.
+#[test]
+fn physics_movement_and_placement_fields_project() {
+    let physics = table(vec![
+        ("MotionType", s("RULEUMT_Land")),
+        ("MaxAcceleration", num(2.5)),
+        ("MaxBrake", num(3.5)),
+        ("Elevation", num(-4.0)),
+        ("MinSpeedPercent", num(0.25)),
+        ("BuildRestriction", s("RULEUBR_OnMassDeposit")),
+    ]);
+    let unit = unit_from_value("xyz0012", &minimal_with("Physics", physics)).expect("must project");
+    assert_eq!(unit.physics.max_acceleration, Some(2.5));
+    assert_eq!(unit.physics.max_brake, Some(3.5));
+    assert_eq!(unit.physics.elevation, Some(-4.0));
+    assert_eq!(unit.physics.min_speed_percent, Some(0.25));
+    assert_eq!(
+        unit.physics.build_restriction.as_deref(),
+        Some("RULEUBR_OnMassDeposit")
+    );
+}
+
+/// Pins the footprint: absent table is `None`; a present one reads its four
+/// fields, each `None` when omitted (never a default of 1).
+#[test]
+fn footprint_is_none_when_absent_and_partial_when_present() {
+    let none = unit_from_value("xyz0013", &table(minimal_unit())).expect("must project");
+    assert_eq!(none.footprint, None);
+    let footprint = table(vec![("SizeZ", num(3.0)), ("MinWaterDepth", num(1.5))]);
+    let unit = unit_from_value("xyz0014", &minimal_with("Footprint", footprint)).expect("projects");
+    assert_eq!(
+        unit.footprint,
+        Some(Footprint {
+            size_x: None,
+            size_z: Some(3.0),
+            min_water_depth: Some(1.5),
+            max_water_depth: None,
+        })
+    );
+}
+
+/// The command caps of the unit are exactly the true keys, sorted
+/// ascending, whatever the order the table stores them in: checked over
+/// every ordering of four keys and every assignment of true and false.
+#[test]
+fn command_caps_are_the_sorted_true_keys_for_every_order_and_assignment() {
+    const KEYS: [&str; 4] = [
+        "RULEUCC_Stop",
+        "RULEUCC_Attack",
+        "RULEUCC_Move",
+        "RULEUCC_Guard",
+    ];
+    let mut orders: Vec<Vec<usize>> = Vec::new();
+    for a in 0..4 {
+        for b in (0..4).filter(|b| *b != a) {
+            for c in (0..4).filter(|c| *c != a && *c != b) {
+                let d = 6 - a - b - c;
+                orders.push(vec![a, b, c, d]);
+            }
+        }
+    }
+    assert_eq!(orders.len(), 24);
+    let mut checked = 0;
+    for order in &orders {
+        for mask in 0..16_u32 {
+            let entries: Vec<(&str, Value)> = order
+                .iter()
+                .map(|&i| (KEYS[i], flag(mask >> i & 1 == 1)))
+                .collect();
+            let general = table(vec![("CommandCaps", table(entries))]);
+            let unit = unit_from_value("xyz0015", &minimal_with("General", general));
+            let unit = unit.expect("must project");
+            let mut expected: Vec<String> = (0..4)
+                .filter(|i| mask >> i & 1 == 1)
+                .map(|i| KEYS[i].to_owned())
+                .collect();
+            expected.sort();
+            assert_eq!(unit.command_caps, expected, "order {order:?} mask {mask}");
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 384);
+}
+
+/// `General` is required, as is the `CommandCaps` table inside it.
+#[test]
+fn a_unit_without_command_caps_is_missing_them() {
+    let without_general = without(minimal_unit(), "General");
+    assert_eq!(
+        unit_from_value("xyz0016", &without_general),
+        Err(Error::Missing {
+            field: "General".into()
+        })
+    );
+    let without_caps = minimal_with("General", table(vec![]));
+    assert_eq!(
+        unit_from_value("xyz0017", &without_caps),
+        Err(Error::Missing {
+            field: "General.CommandCaps".into()
+        })
+    );
+}
+
+/// Pins the weapon additions on a weapon holding every one of them.
+#[test]
+fn weapon_additions_project() {
+    let body = unit_with_weapon(vec![
+        ("DamageRadius", num(2.5)),
+        ("DamageFriendly", flag(true)),
+        ("MinRadius", num(4.0)),
+        ("MuzzleVelocity", num(30.0)),
+        ("ProjectilesPerOnFire", num(3.0)),
+        ("MuzzleSalvoSize", num(2.0)),
+        ("MuzzleSalvoDelay", num(0.5)),
+        ("RackSalvoReloadTime", num(6.0)),
+        ("RackSalvoChargeTime", num(1.0)),
+        ("RackSalvoFiresAfterCharge", flag(false)),
+        ("BallisticArc", s("RULEUBA_HighArc")),
+        (
+            "TargetPriorities",
+            list(vec![s("COMMAND"), s("MOBILE - AIR")]),
+        ),
+        (
+            "FireTargetLayerCapsTable",
+            table(vec![("Water", s("Land|Water")), ("Air", s("Air"))]),
+        ),
+        ("TrackingRadius", num(1.2)),
+        ("FiringTolerance", num(2.0)),
+        ("TargetCheckInterval", num(0.5)),
+        ("Turreted", flag(true)),
+        ("ManualFire", flag(false)),
+    ]);
+    let unit = unit_from_value("xyz0018", &body).expect("must project");
+    let w = &unit.weapons[0];
+    assert_eq!(w.damage_type, "Normal");
+    assert_eq!(w.weapon_category, "Direct Fire");
+    assert_eq!(w.damage_radius, Some(2.5));
+    assert_eq!(w.damage_friendly, Some(true));
+    assert_eq!(w.min_radius, Some(4.0));
+    assert_eq!(w.muzzle_velocity, Some(30.0));
+    assert_eq!(w.projectiles_per_on_fire, Some(3.0));
+    assert_eq!(w.muzzle_salvo_size, Some(2.0));
+    assert_eq!(w.muzzle_salvo_delay, Some(0.5));
+    assert_eq!(w.rack_salvo_reload_time, Some(6.0));
+    assert_eq!(w.rack_salvo_charge_time, Some(1.0));
+    assert_eq!(w.rack_salvo_fires_after_charge, Some(false));
+    assert_eq!(w.ballistic_arc.as_deref(), Some("RULEUBA_HighArc"));
+    assert_eq!(w.target_priorities, ["COMMAND", "MOBILE - AIR"]);
+    assert_eq!(
+        w.fire_target_layer_caps,
+        [
+            ("Air".to_owned(), "Air".to_owned()),
+            ("Water".to_owned(), "Land|Water".to_owned())
+        ]
+    );
+    assert_eq!(w.tracking_radius, Some(1.2));
+    assert_eq!(w.firing_tolerance, Some(2.0));
+    assert_eq!(w.target_check_interval, Some(0.5));
+    assert_eq!(w.turreted, Some(true));
+    assert_eq!(w.manual_fire, Some(false));
+}
+
+/// A weapon that omits the optional additions reads them as `None` or
+/// empty; the required `DamageType` and `WeaponCategory` read through.
+#[test]
+fn a_weapon_without_the_optional_additions_reads_them_as_absent() {
+    let unit = unit_from_value("xyz0019", &unit_with_weapon(vec![])).expect("must project");
+    let w = &unit.weapons[0];
+    assert_eq!(w.damage_type, "Normal");
+    assert_eq!(w.weapon_category, "Direct Fire");
+    assert_eq!(w.damage_radius, None);
+    assert_eq!(w.damage_friendly, None);
+    assert_eq!(w.ballistic_arc, None);
+    assert_eq!(w.target_priorities, Vec::<String>::new());
+    assert_eq!(w.fire_target_layer_caps, Vec::<(String, String)>::new());
+    assert_eq!(w.turreted, None);
+    assert_eq!(w.manual_fire, None);
+}
+
+/// `ManualFire` is stored as a boolean or as the number 1, which reads as
+/// true.
+#[test]
+fn manual_fire_reads_a_boolean_or_the_number_one() {
+    for (stored, expected) in [(flag(true), true), (flag(false), false), (num(1.0), true)] {
+        let body = unit_with_weapon(vec![("ManualFire", stored.clone())]);
+        let unit = unit_from_value("xyz0020", &body).expect("must project");
+        assert_eq!(unit.weapons[0].manual_fire, Some(expected), "{stored:?}");
+    }
+}
+
+/// `DamageType` and `WeaponCategory` are required of every weapon, so
+/// their absence is named by weapon index.
+#[test]
+fn a_weapon_without_damage_type_or_category_is_missing_it() {
+    let no_type = minimal_with(
+        "Weapon",
+        list(vec![table(vec![
+            ("Damage", num(1.0)),
+            ("WeaponCategory", s("Death")),
+        ])]),
+    );
+    assert_eq!(
+        unit_from_value("xyz0021", &no_type),
+        Err(Error::Missing {
+            field: "Weapon[0].DamageType".into()
+        })
+    );
+    let no_category = minimal_with(
+        "Weapon",
+        list(vec![table(vec![
+            ("Damage", num(1.0)),
+            ("DamageType", s("Normal")),
+        ])]),
+    );
+    assert_eq!(
+        unit_from_value("xyz0022", &no_category),
+        Err(Error::Missing {
+            field: "Weapon[0].WeaponCategory".into()
+        })
+    );
+}
+
+/// A mistyped additional field is refused with its path, by the projection
+/// and by `validate` alike.
+#[test]
+fn mistyped_additional_fields_name_their_path() {
+    let elevation = minimal_with(
+        "Physics",
+        table(vec![
+            ("MotionType", s("RULEUMT_Air")),
+            ("Elevation", s("high")),
+        ]),
+    );
+    let expected = Err(Error::Type {
+        field: "Physics.Elevation".into(),
+        expected: "Number".into(),
+    });
+    assert_eq!(unit_from_value("xyz0023", &elevation).map(|_| ()), expected);
+    assert_eq!(validate(Kind::Unit, &elevation), expected);
+    let turreted = unit_with_weapon(vec![("Turreted", num(1.0))]);
+    let expected = Err(Error::Type {
+        field: "Weapon[0].Turreted".into(),
+        expected: "Boolean".into(),
+    });
+    assert_eq!(unit_from_value("xyz0024", &turreted).map(|_| ()), expected);
+    assert_eq!(validate(Kind::Unit, &turreted), expected);
+}
+
+/// Pins the projectile physics: every field reads through, and a field
+/// outside the declared set is ignored.
+#[test]
+fn projectile_physics_projects_and_ignores_undeclared_fields() {
+    let body = table(vec![(
+        "Physics",
+        table(vec![
+            ("InitialSpeed", num(12.0)),
+            ("MaxSpeed", num(40.0)),
+            ("Acceleration", num(-0.4)),
+            ("TurnRate", num(180.0)),
+            ("Lifetime", num(7.5)),
+            ("TrackTarget", flag(true)),
+            ("UseGravity", flag(false)),
+            ("LeadTarget", flag(true)),
+            ("VelocityAlign", flag(false)),
+            ("DestroyOnWater", flag(true)),
+            ("InventedField", num(9.0)),
+        ]),
+    )]);
+    let projectile = projectile_from_value("/projectiles/xyz/xyz_proj.bp", &body);
+    let p = projectile.expect("must project").physics;
+    assert_eq!(p.initial_speed, Some(12.0));
+    assert_eq!(p.max_speed, Some(40.0));
+    assert_eq!(p.acceleration, Some(-0.4));
+    assert_eq!(p.turn_rate, Some(180.0));
+    assert_eq!(p.lifetime, Some(7.5));
+    assert_eq!(p.track_target, Some(true));
+    assert_eq!(p.use_gravity, Some(false));
+    assert_eq!(p.lead_target, Some(true));
+    assert_eq!(p.velocity_align, Some(false));
+    assert_eq!(p.destroy_on_water, Some(true));
+}
+
+/// The projectile `Physics` table is required, as all 365 installed
+/// projectiles carry it; an empty one reads every field as `None`.
+#[test]
+fn projectile_physics_is_required_and_may_be_empty() {
+    assert_eq!(
+        projectile_from_value("x", &table(vec![("Other", num(1.0))])).map(|_| ()),
+        Err(Error::Missing {
+            field: "Physics".into()
+        })
+    );
+    let empty = table(vec![("Physics", table(vec![]))]);
+    let p = projectile_from_value("x", &empty)
+        .expect("must project")
+        .physics;
+    assert_eq!(p.initial_speed, None);
+    assert_eq!(p.destroy_on_water, None);
+}
+
+/// Metamorphic: fields no contract names, added inside the new blocks and
+/// at the top level, leave the projection of a fully populated unit
+/// unchanged (the outside-the-set rule extended to the new blocks).
+#[test]
+fn projection_ignores_undeclared_fields_inside_the_new_blocks() {
+    let build = |extra: bool| {
+        let mut physics = vec![("MotionType", s("RULEUMT_Land")), ("Elevation", num(1.0))];
+        let mut footprint = vec![("SizeX", num(2.0)), ("SizeZ", num(2.0))];
+        let mut general = vec![("CommandCaps", table(vec![("RULEUCC_Move", flag(true))]))];
+        let mut w = vec![("TrackingRadius", num(1.0))];
+        let top = if extra {
+            vec![("Shield", table(vec![("Depth", num(1.0))]))]
+        } else {
+            vec![]
+        };
+        if extra {
+            physics.push(("MotionLayer", s("Land")));
+            footprint.push(("OccupyCaps", s("RULEUCC_Move")));
+            general.push(("Category", s("Tank")));
+            w.push(("RackBones", table(vec![("Bone", s("b"))])));
+        }
+        let mut entries = minimal_unit();
+        entries.retain(|(k, _)| !["Physics", "General"].contains(k));
+        entries.push(("Physics", table(physics)));
+        entries.push(("General", table(general)));
+        entries.push(("Footprint", table(footprint)));
+        entries.push(("Weapon", list(vec![weapon(w)])));
+        entries.extend(top);
+        unit_from_value("xyz0025", &table(entries))
+    };
+    let plain = build(false);
+    assert!(plain.is_ok(), "the plain body must project, got {plain:?}");
+    assert_eq!(
+        plain.as_ref().map(|u| u.command_caps.clone()),
+        Ok(vec!["RULEUCC_Move".to_owned()])
+    );
+    assert_eq!(plain, build(true));
 }
