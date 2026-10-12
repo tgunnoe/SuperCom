@@ -8,7 +8,7 @@
 //! the model never invents an engine default.
 
 use std::cell::RefCell;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write as _};
 use std::io;
 
@@ -719,6 +719,61 @@ fn opt_string(table: &Value, key: &str, parent: &str) -> Result<Option<String>, 
     }
 }
 
+fn bool_at(value: &Value, path: &str) -> Result<bool, Error> {
+    match value {
+        Value::Bool(b) => Ok(*b),
+        _ => Err(type_error(path, "Boolean")),
+    }
+}
+
+fn opt_bool(table: &Value, key: &str, parent: &str) -> Result<Option<bool>, Error> {
+    match table.get(key) {
+        None | Some(Value::Nil) => Ok(None),
+        Some(v) => bool_at(v, &path_of(parent, key)).map(Some),
+    }
+}
+
+/// `ManualFire` is a boolean on 13 installed entries and the number 1 on 9;
+/// the number 1 reads as true and any other value is a type error, the
+/// predicate `unit.ncl` states for the same field.
+fn opt_manual_fire(table: &Value, key: &str, parent: &str) -> Result<Option<bool>, Error> {
+    match table.get(key) {
+        None | Some(Value::Nil) => Ok(None),
+        Some(Value::Bool(b)) => Ok(Some(*b)),
+        Some(Value::Number(n)) if n.to_bits() == 1.0_f64.to_bits() => Ok(Some(true)),
+        Some(_) => Err(type_error(&path_of(parent, key), "Boolean")),
+    }
+}
+
+/// An absent list is empty; a present one is an array of strings.
+fn opt_string_list(table: &Value, key: &str, parent: &str) -> Result<Vec<String>, Error> {
+    let path = path_of(parent, key);
+    match table.get(key) {
+        None | Some(Value::Nil) => Ok(Vec::new()),
+        Some(v) => array_at(v, &path)?
+            .entries()
+            .iter()
+            .enumerate()
+            .map(|(i, (_, item))| string_at(item, &format!("{path}[{i}]")))
+            .collect(),
+    }
+}
+
+/// The named, non-nil entries of a dictionary table, the first of each
+/// name, sorted by name; the nil and positional entries are undeclared, as
+/// the bridge treats them.
+fn named_entries(table: &Value) -> BTreeMap<&str, &Value> {
+    let mut map = BTreeMap::new();
+    for (key, value) in table.entries() {
+        if let Key::Name(name) = key
+            && !matches!(value, Value::Nil)
+        {
+            map.entry(name.as_str()).or_insert(value);
+        }
+    }
+    map
+}
+
 /// As [`categories_of`], but an absent table is an empty list (projectiles
 /// and props omit it in the installed data).
 fn optional_categories_of(body: &Value) -> Result<Vec<String>, Error> {
@@ -759,8 +814,12 @@ fn economy_of(body: &Value) -> Result<Economy, Error> {
         production_per_second_mass: opt_number(t, "ProductionPerSecondMass", "Economy")?,
         storage_energy: opt_number(t, "StorageEnergy", "Economy")?,
         storage_mass: opt_number(t, "StorageMass", "Economy")?,
-        buildable_category: Vec::new(),
-        maintenance_consumption_per_second_energy: None,
+        buildable_category: opt_string_list(t, "BuildableCategory", "Economy")?,
+        maintenance_consumption_per_second_energy: opt_number(
+            t,
+            "MaintenanceConsumptionPerSecondEnergy",
+            "Economy",
+        )?,
     })
 }
 
@@ -770,11 +829,11 @@ fn physics_of(body: &Value) -> Result<Physics, Error> {
         motion_type: req_string(t, "MotionType", "Physics")?,
         max_speed: opt_number(t, "MaxSpeed", "Physics")?,
         turn_rate: opt_number(t, "TurnRate", "Physics")?,
-        max_acceleration: None,
-        max_brake: None,
-        elevation: None,
-        min_speed_percent: None,
-        build_restriction: None,
+        max_acceleration: opt_number(t, "MaxAcceleration", "Physics")?,
+        max_brake: opt_number(t, "MaxBrake", "Physics")?,
+        elevation: opt_number(t, "Elevation", "Physics")?,
+        min_speed_percent: opt_number(t, "MinSpeedPercent", "Physics")?,
+        build_restriction: opt_string(t, "BuildRestriction", "Physics")?,
     })
 }
 
@@ -818,29 +877,85 @@ fn weapons_of(body: &Value) -> Result<Vec<Weapon>, Error> {
                 rate_of_fire: opt_number(t, "RateOfFire", &parent)?,
                 max_radius: opt_number(t, "MaxRadius", &parent)?,
                 projectile_id: opt_string(t, "ProjectileId", &parent)?,
-                damage_radius: None,
-                damage_type: String::new(),
-                damage_friendly: None,
-                min_radius: None,
-                muzzle_velocity: None,
-                projectiles_per_on_fire: None,
-                muzzle_salvo_size: None,
-                muzzle_salvo_delay: None,
-                rack_salvo_reload_time: None,
-                rack_salvo_charge_time: None,
-                rack_salvo_fires_after_charge: None,
-                ballistic_arc: None,
-                target_priorities: Vec::new(),
-                fire_target_layer_caps: Vec::new(),
-                tracking_radius: None,
-                firing_tolerance: None,
-                target_check_interval: None,
-                weapon_category: String::new(),
-                turreted: None,
-                manual_fire: None,
+                damage_radius: opt_number(t, "DamageRadius", &parent)?,
+                damage_type: req_string(t, "DamageType", &parent)?,
+                damage_friendly: opt_bool(t, "DamageFriendly", &parent)?,
+                min_radius: opt_number(t, "MinRadius", &parent)?,
+                muzzle_velocity: opt_number(t, "MuzzleVelocity", &parent)?,
+                projectiles_per_on_fire: opt_number(t, "ProjectilesPerOnFire", &parent)?,
+                muzzle_salvo_size: opt_number(t, "MuzzleSalvoSize", &parent)?,
+                muzzle_salvo_delay: opt_number(t, "MuzzleSalvoDelay", &parent)?,
+                rack_salvo_reload_time: opt_number(t, "RackSalvoReloadTime", &parent)?,
+                rack_salvo_charge_time: opt_number(t, "RackSalvoChargeTime", &parent)?,
+                rack_salvo_fires_after_charge: opt_bool(t, "RackSalvoFiresAfterCharge", &parent)?,
+                ballistic_arc: opt_string(t, "BallisticArc", &parent)?,
+                target_priorities: opt_string_list(t, "TargetPriorities", &parent)?,
+                fire_target_layer_caps: fire_target_layer_caps_of(t, &parent)?,
+                tracking_radius: opt_number(t, "TrackingRadius", &parent)?,
+                firing_tolerance: opt_number(t, "FiringTolerance", &parent)?,
+                target_check_interval: opt_number(t, "TargetCheckInterval", &parent)?,
+                weapon_category: req_string(t, "WeaponCategory", &parent)?,
+                turreted: opt_bool(t, "Turreted", &parent)?,
+                manual_fire: opt_manual_fire(t, "ManualFire", &parent)?,
             })
         })
         .collect()
+}
+
+/// The `(layer, caps)` pairs of `FireTargetLayerCapsTable`, sorted by layer.
+fn fire_target_layer_caps_of(weapon: &Value, parent: &str) -> Result<Vec<(String, String)>, Error> {
+    let path = path_of(parent, "FireTargetLayerCapsTable");
+    match weapon.get("FireTargetLayerCapsTable") {
+        None | Some(Value::Nil) => Ok(Vec::new()),
+        Some(v) => named_entries(record_at(v, &path)?)
+            .into_iter()
+            .map(|(layer, caps)| Ok((layer.to_owned(), string_at(caps, &path_of(&path, layer))?)))
+            .collect(),
+    }
+}
+
+fn footprint_of(body: &Value) -> Result<Option<Footprint>, Error> {
+    match body.get("Footprint") {
+        None | Some(Value::Nil) => Ok(None),
+        Some(v) => {
+            let t = record_at(v, "Footprint")?;
+            Ok(Some(Footprint {
+                size_x: opt_number(t, "SizeX", "Footprint")?,
+                size_z: opt_number(t, "SizeZ", "Footprint")?,
+                min_water_depth: opt_number(t, "MinWaterDepth", "Footprint")?,
+            }))
+        }
+    }
+}
+
+/// The `General.CommandCaps` keys whose value is true, sorted ascending.
+fn command_caps_of(body: &Value) -> Result<Vec<String>, Error> {
+    let general = record_at(required(body, "General", "General")?, "General")?;
+    let path = "General.CommandCaps";
+    let caps = record_at(required(general, "CommandCaps", path)?, path)?;
+    let mut keys = Vec::new();
+    for (key, value) in named_entries(caps) {
+        if bool_at(value, &path_of(path, key))? {
+            keys.push(key.to_owned());
+        }
+    }
+    Ok(keys)
+}
+
+fn projectile_physics_of(body: &Value) -> Result<ProjectilePhysics, Error> {
+    let t = record_at(required(body, "Physics", "Physics")?, "Physics")?;
+    Ok(ProjectilePhysics {
+        initial_speed: opt_number(t, "InitialSpeed", "Physics")?,
+        max_speed: opt_number(t, "MaxSpeed", "Physics")?,
+        acceleration: opt_number(t, "Acceleration", "Physics")?,
+        turn_rate: opt_number(t, "TurnRate", "Physics")?,
+        lifetime: opt_number(t, "Lifetime", "Physics")?,
+        track_target: opt_bool(t, "TrackTarget", "Physics")?,
+        use_gravity: opt_bool(t, "UseGravity", "Physics")?,
+        lead_target: opt_bool(t, "LeadTarget", "Physics")?,
+        velocity_align: opt_bool(t, "VelocityAlign", "Physics")?,
+        destroy_on_water: opt_bool(t, "DestroyOnWater", "Physics")?,
+    })
 }
 
 /// Applies the contract for `kind` to `body` through `nickel-lang-core`.
@@ -882,8 +997,8 @@ pub fn unit_from_value(id: &str, body: &Value) -> Result<Unit, Error> {
         defense: defense_of(body)?,
         intel: intel_of(body)?,
         weapons: weapons_of(body)?,
-        footprint: None,
-        command_caps: Vec::new(),
+        footprint: footprint_of(body)?,
+        command_caps: command_caps_of(body)?,
     })
 }
 
@@ -896,18 +1011,7 @@ pub fn projectile_from_value(id: &str, body: &Value) -> Result<Projectile, Error
     Ok(Projectile {
         id: id.to_owned(),
         categories: optional_categories_of(body)?,
-        physics: ProjectilePhysics {
-            initial_speed: None,
-            max_speed: None,
-            acceleration: None,
-            turn_rate: None,
-            lifetime: None,
-            track_target: None,
-            use_gravity: None,
-            lead_target: None,
-            velocity_align: None,
-            destroy_on_water: None,
-        },
+        physics: projectile_physics_of(body)?,
     })
 }
 

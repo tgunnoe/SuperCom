@@ -74,7 +74,7 @@ let categories = import "categories.ncl" in
         WeaponCategory | String,
         Turreted | Bool | optional,
         # A boolean on 13 installed entries and the number 1 on 9.
-        ManualFire | Dyn | optional,
+        ManualFire | std.contract.from_predicate (fun v => v == true || v == false || v == 1) | optional,
         ..
       }
       | optional,
