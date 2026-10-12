@@ -838,7 +838,7 @@ fn physics_of(body: &Value) -> Result<Physics, Error> {
         elevation: opt_number(t, "Elevation", "Physics")?,
         min_speed_percent: opt_number(t, "MinSpeedPercent", "Physics")?,
         build_restriction: opt_string(t, "BuildRestriction", "Physics")?,
-        build_on_layer_caps: Vec::new(),
+        build_on_layer_caps: true_keys(t, "BuildOnLayerCaps", "Physics")?,
     })
 }
 
@@ -933,11 +933,9 @@ fn footprint_of(body: &Value) -> Result<Option<Footprint>, Error> {
     }
 }
 
-/// The `General.CommandCaps` keys whose value is true, sorted ascending.
-fn command_caps_of(body: &Value) -> Result<Vec<String>, Error> {
-    let general = record_at(required(body, "General", "General")?, "General")?;
-    let path = "General.CommandCaps";
-    let caps = record_at(required(general, "CommandCaps", path)?, path)?;
+/// The keys of the Boolean table `caps` (at `path`) whose value is true,
+/// sorted ascending.
+fn true_keys_of(caps: &Value, path: &str) -> Result<Vec<String>, Error> {
     let mut keys = Vec::new();
     for (key, value) in named_entries(caps) {
         if bool_at(value, &path_of(path, key))? {
@@ -945,6 +943,25 @@ fn command_caps_of(body: &Value) -> Result<Vec<String>, Error> {
         }
     }
     Ok(keys)
+}
+
+/// As [`true_keys_of`] for the table `key` of `table`; empty when absent.
+fn true_keys(table: &Value, key: &str, parent: &str) -> Result<Vec<String>, Error> {
+    let path = path_of(parent, key);
+    match table.get(key) {
+        None | Some(Value::Nil) => Ok(Vec::new()),
+        Some(v) => true_keys_of(record_at(v, &path)?, &path),
+    }
+}
+
+/// The `General.CommandCaps` keys whose value is true, sorted ascending.
+fn command_caps_of(body: &Value) -> Result<Vec<String>, Error> {
+    let general = record_at(required(body, "General", "General")?, "General")?;
+    let path = "General.CommandCaps";
+    true_keys_of(
+        record_at(required(general, "CommandCaps", path)?, path)?,
+        path,
+    )
 }
 
 fn projectile_physics_of(body: &Value) -> Result<ProjectilePhysics, Error> {
@@ -980,7 +997,10 @@ pub fn validate(kind: Kind, body: &Value) -> Result<(), Error> {
         Kind::Unit => {
             unit_from_value("", body)?;
         }
-        Kind::Projectile | Kind::Prop => {
+        Kind::Projectile => {
+            projectile_from_value("", body)?;
+        }
+        Kind::Prop => {
             optional_categories_of(body)?;
         }
     }
