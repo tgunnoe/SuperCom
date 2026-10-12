@@ -3,7 +3,7 @@
 
 Usage (exactly one mode per run):
   spec_lint.py --check PATH         clause grammar and evaluator references in PATH
-                                    (--observed-dir DIR, --design-exempt FILE)
+                                    (--observed-dir DIR, --design-exempt FILE, --adr-dir DIR)
   spec_lint.py --run PATH           run every script: evaluator in PATH (--timeout SECONDS)
   spec_lint.py --inventory FILE     engine-API inventory table (--min-engine-rows N, default 127)
   spec_lint.py --coverage SPEC DIR  clause minimums per domain; SPEC is DOMAIN=MIN/VERIFIED,...
@@ -215,6 +215,7 @@ class Rules:
 
     observed_dir: Path = DEFAULT_OBSERVED_DIR
     design_exempt: Path = DEFAULT_DESIGN_EXEMPT
+    adr_dir: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -566,16 +567,35 @@ def observed_problems(clause: Clause, rules: Rules) -> list[str]:
     return problems + record_problems(record, rules.observed_dir)
 
 
+def adr_problem(ref: str, ident: str, adr_dir: Path | None) -> str | None:
+    """Why the decision record `ref` cannot back clause `ident`; None when it can."""
+    shown = ref.partition("#")[0]
+    path = REPO_ROOT / shown if adr_dir is None else adr_dir / Path(shown).name
+    if (adr_dir is None and not repo_path_exists(shown)) or not path.is_file():
+        return f"design clause {ident} names {shown}, which does not exist"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        return f"design clause {ident} names {shown}, which cannot be read: {error}"
+    if re.search(rf"(?<![\w-]){re.escape(ident)}(?![\w-])", text, re.IGNORECASE) is None:
+        return f"design clause {ident}: {shown} must contain the clause ID {ident}"
+    return None
+
+
 def design_problems(clause: Clause, rules: Rules, exempt: dict[str, int]) -> list[str]:
     ident = clause.header.ident
     if clause.kind not in VERIFIED_KINDS or ident in exempt:
         return []
     text = " ".join(clause.statement)
-    if any(repo_path_exists(found.group()) for found in ADR_REF.finditer(text)):
+    refs = [found.group() for found in ADR_REF.finditer(text)]
+    adr_problems = [adr_problem(ref, ident, rules.adr_dir) for ref in refs]
+    if any(problem is None for problem in adr_problems):
         return []
-    record = own_record(clause)
-    if record is not None and not record_problems(record, rules.observed_dir):
+    if any(not record_problems(found["name"], rules.observed_dir)
+           for found in OBSERVED_REF.finditer(text)):
         return []
+    if adr_problems:
+        return [problem for problem in adr_problems if problem is not None]
     return [
         f"design clause {ident} with a {clause.kind}: evaluator must name a docs/adr/ path "
         f"or an observed record that exists, or be listed in {rules.design_exempt.name}"
@@ -991,6 +1011,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="with --check: the frozen list of design clauses exempt from naming a source",
     )
     parser.add_argument(
+        "--adr-dir",
+        type=Path,
+        metavar="DIR",
+        help="with --check: where a named docs/adr/<file>.md is resolved (default docs/adr)",
+    )
+    parser.add_argument(
         "--min-engine-rows",
         type=int,
         metavar="N",
@@ -1019,8 +1045,8 @@ def dispatch(args: argparse.Namespace) -> int:
         raise UsageError("--min-engine-rows applies only to --inventory")
     if args.timeout is not None and args.run is None:
         raise UsageError("--timeout applies only to --run")
-    if (args.observed_dir or args.design_exempt) and args.check is None:
-        raise UsageError("--observed-dir and --design-exempt apply only to --check")
+    if (args.observed_dir or args.design_exempt or args.adr_dir) and args.check is None:
+        raise UsageError("--observed-dir, --design-exempt and --adr-dir apply only to --check")
     if args.self_test:
         return self_test()
     if args.inventory is not None:
@@ -1042,7 +1068,9 @@ def dispatch(args: argparse.Namespace) -> int:
             raise UsageError("--timeout must be a positive number of seconds")
         return run_command(existing(args.run, "file or directory"), timeout)
     rules = Rules(
-        args.observed_dir or DEFAULT_OBSERVED_DIR, args.design_exempt or DEFAULT_DESIGN_EXEMPT
+        args.observed_dir or DEFAULT_OBSERVED_DIR,
+        args.design_exempt or DEFAULT_DESIGN_EXEMPT,
+        args.adr_dir,
     )
     return check_command(existing(args.check, "file or directory"), rules)
 
