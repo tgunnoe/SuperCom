@@ -16,10 +16,16 @@ pub fn canonical_f64_bits(x: f64) -> u64 {
 
 /// Append the canonical serialization S of `state` to `out` (DET-009).
 ///
-/// Field order, to be documented here by the implementation: the state's
-/// scalar fields, then each collection in ascending key order. Integers are
-/// little-endian, [`crate::Q`] values are their raw `i64` bits, and `f64`
-/// values go through [`canonical_f64_bits`].
+/// Field order: tick (LE64), seed (LE64), the generator state (LE64), next
+/// entity id (LE32), commands applied (LE64), commands ignored (LE64); the
+/// armies, a LE32 count then each in ascending slot order as slot (u8), mass,
+/// energy, mass storage, energy storage (each the raw `i64` bits of its
+/// [`crate::Q`], LE64), defeated (u8, 0 or 1); the entities, a LE32 count then
+/// each in ascending id order as id (LE32), army (u8), blueprint (LE32 length,
+/// bytes), x, y, z (each [`canonical_f64_bits`], LE64), health and max health
+/// (raw `i64` bits, LE64), then the queued orders (LE32 count, each in
+/// [`crate::Order::encode_into`]'s encoding, front to back). The chain head is
+/// not part of S.
 pub fn serialize(_state: &State, _out: &mut Vec<u8>) {}
 
 /// One link of the chain: `SHA-256(prev || LE64(tick) || LE64(len) || state)`
