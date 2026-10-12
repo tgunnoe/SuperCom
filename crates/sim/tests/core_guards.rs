@@ -8,7 +8,8 @@
 )]
 
 use supercom_sim::{
-    Army, Command, EntityId, Error, Order, Pos, Q, QueueMode, ScheduleError, State, Tick,
+    Army, Command, EntityId, Error, GENESIS, Order, Pos, Q, QueueMode, Rng, ScheduleError, State,
+    Tick, chain, serialize,
 };
 
 fn move_to(n: u32) -> Order {
@@ -101,4 +102,75 @@ fn step_refuses_a_source_and_seq_repeated_in_one_batch() {
         &batch,
         &Error::Schedule(ScheduleError::Duplicate { source: 1, seq: 7 }),
     );
+}
+
+/// Vigna's splitmix64.c for seed 0: the state advances by the increment, then
+/// the advanced state is mixed. Values are the reference's, not the crate's.
+#[test]
+fn sim_rng_matches_the_reference_splitmix64() {
+    let mut rng = Rng::from_seed(0);
+    let got = [rng.next_u64(), rng.next_u64(), rng.next_u64()];
+    assert_eq!(
+        got,
+        [
+            0xe220_a839_7b1d_cdaf,
+            0x6e78_9e6a_a1b9_65f4,
+            0x06c4_5d18_8009_454f
+        ]
+    );
+}
+
+/// A golden vector for a second seed, as the crate yields it at the commit
+/// that added this test; it pins the generator against any change of constant
+/// or shift.
+#[test]
+fn sim_rng_golden_vector_for_seed_1234567() {
+    let mut rng = Rng::from_seed(1_234_567);
+    let got: Vec<u64> = (0..5).map(|_| rng.next_u64()).collect();
+    assert_eq!(got, GOLDEN);
+}
+
+const GOLDEN: [u64; 5] = [
+    6_457_827_717_110_365_317,
+    3_203_168_211_198_807_973,
+    9_817_491_932_198_370_423,
+    4_593_380_528_125_082_431,
+    16_408_922_859_458_223_821,
+];
+
+/// S carries the generator's state at bytes 16 to 23, after tick and seed
+/// (DET-009); the literal is seed 5 plus one increment, little endian.
+#[test]
+fn sim_serialized_generator_field_is_the_state_after_a_draw() {
+    let mut s = State::new(5);
+    let _ = s.rng.next_u64();
+    let mut bytes = Vec::new();
+    serialize(&s, &mut bytes);
+    assert_eq!(bytes[16..24], 0x9E37_79B9_7F4A_7C1A_u64.to_le_bytes());
+}
+
+#[test]
+fn sim_mixed_ownership_command_is_ignored_whole() {
+    let mut s = world(0);
+    let mixed = command((0, 0, 0), 0, &[1, 3], move_to(1), QueueMode::Replace);
+    let before = s.entities.clone();
+    s.step(&[mixed]).expect("a well-formed batch");
+    assert_eq!(s.entities, before, "no queue may change");
+    assert_eq!(s.counters.commands_ignored, 1);
+    assert_eq!(s.counters.commands_applied, 0);
+}
+
+/// Each digest is `chain(prev, t, S)` for the tick `t` just run and S
+/// serialized from the state after the step (DET-010).
+#[test]
+fn sim_step_digest_is_chain_over_the_end_of_tick_state() {
+    let mut s = world(3);
+    let mut prev = GENESIS;
+    for t in 0..2 {
+        let digest = s.step(&[]).expect("an empty batch");
+        let mut bytes = Vec::new();
+        serialize(&s, &mut bytes);
+        assert_eq!(digest, chain(&prev, Tick(t), &bytes), "tick {t}");
+        prev = digest;
+    }
 }
