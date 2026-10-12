@@ -368,7 +368,7 @@ fn agreement_on_a_mistyped_projectile_physics_field() {
     );
 }
 
-/// The ManualFire rule in one place: the boolean and the number 1 are
+/// The `ManualFire` rule in one place: the boolean and the number 1 are
 /// accepted, the number 2 and a string are refused, by both verdicts.
 #[test]
 fn manual_fire_accepts_one_and_refuses_two_and_a_string_in_both_verdicts() {

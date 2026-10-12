@@ -387,11 +387,13 @@ fn conformance_data_build_on_layer_caps() {
     let mut true_counts: std::collections::BTreeMap<String, usize> =
         std::collections::BTreeMap::new();
     for (key, value) in tables.iter().flatten() {
-        let Key::Name(name) = key else {
-            panic!("a positional BuildOnLayerCaps key");
-        };
-        let Value::Bool(b) = value else {
-            panic!("{name} is not a boolean: {value:?}");
+        let (Key::Name(name), Value::Bool(b)) = (key, value) else {
+            // A positional key or a non-boolean value: counted as a failure
+            // by the exact-equality assertion below.
+            *true_counts
+                .entry(format!("unexpected {key:?}={value:?}"))
+                .or_default() += 1;
+            continue;
         };
         *true_counts.entry(name.clone()).or_default() += usize::from(*b);
     }

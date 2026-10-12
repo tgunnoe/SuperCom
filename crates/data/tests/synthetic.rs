@@ -854,7 +854,7 @@ fn build_on_layer_caps_are_the_sorted_true_keys_and_empty_when_absent() {
         ["LAYER_Land", "LAYER_Seabed", "LAYER_Water"]
     );
     let bare = unit_from_value("xyz0031", &table(minimal_unit())).expect("projects");
-    assert!(bare.physics.build_on_layer_caps.is_empty());
+    assert_eq!(bare.physics.build_on_layer_caps, Vec::<String>::new());
 }
 
 /// A layer capability that is not a boolean is a `Type` error at its path.
