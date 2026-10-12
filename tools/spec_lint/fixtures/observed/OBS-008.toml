@@ -1,0 +1,9 @@
+[provenance]
+build     = "build-0001"
+date      = "2026-01-01"
+observer  = 1
+platform  = "linux"
+procedure = "ran the scripted scenario OBS-008"
+
+[numbers]
+ticks = 100

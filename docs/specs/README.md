@@ -56,9 +56,21 @@ The header line holds three parts, separated by single spaces:
   - `design`: a decision of this project that the original never exposed
     (the command stream, the replay format, state hashing, the WIT API, a
     budget), or a deviation from the installed game, which cites its ratified
-    ADR. A design clause never states how the original behaves.
+    ADR. A design clause never states how the original behaves. A design
+    clause with a `test:` or `script:` evaluator names in its statement a
+    `docs/adr/` path that exists and contains the clause's ID, or an
+    `observed` record, unless its ID is in
+    `tools/spec_lint/design_without_source.txt`, the frozen list of the clauses
+    that predate this rule; the list only shrinks.
   - `derived`: follows from other clauses, which its statement names by ID.
     Its evaluator still checks it.
+  - `observed`: a rule whose numbers come from a numbers-only record of the
+    original running. The statement names the record by path,
+    `tools/spec_eval/sim/observed/<ID>.toml` with the clause's own ID, and the
+    evaluator is a `test:` that compares the sim to the record. The record
+    opens with a `[provenance]` table of non-empty strings `procedure`,
+    `build`, `platform`, `date`, and `observer`; the observer is never the
+    clause's author.
 - **Evaluator reference**, in backticks, exactly one of the forms below.
 
 | Evaluator reference           | Resolves when                                                                                |
@@ -108,14 +120,14 @@ alone. `just lint` runs its self-test, then `--check docs/specs`, then
 `file:line: message`. The exit status is 0 when clean, 1 on findings, and 2 on a
 usage error.
 
-| Mode                                               | Succeeds when                                                                                                                                    |
-| :------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--check <dir-or-file>`                            | every clause is well-formed, IDs are unique, and every evaluator reference resolves                                                              |
-| `--run <dir-or-file> [--timeout <seconds>]`        | no `script:` evaluator of a well-formed clause fails when run from the repository root                                                           |
-| `--coverage <domain>=<min>/<verified>[,...] <dir>` | each `<dir>/<domain>.md` has at least `<min>` well-formed clauses, at least `<verified>` of them machine-verified; a missing file counts as zero |
-| `--inventory <file> [--min-engine-rows <n>]`       | every inventory row is well-formed and there are at least `<n>` engine rows (default 127)                                                        |
-| `--require <ID> <file>`                            | the file holds a well-formed clause with exactly that ID                                                                                         |
-| `--self-test`                                      | every fixture under `tools/spec_lint/fixtures/` behaves as its `.expect` file says                                                               |
+| Mode                                               | Succeeds when                                                                                                                                                                                                |
+| :------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--check <dir-or-file>`                            | every clause is well-formed, IDs are unique, every evaluator reference resolves, every `observed` record is sound, and every `design` clause with a `test:` or `script:` evaluator has a source or is frozen |
+| `--run <dir-or-file> [--timeout <seconds>]`        | no `script:` evaluator of a well-formed clause fails when run from the repository root                                                                                                                       |
+| `--coverage <domain>=<min>/<verified>[,...] <dir>` | each `<dir>/<domain>.md` has at least `<min>` well-formed clauses, at least `<verified>` of them machine-verified; a missing file counts as zero                                                             |
+| `--inventory <file> [--min-engine-rows <n>]`       | every inventory row is well-formed and there are at least `<n>` engine rows (default 127)                                                                                                                    |
+| `--require <ID> <file>`                            | the file holds a well-formed clause with exactly that ID                                                                                                                                                     |
+| `--self-test`                                      | every fixture under `tools/spec_lint/fixtures/` behaves as its `.expect` file says                                                                                                                           |
 
 `--coverage` and `--require` check form only: they do not resolve evaluator
 references.
