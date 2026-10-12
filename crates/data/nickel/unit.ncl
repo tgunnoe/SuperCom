@@ -88,7 +88,6 @@ let categories = import "categories.ncl" in
         SizeX | Number | optional,
         SizeZ | Number | optional,
         MinWaterDepth | Number | optional,
-        MaxWaterDepth | Number | optional,
         ..
       }
       | optional,

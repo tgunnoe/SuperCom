@@ -242,8 +242,7 @@ fn conformance_data_build_and_placement_fields() {
 
 /// Pins the physics and footprint fields (DAT-033): `MaxAcceleration` 149,
 /// `MaxBrake` 124, `Elevation` 95, `MinSpeedPercent` 519; a `Footprint` in
-/// 402 units with `SizeX` and `SizeZ` in 363 and `MinWaterDepth` in 48, and
-/// `MaxWaterDepth` in none.
+/// 402 units with `SizeX` and `SizeZ` in 363 and `MinWaterDepth` in 48.
 #[test]
 fn conformance_data_physics_and_footprint_fields() {
     let Some(fa) = supercom_testkit::require_game() else {
@@ -290,13 +289,6 @@ fn conformance_data_physics_and_footprint_fields() {
         range_of(&footprints, |f| f.min_water_depth),
         Some((0.0, 2.0)),
         "MinWaterDepth range"
-    );
-    // Parser level: no installed Footprint table names MaxWaterDepth, so the
-    // projection must read none (it guards against a misread key).
-    assert_eq!(
-        count_some(&footprints, |f| f.max_water_depth),
-        0,
-        "MaxWaterDepth"
     );
 }
 

@@ -78,8 +78,6 @@ pub struct Footprint {
     pub size_z: Option<f64>,
     /// Shallowest water the unit may occupy.
     pub min_water_depth: Option<f64>,
-    /// Deepest water the unit may occupy.
-    pub max_water_depth: Option<f64>,
 }
 
 /// A unit's defence block.
@@ -416,7 +414,7 @@ const WEAPON: &[&str] = &[
     "ManualFire",
 ];
 const GENERAL: &[&str] = &["CommandCaps"];
-const FOOTPRINT: &[&str] = &["SizeX", "SizeZ", "MinWaterDepth", "MaxWaterDepth"];
+const FOOTPRINT: &[&str] = &["SizeX", "SizeZ", "MinWaterDepth"];
 const PROJECTILE_PHYSICS: &[&str] = &[
     "InitialSpeed",
     "MaxSpeed",

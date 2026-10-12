@@ -312,7 +312,6 @@ fn a_fully_populated_unit_validates() {
                 name("SizeX", num(1.0)),
                 name("SizeZ", num(1.0)),
                 name("MinWaterDepth", num(0.0)),
-                name("MaxWaterDepth", num(5.0)),
             ]),
         ),
     ]);

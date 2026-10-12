@@ -480,7 +480,6 @@ fn footprint_is_none_when_absent_and_partial_when_present() {
             size_x: None,
             size_z: Some(3.0),
             min_water_depth: Some(1.5),
-            max_water_depth: None,
         })
     );
 }
