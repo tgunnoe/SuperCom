@@ -58,7 +58,8 @@ The header line holds three parts, separated by single spaces:
     budget), or a deviation from the installed game, which cites its ratified
     ADR. A design clause never states how the original behaves. A design
     clause with a `test:` or `script:` evaluator names in its statement a
-    `docs/adr/` path that exists, or an `observed` record, unless its ID is in
+    `docs/adr/` path that exists and contains the clause's ID, or an
+    `observed` record, unless its ID is in
     `tools/spec_lint/design_without_source.txt`, the frozen list of the clauses
     that predate this rule; the list only shrinks.
   - `derived`: follows from other clauses, which its statement names by ID.

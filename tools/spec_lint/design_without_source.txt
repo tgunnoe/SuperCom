@@ -1,4 +1,4 @@
-# Design clauses with a test: or script: evaluator that name no ADR or observed record.
+# design clauses with a test: or script: evaluator that predate the source rule; exempt from naming a source; never extended
 # The list only shrinks: cite a source and delete the line.
 DAT-001
 DAT-002

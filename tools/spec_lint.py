@@ -36,7 +36,8 @@ running. Its evaluator is a test: reference; its statement names the record path
 tools/spec_eval/sim/observed/<its own ID>.toml, which must exist under the record
 directory (--observed-dir) and hold a [provenance] table of non-empty strings
 procedure, build, platform, date, and observer. A `design` clause with a test: or
-script: evaluator must name an existing docs/adr/ path or such a record, unless its
+script: evaluator must name an existing docs/adr/ path that contains its ID (--adr-dir)
+or such a record, unless its
 ID is in the frozen list (--design-exempt, default tools/spec_lint/design_without_source.txt:
 one ID per line, `#` comments). The list only shrinks, and an ID in it that is not a
 design clause with a test: or script: evaluator in a checked directory is a finding.
