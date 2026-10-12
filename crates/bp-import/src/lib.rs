@@ -95,7 +95,7 @@ const ARCHIVES: [&str; 6] = [
 const CACHE_FILE: &str = "catalog.json";
 
 /// Bump when the cached layout or the import's reading of a member changes.
-const CACHE_FORMAT: u32 = 2;
+const CACHE_FORMAT: u32 = 3;
 
 fn archive_path(install: &Path, name: &str) -> PathBuf {
     install.join("gamedata").join(name)
