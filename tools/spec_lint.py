@@ -3,6 +3,7 @@
 
 Usage (exactly one mode per run):
   spec_lint.py --check PATH         clause grammar and evaluator references in PATH
+                                    (--observed-dir DIR, --design-exempt FILE)
   spec_lint.py --run PATH           run every script: evaluator in PATH (--timeout SECONDS)
   spec_lint.py --inventory FILE     engine-API inventory table (--min-engine-rows N, default 127)
   spec_lint.py --coverage SPEC DIR  clause minimums per domain; SPEC is DOMAIN=MIN/VERIFIED,...
@@ -29,6 +30,16 @@ IDs are unique across the files checked, compared without regard to case.
 An inventory is a pipe table whose header names Name, Owner, and Citation (any order,
 other columns allowed). Every row needs a name, an owner of engine or lua, and a
 citation that holds at least one locator. Other tables in the file are ignored.
+
+An `observed` clause is a rule whose numbers come from a record of the original
+running. Its evaluator is a test: reference; its statement names the record path
+tools/spec_eval/sim/observed/<its own ID>.toml, which must exist under the record
+directory (--observed-dir) and hold a [provenance] table of non-empty strings
+procedure, build, platform, date, and observer. A `design` clause with a test: or
+script: evaluator must name an existing docs/adr/ path or such a record, unless its
+ID is in the frozen list (--design-exempt, default tools/spec_lint/design_without_source.txt:
+one ID per line, `#` comments). The list only shrinks, and an ID in it that is not a
+design clause with a test: or script: evaluator in a checked directory is a finding.
 
 A source: reference, and every locator in a Citation cell, is checked for form only:
 an https:// URL (a github.com or raw.githubusercontent.com URL must carry a commit of
@@ -66,6 +77,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import tomllib
 import urllib.parse
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
@@ -75,10 +87,16 @@ TOOL_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TOOL_DIR.parent
 FIXTURES = TOOL_DIR / "spec_lint" / "fixtures"
 
-EVIDENCE_CLASSES = ("game-data", "reference", "engine-stub", "design", "derived")
+EVIDENCE_CLASSES = ("game-data", "reference", "engine-stub", "design", "derived", "observed")
 CLASS_LIST = ", ".join(sorted(EVIDENCE_CLASSES))
 EVALUATOR_KINDS = ("test", "script", "source")
 VERIFIED_KINDS = frozenset({"test", "script"})
+OBSERVED_PREFIX = "tools/spec_eval/sim/observed"
+PROVENANCE_KEYS = ("procedure", "build", "platform", "date", "observer")
+DEFAULT_OBSERVED_DIR = REPO_ROOT / OBSERVED_PREFIX
+DEFAULT_DESIGN_EXEMPT = TOOL_DIR / "spec_lint" / "design_without_source.txt"
+OBSERVED_REF = re.compile(re.escape(OBSERVED_PREFIX) + r"/(?P<name>[A-Za-z0-9_-]+)\.toml")
+ADR_REF = re.compile(r"docs/adr/[^\s`'\"<>()\[\],;]*[^\s`'\"<>()\[\],;.]")
 MISSING_CLASS = f"missing evidence class (one of {CLASS_LIST})"
 MISSING_EVALUATOR = "missing evaluator reference (test:, script:, or source:)"
 
@@ -129,6 +147,7 @@ UNESCAPED_PIPE = re.compile(r"(?<!\\)\|")
 
 MIN_RED_FIXTURES = 8
 MIN_GREEN_FIXTURES = 2
+MIN_OBSERVED_FIXTURES = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +168,7 @@ class Header:
     refs: tuple[str, ...]
     ident_ok: bool
     problems: tuple[str, ...]
+    evidence: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,6 +207,14 @@ class Draft:
     starts_paragraph: bool
     column_zero: bool
     statement: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class Rules:
+    """Where observed records live and which design clauses are exempt from needing a source."""
+
+    observed_dir: Path = DEFAULT_OBSERVED_DIR
+    design_exempt: Path = DEFAULT_DESIGN_EXEMPT
 
 
 @dataclass(frozen=True, slots=True)
@@ -302,7 +330,7 @@ def parse_header(text: str) -> Header:
         for ref in refs
         if ref_kind(ref) is None
     ]
-    return Header(ident, tuple(refs), ident_ok, tuple(problems))
+    return Header(ident, tuple(refs), ident_ok, tuple(problems), evidence)
 
 
 def scan(path: str, text: str) -> list[Clause]:
@@ -478,7 +506,85 @@ def unresolved(clause: Clause) -> str | None:
     return unresolved_source(payload)
 
 
-def judge_clause(clause: Clause, first_seen: dict[str, Clause]) -> list[Finding]:
+def exempt_ids(path: Path) -> dict[str, int]:
+    """The frozen list's IDs (as written) with their line numbers."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise UsageError(f"cannot read the design exemption list {path}: {error}") from error
+    found: dict[str, int] = {}
+    for number, line in enumerate(text.splitlines(), start=1):
+        body = line.strip()
+        if not body or body.startswith("#"):
+            continue
+        if not CLAUSE_ID.fullmatch(body):
+            raise UsageError(f"{path}:{number}: {body!r} is not a clause ID")
+        found.setdefault(body, number)
+    return found
+
+
+def record_problems(name: str, observed_dir: Path) -> list[str]:
+    """Why the observed record named `name` is unsound; empty when it is."""
+    shown = f"observed record {OBSERVED_PREFIX}/{name}.toml"
+    path = observed_dir / f"{name}.toml"
+    if not path.is_file():
+        return [f"{shown} does not exist under {observed_dir.name}/"]
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
+        return [f"{shown} cannot be read as TOML: {error}"]
+    provenance = data.get("provenance")
+    if not isinstance(provenance, dict):
+        return [f"{shown} has no [provenance] table"]
+    problems = []
+    for key in PROVENANCE_KEYS:
+        if key not in provenance:
+            problems.append(f"{shown}: [provenance] lacks {key!r}")
+        elif not isinstance(provenance[key], str) or not provenance[key].strip():
+            problems.append(f"{shown}: [provenance] {key!r} must be a non-empty string")
+    return problems
+
+
+def own_record(clause: Clause) -> str | None:
+    """The record name in the statement that matches the clause's own ID, else None."""
+    ident = clause.header.ident.casefold()
+    for found in OBSERVED_REF.finditer(" ".join(clause.statement)):
+        if found["name"].casefold() == ident:
+            return found["name"]
+    return None
+
+
+def observed_problems(clause: Clause, rules: Rules) -> list[str]:
+    ident = clause.header.ident
+    problems = []
+    if clause.kind != "test":
+        problems.append(f"observed clause {ident} must use a test: evaluator")
+    record = own_record(clause)
+    if record is None:
+        problems.append(f"observed clause {ident} must name {OBSERVED_PREFIX}/{ident}.toml")
+        return problems
+    return problems + record_problems(record, rules.observed_dir)
+
+
+def design_problems(clause: Clause, rules: Rules, exempt: dict[str, int]) -> list[str]:
+    ident = clause.header.ident
+    if clause.kind not in VERIFIED_KINDS or ident in exempt:
+        return []
+    text = " ".join(clause.statement)
+    if any(repo_path_exists(found.group()) for found in ADR_REF.finditer(text)):
+        return []
+    record = own_record(clause)
+    if record is not None and not record_problems(record, rules.observed_dir):
+        return []
+    return [
+        f"design clause {ident} with a {clause.kind}: evaluator must name a docs/adr/ path "
+        f"or an observed record that exists, or be listed in {rules.design_exempt.name}"
+    ]
+
+
+def judge_clause(
+    clause: Clause, first_seen: dict[str, Clause], rules: Rules, exempt: dict[str, int]
+) -> list[Finding]:
     messages = clause.problems
     well_formed = not messages
     if clause.header.ident_ok:
@@ -492,6 +598,10 @@ def judge_clause(clause: Clause, first_seen: dict[str, Clause]) -> list[Finding]
             )
     if well_formed and (reason := unresolved(clause)):
         messages.append(reason)
+    if well_formed and clause.header.evidence == "observed":
+        messages += observed_problems(clause, rules)
+    if well_formed and clause.header.evidence == "design":
+        messages += design_problems(clause, rules, exempt)
     return [Finding(clause.path, clause.line, message) for message in messages]
 
 
@@ -499,15 +609,32 @@ def spec_files(root: Path) -> list[Path]:
     return sorted(root.rglob("*.md")) if root.is_dir() else [root]
 
 
-def check_command(root: Path) -> int:
+def check_command(root: Path, rules: Rules) -> int:
     files = spec_files(root)
+    exempt = exempt_ids(rules.design_exempt)
     findings: list[Finding] = []
     first_seen: dict[str, Clause] = {}
+    gated: set[str] = set()
     clauses = 0
     for path in files:
         for clause in scan(str(path), path.read_text(encoding="utf-8")):
             clauses += 1
-            findings += judge_clause(clause, first_seen)
+            findings += judge_clause(clause, first_seen, rules, exempt)
+            if clause.header.evidence == "design" and clause.kind in VERIFIED_KINDS:
+                gated.add(clause.header.ident)
+    if root.is_dir():
+        # A single file holds too few clauses to tell a stale entry from an absent one.
+        findings += [
+            Finding(
+                str(rules.design_exempt),
+                line,
+                f"{ident} is listed in {rules.design_exempt.name} but is not a design "
+                "clause with a test: or script: evaluator in "
+                f"{root}",
+            )
+            for ident, line in exempt.items()
+            if ident not in gated
+        ]
     for finding in findings:
         print(finding)
     if findings:
@@ -690,6 +817,11 @@ def run_suite(fixtures: list[Path]) -> int:
         problems.append(f"found {green} green fixtures, need at least {MIN_GREEN_FIXTURES}")
     for fixture in fixtures:
         problems += judge_fixture(fixture)
+    observed = [fixture.name for fixture in fixtures if "observed" in fixture.name]
+    if len(observed) < MIN_OBSERVED_FIXTURES:
+        problems.append(
+            f"found {len(observed)} observed fixtures, need at least {MIN_OBSERVED_FIXTURES}"
+        )
     listings = workspace_tests.cache_info().misses
     if listings > 1:
         problems.append(f"`cargo nextest list` ran {listings} times; it must run once per process")
@@ -697,6 +829,8 @@ def run_suite(fixtures: list[Path]) -> int:
         print(f"self-test: {problem}")
     if problems:
         return 1
+    for name in observed:
+        print(f"self-test: observed case ok: {name}")
     print(f"self-test: {red} red and {green} green fixtures behave as expected")
     return 0
 
@@ -845,6 +979,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     modes.add_argument("--self-test", action="store_true", help="run the fixture suite")
     parser.add_argument(
+        "--observed-dir",
+        type=Path,
+        metavar="DIR",
+        help=f"with --check: where observed records live (default {OBSERVED_PREFIX})",
+    )
+    parser.add_argument(
+        "--design-exempt",
+        type=Path,
+        metavar="FILE",
+        help="with --check: the frozen list of design clauses exempt from naming a source",
+    )
+    parser.add_argument(
         "--min-engine-rows",
         type=int,
         metavar="N",
@@ -873,6 +1019,8 @@ def dispatch(args: argparse.Namespace) -> int:
         raise UsageError("--min-engine-rows applies only to --inventory")
     if args.timeout is not None and args.run is None:
         raise UsageError("--timeout applies only to --run")
+    if (args.observed_dir or args.design_exempt) and args.check is None:
+        raise UsageError("--observed-dir and --design-exempt apply only to --check")
     if args.self_test:
         return self_test()
     if args.inventory is not None:
@@ -893,7 +1041,10 @@ def dispatch(args: argparse.Namespace) -> int:
         if not (math.isfinite(timeout) and timeout > 0):
             raise UsageError("--timeout must be a positive number of seconds")
         return run_command(existing(args.run, "file or directory"), timeout)
-    return check_command(existing(args.check, "file or directory"))
+    rules = Rules(
+        args.observed_dir or DEFAULT_OBSERVED_DIR, args.design_exempt or DEFAULT_DESIGN_EXEMPT
+    )
+    return check_command(existing(args.check, "file or directory"), rules)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
