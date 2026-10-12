@@ -1,3 +1,5 @@
+<!-- spec-lint: --check {file} --design-exempt {dir}/exempt-test-refs.txt -->
+
 # Green: test references resolve against the workspace test list
 
 **FMT-001** `design` `test:override_wins_over_home`
