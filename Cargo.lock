@@ -1785,7 +1785,6 @@ version = "0.0.1"
 dependencies = [
  "fixed",
  "libm",
- "sha2 0.10.9",
 ]
 
 [[package]]
@@ -1819,6 +1818,15 @@ dependencies = [
  "supercom-dds",
  "supercom-scd",
  "supercom-testkit",
+]
+
+[[package]]
+name = "supercom-sim"
+version = "0.0.1"
+dependencies = [
+ "fixed",
+ "libm",
+ "sha2 0.10.9",
 ]
 
 [[package]]

@@ -5,10 +5,8 @@
 //! the constants at the top of the test file, and record the date, platform,
 //! and compiler in that file's header.
 
-use supercom_detbench::command::{schedule, synthetic_commands};
 use supercom_detbench::fixedpoint::mac_steps;
 use supercom_detbench::floats::{basic_ops_bits, libm_exp_bits, libm_sin_bits, libm_sqrt_bits};
-use supercom_detbench::hash::{chain_all, hex, scheduled_run, synthetic_states};
 
 /// `v` as `0x` and sixteen hex digits in groups of four, as clippy wants.
 fn word(v: u64) -> String {
@@ -61,16 +59,4 @@ fn main() {
         mac.len(),
         cells.join(", ")
     );
-
-    let hashes = chain_all(&synthetic_states(16));
-    if let (Some(first), Some(last)) = (hashes.first(), hashes.last()) {
-        println!("const CHAIN_FIRST_HEX: &str = \"{}\";", hex(first));
-        println!("const CHAIN_LAST_HEX: &str = \"{}\";", hex(last));
-    }
-
-    if let Ok(sched) = schedule(&synthetic_commands(), 0) {
-        if let Some(last) = scheduled_run(&sched, 8).last() {
-            println!("const SCHEDULED_LAST_HEX: &str = \"{}\";", hex(last));
-        }
-    }
 }

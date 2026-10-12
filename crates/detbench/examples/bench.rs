@@ -4,7 +4,7 @@
 //! `cargo run --release -p supercom-detbench --example bench`.
 //! It is not a test and not part of the gate. It compares the platform's
 //! transcendentals with `libm`'s, floating-point multiply-accumulate with
-//! fixed-point, and SHA-256 chaining at sim-state sizes, and it reports where
+//! fixed-point, and it reports where
 //! the platform and `libm` disagree and what the default NaN looks like here.
 //!
 //! The example reads the clock, as the sim must not; it is a measuring tool,
@@ -19,7 +19,6 @@ use std::hint::black_box;
 use std::time::Instant;
 
 use supercom_detbench::fixedpoint::Q;
-use supercom_detbench::hash::{GENESIS, chain};
 
 const N: usize = 1 << 20;
 const REPEATS: usize = 7;
@@ -136,25 +135,6 @@ fn main() {
         "mac   f64 {f64_ns:7.2} ns/op   I32F32 {q_ns:7.2} ns/op   raw i64 {raw_ns:7.2} ns/op   I32F32/f64 {:5.2}x",
         q_ns / f64_ns
     );
-
-    // The chain at sim-state sizes: cost of hashing a whole state once a tick.
-    for kib in [1usize, 64, 1024, 4096] {
-        let state: Vec<u8> = (0..kib * 1024).map(|i| (i % 251) as u8).collect();
-        let reps = (64 * 1024 / kib).max(4);
-        let ns = ns_per_op(reps, || {
-            let mut prev = GENESIS;
-            for t in 0..reps {
-                prev = chain(&prev, t as u64, black_box(&state));
-            }
-            black_box(prev);
-        });
-        println!(
-            "chain {kib:5} KiB state {:9.1} us/tick   {:7.1} MiB/s   share of a 100 ms tick {:6.3}%",
-            ns / 1e3,
-            kib as f64 / 1024.0 / (ns / 1e9),
-            ns / 1e8 * 100.0
-        );
-    }
 
     // What the machine does with an invalid operation, at run time.
     let zero = black_box(0.0f64);
