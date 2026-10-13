@@ -87,7 +87,50 @@ impl core::error::Error for ReplayError {}
 
 /// Append `replay`'s bytes to `out` in the DET-026 layout.
 pub fn write_replay(replay: &Replay, out: &mut Vec<u8>) {
-    let _ = (replay, out);
+    let h = &replay.header;
+    out.extend_from_slice(MAGIC);
+    put_u32(out, h.format_version);
+    put_str(out, &h.engine_version);
+    put_str(out, &h.map);
+    out.extend_from_slice(&h.map_digest);
+    out.extend_from_slice(&h.catalog_digest);
+    put_len(out, h.plugins.len());
+    for (name, digest) in &h.plugins {
+        put_str(out, name);
+        out.extend_from_slice(digest);
+    }
+    put_len(out, h.players.len());
+    for (army, name) in &h.players {
+        out.push(army.0);
+        put_str(out, name);
+    }
+    out.extend_from_slice(&h.seed.to_le_bytes());
+    put_len(out, replay.commands.len());
+    for c in &replay.commands {
+        c.encode_into(out);
+    }
+    put_len(out, replay.checkpoints.len());
+    for (tick, digest) in &replay.checkpoints {
+        out.extend_from_slice(&tick.0.to_le_bytes());
+        out.extend_from_slice(digest);
+    }
+}
+
+const MAGIC: &[u8; 8] = b"SCREPLAY";
+
+fn put_u32(out: &mut Vec<u8>, v: u32) {
+    out.extend_from_slice(&v.to_le_bytes());
+}
+
+// A count over 4 GiB cannot occur; saturating keeps the writer total, as
+// the command encoder does.
+fn put_len(out: &mut Vec<u8>, n: usize) {
+    put_u32(out, u32::try_from(n).unwrap_or(u32::MAX));
+}
+
+fn put_str(out: &mut Vec<u8>, s: &str) {
+    put_len(out, s.len());
+    out.extend_from_slice(s.as_bytes());
 }
 
 /// Parse and validate a replay (DET-007, DET-008, DET-026).
