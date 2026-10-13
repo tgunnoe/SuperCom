@@ -1,12 +1,24 @@
 //! The replay log (DET-007, DET-008, DET-026): the project's own format, a
 //! header, the command log in schedule order, and hash checkpoints.
+//!
+//! The reader takes hostile bytes and is total. Every read goes through
+//! [`Cursor`], whose only primitive is `split_at_checked`, so no read can
+//! panic. A declared length is refused with `LengthExceedsInput` unless the
+//! input left holds it before any buffer is sized from it, and a declared
+//! element count is refused unless the input left holds that many minimum
+//! encodings; so every loop pass consumes at least one byte of a finite
+//! input and the number of passes is at most the input's length. A string,
+//! unit list, or checkpoint list is therefore no larger than the bytes it
+//! came from, and a command list grows only as records are actually parsed.
 
 use core::fmt;
 
-use crate::command::Command;
+use std::collections::BTreeSet;
+
+use crate::command::{Command, Order, QueueMode};
 use crate::error::Error;
-use crate::hash::Digest;
-use crate::ids::{Army, Tick};
+use crate::hash::{Digest, canonical_f64_bits};
+use crate::ids::{Army, EntityId, Pos, Tick};
 
 /// The format version this crate writes and reads.
 pub const REPLAY_FORMAT_VERSION: u32 = 1;
@@ -139,8 +151,72 @@ fn put_str(out: &mut Vec<u8>, s: &str) {
 ///
 /// [`Error::Replay`] for malformed or unordered bytes.
 pub fn read_replay(bytes: &[u8]) -> Result<Replay, Error> {
-    let _ = bytes;
-    Err(Error::Unimplemented)
+    let mut c = Cursor::new(bytes);
+    if c.fixed(MAGIC.len())? != MAGIC.as_slice() {
+        return Err(ReplayError::BadMagic.into());
+    }
+    let format_version = c.u32()?;
+    if format_version != REPLAY_FORMAT_VERSION {
+        return Err(ReplayError::UnsupportedVersion(format_version).into());
+    }
+    let engine_version = c.string()?;
+    let map = c.string()?;
+    let map_digest = c.digest()?;
+    let catalog_digest = c.digest()?;
+
+    let mut plugins = Vec::new();
+    for _ in 0..c.count(PLUGIN_MIN)? {
+        plugins.push((c.string()?, c.digest()?));
+    }
+    let mut players = Vec::new();
+    for _ in 0..c.count(PLAYER_MIN)? {
+        players.push((Army(c.u8()?), c.string()?));
+    }
+    let seed = c.u64()?;
+    let header = ReplayHeader {
+        format_version,
+        engine_version,
+        map,
+        map_digest,
+        catalog_digest,
+        plugins,
+        players,
+        seed,
+    };
+
+    let mut commands: Vec<Command> = Vec::new();
+    let mut seen = BTreeSet::new();
+    for index in 0..c.count(Command::MIN_ENCODED)? {
+        let cmd = c.command()?;
+        if let Some(prev) = commands.last() {
+            if (cmd.tick, cmd.source, cmd.seq) < (prev.tick, prev.source, prev.seq) {
+                return Err(ReplayError::RecordsOutOfOrder { index }.into());
+            }
+        }
+        if !seen.insert((cmd.source, cmd.seq)) {
+            return Err(ReplayError::DuplicateRecord { index }.into());
+        }
+        let slot = header.players.get(usize::from(cmd.source));
+        if slot.map(|(army, _)| *army) != Some(cmd.army) {
+            return Err(ReplayError::ArmyNotInSlot { index }.into());
+        }
+        commands.push(cmd);
+    }
+
+    let mut checkpoints: Vec<(Tick, Digest)> = Vec::new();
+    for index in 0..c.count(CHECKPOINT_LEN)? {
+        let tick = Tick(c.u64()?);
+        if checkpoints.last().is_some_and(|(prev, _)| tick <= *prev) {
+            return Err(ReplayError::CheckpointsNotAscending { index }.into());
+        }
+        checkpoints.push((tick, c.digest()?));
+    }
+
+    Ok(Replay {
+        header,
+        commands,
+        checkpoints,
+    })
 }
 
 /// Refuse, before tick 0, a replay whose content digests differ from the
@@ -154,14 +230,173 @@ pub fn check_content(
     map_digest: &Digest,
     catalog_digest: &Digest,
 ) -> Result<(), Error> {
-    let _ = (header, map_digest, catalog_digest);
-    Err(Error::Unimplemented)
+    if header.map_digest == *map_digest && header.catalog_digest == *catalog_digest {
+        Ok(())
+    } else {
+        Err(ReplayError::ContentMismatch.into())
+    }
+}
+
+/// Smallest encodings of one plugin entry, player entry, and checkpoint:
+/// what a declared count is checked against before any loop runs.
+const PLUGIN_MIN: usize = 4 + 32;
+const PLAYER_MIN: usize = 1 + 4;
+const CHECKPOINT_LEN: usize = 8 + 32;
+
+/// A read position over untrusted bytes. Every read is a checked split, so
+/// no read can index out of range; the offset of each failure is kept.
+pub(crate) struct Cursor<'a> {
+    rest: &'a [u8],
+    at: usize,
+}
+
+impl<'a> Cursor<'a> {
+    pub(crate) fn new(bytes: &'a [u8]) -> Self {
+        Self { rest: bytes, at: 0 }
+    }
+
+    /// Bytes consumed so far.
+    pub(crate) fn consumed(&self) -> usize {
+        self.at
+    }
+
+    fn split(&mut self, n: usize) -> Option<&'a [u8]> {
+        let (head, tail) = self.rest.split_at_checked(n)?;
+        self.rest = tail;
+        self.at = self.at.saturating_add(n);
+        Some(head)
+    }
+
+    /// `n` bytes of a fixed-width field.
+    fn fixed(&mut self, n: usize) -> Result<&'a [u8], ReplayError> {
+        self.split(n).ok_or(ReplayError::Truncated)
+    }
+
+    fn array<const N: usize>(&mut self) -> Result<[u8; N], ReplayError> {
+        <[u8; N]>::try_from(self.fixed(N)?).map_err(|_| ReplayError::Truncated)
+    }
+
+    fn u8(&mut self) -> Result<u8, ReplayError> {
+        Ok(u8::from_le_bytes(self.array()?))
+    }
+
+    fn u32(&mut self) -> Result<u32, ReplayError> {
+        Ok(u32::from_le_bytes(self.array()?))
+    }
+
+    fn u64(&mut self) -> Result<u64, ReplayError> {
+        Ok(u64::from_le_bytes(self.array()?))
+    }
+
+    fn digest(&mut self) -> Result<Digest, ReplayError> {
+        self.array()
+    }
+
+    /// A little-endian `f64` with any NaN mapped to the canonical one, the
+    /// value the sim would have hashed (DET-022).
+    fn f64(&mut self) -> Result<f64, ReplayError> {
+        let v = f64::from_bits(self.u64()?);
+        Ok(f64::from_bits(canonical_f64_bits(v)))
+    }
+
+    /// A declared length of `n` bytes, checked against the input left.
+    fn sized(&mut self, n: u32) -> Result<&'a [u8], ReplayError> {
+        let at = self.at;
+        usize::try_from(n)
+            .ok()
+            .and_then(|n| self.split(n))
+            .ok_or(ReplayError::LengthExceedsInput { at })
+    }
+
+    /// A declared element count whose elements each take at least `min`
+    /// bytes: refused unless the input left could hold them, so a loop over
+    /// the count consumes input every pass and ends within it.
+    fn count(&mut self, min: usize) -> Result<usize, ReplayError> {
+        let n = self.u32()?;
+        let at = self.at;
+        usize::try_from(n)
+            .ok()
+            .filter(|&n| {
+                n.checked_mul(min)
+                    .is_some_and(|need| need <= self.rest.len())
+            })
+            .ok_or(ReplayError::LengthExceedsInput { at })
+    }
+
+    fn string(&mut self) -> Result<String, ReplayError> {
+        let n = self.u32()?;
+        let raw = self.sized(n)?;
+        core::str::from_utf8(raw)
+            .map(str::to_owned)
+            .map_err(|_| ReplayError::BadString)
+    }
+
+    fn pos(&mut self) -> Result<Pos, ReplayError> {
+        Ok(Pos {
+            x: self.f64()?,
+            y: self.f64()?,
+            z: self.f64()?,
+        })
+    }
+
+    fn order(&mut self) -> Result<Order, ReplayError> {
+        Ok(match self.u8()? {
+            0 => Order::Move { to: self.pos()? },
+            1 => Order::Stop,
+            2 => Order::Attack {
+                target: EntityId(self.u32()?),
+            },
+            3 => Order::BuildMobile {
+                blueprint: self.string()?,
+                at: self.pos()?,
+            },
+            4 => Order::BuildFactory {
+                blueprint: self.string()?,
+            },
+            5 => Order::Guard {
+                target: EntityId(self.u32()?),
+            },
+            tag => return Err(ReplayError::BadOrderTag(tag)),
+        })
+    }
+
+    /// One command: the inverse of [`Command::encode_into`].
+    pub(crate) fn command(&mut self) -> Result<Command, ReplayError> {
+        let tick = Tick(self.u64()?);
+        let source = self.u8()?;
+        let seq = self.u32()?;
+        let army = Army(self.u8()?);
+        let units = {
+            let n = self.count(4)?;
+            let mut ids = Vec::with_capacity(n);
+            for _ in 0..n {
+                ids.push(EntityId(self.u32()?));
+            }
+            ids
+        };
+        let mode = match self.u8()? {
+            0 => QueueMode::Replace,
+            1 => QueueMode::Append,
+            m => return Err(ReplayError::BadMode(m)),
+        };
+        let order = self.order()?;
+        Ok(Command {
+            tick,
+            source,
+            seq,
+            army,
+            units,
+            order,
+            mode,
+        })
+    }
 }
 
 /// The commands stamped for `tick`, found by binary search on the stamp
 /// (DET-008).
 #[must_use]
 pub fn commands_at(replay: &Replay, tick: Tick) -> &[Command] {
-    let _ = (replay, tick);
-    &[]
+    let start = replay.commands.partition_point(|c| c.tick < tick);
+    let end = replay.commands.partition_point(|c| c.tick <= tick);
+    replay.commands.get(start..end).unwrap_or_default()
 }
