@@ -355,6 +355,10 @@ fn entity(id: u32, army: u8) -> Entity {
         pos: pos(f64::from(id), 0.5, -f64::from(id)),
         health: Q::from_num(10),
         max_health: Q::from_num(20),
+        built: Q::ZERO,
+        complete: true,
+        fraction: Q::ONE,
+        work: None,
         orders: [Order::Stop].into(),
     }
 }
@@ -422,8 +426,10 @@ fn sim_serialization_is_canonical() {
     // generator state, the next id, the two counters, the armies (count, then
     // id, mass, energy, mass storage, energy storage as raw i64 bits, the
     // defeated flag), then the entities (count, then id, army, blueprint
-    // length and bytes, x, y, z, health, max health, and the queued orders,
-    // counted, in the order encoding).
+    // length and bytes, x, y, z, health, max health, built, complete,
+    // fraction, work, and the queued orders, counted, in the order
+    // encoding). The counters carry builds completed and stall ticks, and
+    // each army its ledger of eight values.
     let mut s = State::new(5);
     s.add_army(
         Army(1),
@@ -445,12 +451,17 @@ fn sim_serialization_is_canonical() {
     want.extend_from_slice(&2u32.to_le_bytes()); // next id
     want.extend_from_slice(&0u64.to_le_bytes()); // commands applied
     want.extend_from_slice(&0u64.to_le_bytes()); // commands ignored
+    want.extend_from_slice(&0u64.to_le_bytes()); // builds completed
+    want.extend_from_slice(&0u64.to_le_bytes()); // stall ticks
     want.extend_from_slice(&1u32.to_le_bytes()); // one army
     want.push(1);
     for v in [3i64, 4, 5, 6] {
         want.extend_from_slice(&(v << 32).to_le_bytes());
     }
     want.push(0); // not defeated
+    for v in [0i64, 0, 0, 0, 0, 0, 1, 1] {
+        want.extend_from_slice(&(v << 32).to_le_bytes()); // the ledger
+    }
     want.extend_from_slice(&1u32.to_le_bytes()); // one entity
     want.extend_from_slice(&1u32.to_le_bytes()); // id
     want.push(1); // army
@@ -461,6 +472,10 @@ fn sim_serialization_is_canonical() {
     }
     want.extend_from_slice(&(10i64 << 32).to_le_bytes()); // health
     want.extend_from_slice(&(10i64 << 32).to_le_bytes()); // max health
+    want.extend_from_slice(&0i64.to_le_bytes()); // built
+    want.push(1); // complete
+    want.extend_from_slice(&(1i64 << 32).to_le_bytes()); // fraction
+    want.push(0); // no work
     want.extend_from_slice(&1u32.to_le_bytes()); // one queued order
     want.push(1); // Stop
     assert_eq!(bytes_of(&s), want);

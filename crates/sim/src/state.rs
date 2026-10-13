@@ -1,13 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
+use crate::build::total_work;
 use crate::command::{Command, Order, QueueMode};
+use crate::economy::Ledger;
 use crate::error::Error;
 use crate::hash::{Digest, GENESIS, chain, serialize};
 use crate::ids::{Army, EntityId, Pos, Q, Tick};
 use crate::rng::Rng;
 use crate::schedule::{Schedule, ScheduleError};
-use crate::world::World;
+use crate::world::{UnitKind, World};
 
 /// One phase of a tick (SIM-044).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,11 +44,34 @@ pub const PHASES: [Phase; 10] = [
 pub struct Entity {
     pub id: EntityId,
     pub army: Army,
+    /// The kind's id in ASCII lower case, the form the world's units are
+    /// keyed by (SIM-061).
     pub blueprint: String,
     pub pos: Pos,
     pub health: Q,
     pub max_health: Q,
+    /// Build work accumulated so far, in build-rate-seconds (SIM-059).
+    pub built: Q,
+    /// Whether the unit is finished; a spawned unit is.
+    pub complete: bool,
+    /// The fraction of its request granted in the last economy phase; 1
+    /// when it requested nothing (SIM-043).
+    pub fraction: Q,
+    /// The entity it is building or assisting this tick.
+    pub work: Option<EntityId>,
     pub orders: VecDeque<Order>,
+}
+
+impl Entity {
+    /// Build progress in `0..=1`: 1 once complete, else the work done over
+    /// the kind's build time (floored, SIM-056).
+    #[must_use]
+    pub fn progress(&self, kind: &UnitKind) -> Q {
+        if self.complete {
+            return Q::ONE;
+        }
+        self.built.saturating_div(total_work(kind)).min(Q::ONE)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -57,12 +82,16 @@ pub struct ArmyState {
     pub mass_storage: Q,
     pub energy_storage: Q,
     pub defeated: bool,
+    /// The last economy phase's settlement (SIM-058).
+    pub ledger: Ledger,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Counters {
     pub commands_applied: u64,
     pub commands_ignored: u64,
+    pub builds_completed: u64,
+    pub stall_ticks: u64,
 }
 
 /// The full simulation state.
@@ -125,11 +154,14 @@ impl State {
                 mass_storage,
                 energy_storage,
                 defeated: false,
+                ledger: Ledger::default(),
             },
         );
     }
 
     /// Spawn an entity at full `health` with the next id; ids ascend from 1.
+    /// The blueprint is stored ASCII lower-cased, the one form every lookup
+    /// reads (SIM-061).
     ///
     /// At saturation (`u32::MAX` spawns, which a match cannot reach) the
     /// counter stays at `u32::MAX`; the id is then already live, so this
@@ -140,19 +172,69 @@ impl State {
         if self.entities.contains_key(&id) {
             return id;
         }
+        let lower = blueprint.to_ascii_lowercase();
+        let built = self
+            .world
+            .units
+            .get(&lower)
+            .and_then(|k| k.build_time)
+            .unwrap_or(Q::ZERO);
         self.entities.insert(
             id,
             Entity {
                 id,
                 army,
-                blueprint: blueprint.to_owned(),
+                blueprint: lower,
                 pos,
                 health,
                 max_health: health,
+                built,
+                complete: true,
+                fraction: Q::ONE,
+                work: None,
                 orders: VecDeque::new(),
             },
         );
         id
+    }
+
+    /// Spawn an unfinished entity of `blueprint` (looked up after ASCII
+    /// lower-casing and stored in that form) with health 0, no work done,
+    /// and the kind's maximum health; `None` and no spawn for an unknown
+    /// blueprint or one without a build time (SIM-059).
+    pub fn spawn_under_construction(
+        &mut self,
+        army: Army,
+        blueprint: &str,
+        pos: Pos,
+    ) -> Option<EntityId> {
+        let key = blueprint.to_ascii_lowercase();
+        let kind = self.world.units.get(&key)?;
+        // A kind with no build time has no work to finish (SIM-056).
+        kind.build_time?;
+        let max_health = kind.max_health;
+        let id = self.next_id;
+        self.next_id = EntityId(id.0.saturating_add(1));
+        if self.entities.contains_key(&id) {
+            return Some(id);
+        }
+        self.entities.insert(
+            id,
+            Entity {
+                id,
+                army,
+                blueprint: key,
+                pos,
+                health: Q::ZERO,
+                max_health,
+                built: Q::ZERO,
+                complete: false,
+                fraction: Q::ONE,
+                work: None,
+                orders: VecDeque::new(),
+            },
+        );
+        Some(id)
     }
 
     /// Run one tick: apply `commands` in the order given (the caller passes a
@@ -215,14 +297,15 @@ impl State {
         Ok(())
     }
 
-    /// Every phase but the commands is a no-op until its rules land; each
-    /// that visits entities will do so in ascending id (SIM-036).
+    /// The commands, economy, and build phases run their rules; the others
+    /// are no-ops until theirs land. Each that visits entities does so in
+    /// ascending id (SIM-036).
     fn run_phase(&mut self, phase: Phase, commands: &[Command]) {
         match phase {
             Phase::Commands => self.apply_commands(commands),
-            Phase::Economy
-            | Phase::Build
-            | Phase::Movement
+            Phase::Economy => self.run_economy(),
+            Phase::Build => self.run_build(),
+            Phase::Movement
             | Phase::Weapons
             | Phase::Projectiles
             | Phase::Damage
@@ -248,6 +331,10 @@ impl State {
             for id in &c.units {
                 if let Some(e) = self.entities.get_mut(id) {
                     if c.mode == QueueMode::Replace {
+                        // The old head no longer explains the work item, so
+                        // the work ends here, as after a Stop (SIM-045,
+                        // SIM-061); the unfinished entity stays in place.
+                        e.work = None;
                         e.orders.clear();
                     }
                     e.orders.push_back(c.order.clone());
@@ -282,6 +369,9 @@ impl State {
                     mass: a.mass,
                     energy: a.energy,
                     defeated: a.defeated,
+                    mass_storage: a.mass_storage,
+                    energy_storage: a.energy_storage,
+                    ledger: a.ledger,
                 })
                 .collect(),
             entities: self
@@ -293,6 +383,8 @@ impl State {
                     pos: e.pos,
                     health: e.health,
                     max_health: e.max_health,
+                    built: e.built,
+                    complete: e.complete,
                 })
                 .collect(),
         }
@@ -329,6 +421,8 @@ pub struct EntitySnapshot {
     pub pos: Pos,
     pub health: Q,
     pub max_health: Q,
+    pub built: Q,
+    pub complete: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -336,5 +430,8 @@ pub struct ArmySnapshot {
     pub id: Army,
     pub mass: Q,
     pub energy: Q,
+    pub mass_storage: Q,
+    pub energy_storage: Q,
     pub defeated: bool,
+    pub ledger: Ledger,
 }

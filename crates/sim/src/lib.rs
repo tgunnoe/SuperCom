@@ -5,7 +5,9 @@
 //! no unordered collection (I2). `docs/adr/0008-simulation-core.md` records
 //! the design choices this crate makes.
 
+mod build;
 mod command;
+mod economy;
 mod error;
 mod hash;
 mod ids;
@@ -15,7 +17,9 @@ mod schedule;
 mod state;
 mod world;
 
+pub use build::{BUILD_RANGE, BUILD_TIME_FLOOR, BuildRates, build_rates, footprint_of, total_work};
 pub use command::{Command, Order, QueueMode};
+pub use economy::{Ledger, per_tick};
 pub use error::{Error, IngestError};
 pub use hash::{Digest, GENESIS, canonical_f64_bits, chain, first_divergence, serialize};
 pub use ids::{Army, EntityId, Pos, Q, Tick};
