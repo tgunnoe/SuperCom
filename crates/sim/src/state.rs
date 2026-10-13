@@ -240,13 +240,13 @@ impl State {
     /// The chain value after the last completed tick.
     #[must_use]
     pub fn head(&self) -> Digest {
-        GENESIS
+        self.head
     }
 
     /// Replace the chain head, so a state rebuilt from a checkpoint extends
     /// the chain from the checkpoint's digest (the head lies outside S).
     pub fn set_head(&mut self, head: Digest) {
-        let _ = head;
+        self.head = head;
     }
 
     /// An owned view of the state for readers (SIM-046).
