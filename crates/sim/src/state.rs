@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::Arc;
 
 use crate::command::{Command, Order, QueueMode};
 use crate::error::Error;
@@ -6,6 +7,7 @@ use crate::hash::{Digest, GENESIS, chain, serialize};
 use crate::ids::{Army, EntityId, Pos, Q, Tick};
 use crate::rng::Rng;
 use crate::schedule::{Schedule, ScheduleError};
+use crate::world::World;
 
 /// One phase of a tick (SIM-044).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,6 +78,9 @@ pub struct State {
     /// The chain value after the last completed tick; not part of the
     /// serialized state, which the chain hashes after it (DET-010).
     head: Digest,
+    /// The immutable world the state was constructed with; outside S, set
+    /// once at construction and never reassigned (SIM-036).
+    world: Arc<World>,
 }
 
 impl State {
@@ -91,7 +96,14 @@ impl State {
             entities: BTreeMap::new(),
             counters: Counters::default(),
             head: GENESIS,
+            world: Arc::new(World::empty()),
         }
+    }
+
+    /// The world the state was constructed with.
+    #[must_use]
+    pub fn world(&self) -> &Arc<World> {
+        &self.world
     }
 
     /// Add an army (not defeated), replacing any army with the same slot.

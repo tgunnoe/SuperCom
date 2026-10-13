@@ -1827,6 +1827,21 @@ dependencies = [
  "fixed",
  "libm",
  "sha2 0.10.9",
+ "supercom-data",
+]
+
+[[package]]
+name = "supercom-sim-ingest"
+version = "0.0.1"
+dependencies = [
+ "sha2 0.10.9",
+ "supercom-bp",
+ "supercom-bp-import",
+ "supercom-data",
+ "supercom-scmap",
+ "supercom-sim",
+ "supercom-testkit",
+ "tempfile",
 ]
 
 [[package]]

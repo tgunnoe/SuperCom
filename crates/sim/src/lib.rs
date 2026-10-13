@@ -13,9 +13,10 @@ mod replay;
 mod rng;
 mod schedule;
 mod state;
+mod world;
 
 pub use command::{Command, Order, QueueMode};
-pub use error::Error;
+pub use error::{Error, IngestError};
 pub use hash::{Digest, GENESIS, canonical_f64_bits, chain, first_divergence, serialize};
 pub use ids::{Army, EntityId, Pos, Q, Tick};
 pub use replay::{
@@ -26,4 +27,8 @@ pub use rng::Rng;
 pub use schedule::{Schedule, ScheduleError, schedule};
 pub use state::{
     ArmySnapshot, ArmyState, Counters, Entity, EntitySnapshot, PHASES, Phase, Snapshot, State, run,
+};
+pub use world::{
+    BuildRestriction, Faction, Layer, LayerSet, MapGrid, Marker, MarkerKind, MotionType, OrderCaps,
+    OrderKind, ProjectileKind, UnitKind, WeaponKind, World, catalog_digest, map_digest,
 };

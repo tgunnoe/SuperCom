@@ -12,6 +12,7 @@ version      = { workspace = true }
 workspace = true
 
 [dependencies]
-fixed = "1"
-libm  = { default-features = false, version = "0.2" }
-sha2  = "0.10"
+fixed         = "1"
+libm          = { default-features = false, version = "0.2" }
+sha2          = "0.10"
+supercom-data = { path = "../data", version = "0.0.1" }
