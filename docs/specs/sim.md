@@ -130,7 +130,7 @@ The match result MUST be decided by a victory option: lua/victory.lua of lua.scd
 A skirmish MUST start with one commander per army, drawn from exactly the 4 COMMAND blueprints UEL0001 (UEF), UAL0001 (Aeon), URL0001 (Cybran), and XSL0001 (Seraphim); the Lua side starts armies through InitializeArmies, CreateInitialArmyGroup, CreateResources, and CommanderWarpDelay in lua/sim/ScenarioUtilities.lua of mohodata.scd and through OnCreateHuman, OnCreateAI, OnSpawnPreBuiltUnits, InitializeEconomyState, OnDefeat, OnVictory, and OnDraw in lua/aibrain.lua of lua.scd.
 
 **SIM-036** `design` `source:AGENTS.md`
-One tick MUST be a pure function of the sim state and that tick's command batch: the sim visits entities in ascending entity ID, draws random numbers only from the seeded generator held in the state, and never reads the clock, the operating system's randomness, or the iteration order of an unordered container (R2, I2).
+One tick MUST be a pure function of the sim state, the immutable world the state was constructed with (identified by the catalog and map digests the replay header carries), and that tick's command batch: the sim visits entities in ascending entity ID, draws random numbers only from the seeded generator held in the state, and never reads the clock, the operating system's randomness, or the iteration order of an unordered container (R2, I2).
 
 ## Tick loop and command application
 
@@ -143,10 +143,27 @@ The commands stamped for a tick MUST be applied at the start of that tick in sch
 **SIM-046** `design` `test:sim_snapshot_lists_entities_in_id_order`
 The sim MUST give readers an owned snapshot of a state whose entities and armies are listed in ascending identifier order (SIM-036) with the state's values for position, health, and the armies' resources and defeat flag; the snapshot is recorded in `docs/adr/0008-simulation-core.md`. The test spawns entities and adds armies out of order and compares the snapshot with the state.
 
+## World and initial state
+
+**SIM-047** `game-data` `script:tools/spec_eval/sim/footprints.py SIM-047`
+The installed footprint table, lua/footprints.lua of mohodata.scd (no footprint member exists in lua.scd), MUST define MaxSlope 0.75 on every footprint whose layer caps include land: 10 of its 20 footprints, Vehicle1x1, Vehicle2x2, Vehicle5x5, Amphibious1x1, Amphibious3x3, Amphibious6x6, WaterLand1x1, WaterLand2x2, WaterLand3x3, and WaterLand5x5, and no other footprint defines one.
+
+**SIM-048** `design` `test:sim_land_passability_from_heightmap`
+A cell's slope MUST be the maximum absolute height difference over its four edges between adjacent corner samples, never a diagonal; a slope not exceeding the MaxSlope of SIM-047 MUST be a necessary condition for the cell's land passability, which later clauses may add conditions to and never remove; air MUST be passable everywhere; and the water, seabed, and sub layers MUST be absent from the passability grid, and so false, until a clause derives them from water elevation (SIM-033). No readable source states the original's slope function, so the gradient is the approximation of the two community map tools adopted pending an observation, recorded in `docs/adr/0010-ingest-and-initial-state.md`. The test builds an 8x8 heightmap with a flat region, a ramp, an edge of exactly 0.75, a cliff over it, and a planar ramp whose cells have a diagonal over 0.75 with every edge under it, and compares each cell with its own implementation.
+
+**SIM-049** `design` `test:sim_layer_set_and_caps_parse`
+The sim MUST read motion types (the 8 of SIM-029), layer keys (the 6 of SIM-030), command capabilities (the 21 of SIM-016), and build restrictions into closed sets and MUST refuse an unknown value as an ingest error, and MUST resolve each builder's buildable set once at ingest by SIM-011's rule; refusal is this project's choice, the original's behaviour on an unknown value being unobserved, and is recorded in `docs/adr/0010-ingest-and-initial-state.md`. The installed data uses RULEUBR_OnMassDeposit on 12 units and RULEUBR_OnHydrocarbonDeposit on 4, which conformance_ingest_world_from_the_installed_catalog pins. The test round-trips each closed set and compares the errors for unknown values.
+
+**SIM-050** `design` `test:sim_ingest_rounds_to_nearest_q_and_refuses_overflow`
+Every blueprint scalar the sim holds as a fixed-point number MUST be converted once at ingest to the nearest representable value, and a value of magnitude 2^31 or more, or not finite, MUST be an ingest error naming the field's path, never a wrap or a saturation; heightmap samples MUST convert exactly, which requires a scale that is a power of two no smaller than 2^-16 (every installed map stores 2^-7); geometry stays binary64 (ADR-0006); the rule is recorded in `docs/adr/0010-ingest-and-initial-state.md`. The test converts 0.1 and compares the raw bits with the nearest value, and refuses 2^31, a negative magnitude over it, and NaN.
+
+**SIM-051** `design` `test:sim_skirmish_places_commanders_and_starts_full`
+A skirmish MUST start with one army per player, slot n's commander (SIM-035) at the marker named ARMY_n at the marker's position with its kind's maximum health, and the army's stored mass and energy equal to the commander's storage values; the world MUST be identified by its catalog digest and its map digest, which lie outside the serialized state (SIM-036); starting resources as the commander's storage is this project's choice, recorded in `docs/adr/0010-ingest-and-initial-state.md`. The test starts a two-army skirmish on a synthetic world whose commanders differ in storage and health and compares each army, its unit, and the first digest across two constructions.
+
 ## Specification hygiene
 
 **SIM-037** `design` `script:tools/spec_eval/sim/catalog.py SIM-037`
-Every clause of this file whose class is derived MUST name at least one premise clause by ID, every ID a clause names MUST exist in this file, and the file holds 42 clauses; this guards the premise rule against drift.
+Every clause of this file whose class is derived MUST name at least one premise clause by ID, every ID a clause names MUST exist in this file, and the file holds 47 clauses; this guards the premise rule against drift.
 
 **SIM-038** `engine-stub` `script:tools/spec_eval/sim/catalog.py SIM-038`
 The engine-API inventory MUST list every function declared by the engine stubs for Unit (127), UnitWeapon (32), Projectile (35), Entity (64), and CAiBrain (68) at the pinned commit, 326 declarations in all, once per declaration, in stub line order, each citing its stub line; they carry 323 distinct names, because the CAiBrain stub declares CAiBrain:GetAvailableFactories (lines 244 and 251), CAiBrain:GetPlatoonUniquelyNamed (412 and 418), and CAiBrain:PickBestAttackVector (523 and 535) twice; the rows are generated by tools/spec_eval/sim/inventory.py.

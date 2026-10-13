@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::Arc;
 
 use crate::command::{Command, Order, QueueMode};
 use crate::error::Error;
@@ -6,6 +7,7 @@ use crate::hash::{Digest, GENESIS, chain, serialize};
 use crate::ids::{Army, EntityId, Pos, Q, Tick};
 use crate::rng::Rng;
 use crate::schedule::{Schedule, ScheduleError};
+use crate::world::World;
 
 /// One phase of a tick (SIM-044).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,12 +78,23 @@ pub struct State {
     /// The chain value after the last completed tick; not part of the
     /// serialized state, which the chain hashes after it (DET-010).
     head: Digest,
+    /// The immutable world the state was constructed with; outside S, set
+    /// once at construction and never reassigned (SIM-036).
+    world: Arc<World>,
 }
 
 impl State {
     /// An empty state at tick 0 whose generator is seeded from `seed`.
     #[must_use]
     pub fn new(seed: u64) -> State {
+        State::with_world(Arc::new(World::empty()), seed)
+    }
+
+    /// An empty state at tick 0 in `world`, whose generator is seeded from
+    /// `seed`. The resume path of a replay builds the world, checks its
+    /// digests against the header ([`World::check_replay`]), and starts here.
+    #[must_use]
+    pub fn with_world(world: Arc<World>, seed: u64) -> State {
         State {
             tick: Tick(0),
             seed,
@@ -91,7 +104,14 @@ impl State {
             entities: BTreeMap::new(),
             counters: Counters::default(),
             head: GENESIS,
+            world,
         }
+    }
+
+    /// The world the state was constructed with.
+    #[must_use]
+    pub fn world(&self) -> &Arc<World> {
+        &self.world
     }
 
     /// Add an army (not defeated), replacing any army with the same slot.
