@@ -167,6 +167,18 @@ pub struct Stratum {
     pub scale: f32,
 }
 
+/// The elevations of a map's water surface, in world units. The water's
+/// colours, reflection terms, textures, and waves are not read.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Water {
+    /// Elevation of the water surface.
+    pub elevation: f32,
+    /// Elevation of the deep-water level.
+    pub deep: f32,
+    /// Elevation of the abyss level.
+    pub abyss: f32,
+}
+
 /// A parsed `.scmap` map.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Map {
@@ -183,6 +195,8 @@ pub struct Map {
     /// The ten terrain texture layers in file order, unused ones with an
     /// empty `texture`.
     pub strata: Vec<Stratum>,
+    /// The water elevations; `None` when the map's presence byte is not 1.
+    pub water: Option<Water>,
 }
 
 impl Map {
@@ -223,7 +237,7 @@ impl Map {
         }
 
         let heightmap = read_heightmap(&mut file)?;
-        skip_to_strata(&mut file, version)?;
+        let water = skip_to_strata(&mut file, version)?;
         let mut strata = Vec::with_capacity(STRATA);
         for _ in 0..STRATA {
             let texture = file.cstr()?;
@@ -237,6 +251,7 @@ impl Map {
             preview,
             heightmap,
             strata,
+            water,
         })
     }
 }
@@ -268,7 +283,8 @@ fn read_heightmap(file: &mut Reader<'_>) -> Result<Heightmap, Error> {
 
 /// Walks the sections between the heightmap and the strata, in file order
 /// (importer lines 94-127), and leaves the cursor at the first stratum.
-fn skip_to_strata(file: &mut Reader<'_>, version: u32) -> Result<(), Error> {
+/// Returns the water elevations read on the way.
+fn skip_to_strata(file: &mut Reader<'_>, version: u32) -> Result<Option<Water>, Error> {
     // Shader, background, and sky cube paths.
     for _ in 0..3 {
         file.cstr()?;
@@ -296,7 +312,7 @@ fn skip_to_strata(file: &mut Reader<'_>, version: u32) -> Result<(), Error> {
     if version > 56 {
         file.skip(4)?;
     }
-    Ok(())
+    Ok(None)
 }
 
 /// Why a map could not be parsed.

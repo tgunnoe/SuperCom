@@ -61,6 +61,8 @@ struct Spec {
     cube_maps: usize,
     wave_generators: usize,
     strata: Vec<(&'static str, f32)>,
+    /// Surface, deep, and abyss elevations; `None` builds an absent block.
+    water: Option<(f32, f32, f32)>,
 }
 
 /// A built map and the offsets the tests patch or cut at.
@@ -95,6 +97,7 @@ impl Spec {
             cube_maps: 0,
             wave_generators: 0,
             strata: strata(&[(0, "/textures/test/a.dds", 4.0)]),
+            water: Some((0.25, 0.25, 0.25)),
         }
     }
 
@@ -119,6 +122,8 @@ impl Spec {
                     scale,
                 })
                 .collect(),
+            // The parser does not yet return the water; the decode flips this.
+            water: None,
         }
     }
 
@@ -159,8 +164,18 @@ impl Spec {
             put_cstr(&mut out, "/textures/environment/cube.dds");
         }
         put_f32s(&mut out, &[1.5; 23]); // lighting
-        out.push(1); // water present
-        put_f32s(&mut out, &[0.25; 23]);
+        match self.water {
+            Some((elevation, deep, abyss)) => {
+                out.push(1);
+                put_f32s(&mut out, &[elevation, deep, abyss]);
+                put_f32s(&mut out, &[0.25; 20]);
+            }
+            None => {
+                out.push(0);
+                put_f32s(&mut out, &[-10_000.0; 3]);
+                put_f32s(&mut out, &[0.25; 20]);
+            }
+        }
         put_cstr(&mut out, "watercube");
         put_cstr(&mut out, "waterramp");
         put_f32s(&mut out, &[2.0; 4]);
