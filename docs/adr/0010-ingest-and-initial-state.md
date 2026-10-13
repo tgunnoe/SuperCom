@@ -23,8 +23,9 @@ have a ratifiable source (AGENTS.md R2, R7).
   `World` from parsed values only; `crates/sim-ingest` reads the catalog, the
   map, and the save file and converts them. The conversion of the map
   parser's and the save parser's values into the sim's own types is
-  `crates/sim-ingest`'s, so the sim depends on the typed blueprint model and
-  on nothing that reads a file.
+  `crates/sim-ingest`'s, so the sim calls nothing that reads a file, while
+  its dependency closure includes the typed model's Nickel evaluator, which
+  does.
 - **Closed sets (SIM-049).** Motion types, layer keys, command capabilities,
   and build restrictions are read into enumerations, and an unknown value is
   an ingest error. The installed data uses the eight motion types of SIM-029,
@@ -40,8 +41,9 @@ have a ratifiable source (AGENTS.md R2, R7).
   conversion; a value of magnitude 2^31 or more, or not finite, is an ingest
   error naming the field's path. The largest installed value is 10,008,000
   (a build cost), well inside the range. Heightmap samples convert exactly:
-  the stored scale is 2^-7 on every installed map, and the loader requires a
-  power of two no smaller than 2^-16. Geometry stays `f64` (ADR-0006).
+  the stored scale is 2^-7 on every installed map, and the sim, not the
+  loader, requires a power of two from 2^-16 to 2^8 and refuses any other
+  scale. Geometry stays `f64` (ADR-0006).
 - **Slope and land passability (SIM-048).** A cell's slope is the maximum
   absolute height difference over its four edges between adjacent corner
   samples, never a diagonal, and a cell is land-passable when that slope does
@@ -56,31 +58,35 @@ have a ratifiable source (AGENTS.md R2, R7).
   elevation, which the map loader does not yet decode.
 - **Starting resources (SIM-051).** A skirmish starts each army with stored
   mass and energy equal to its commander's storage values, 650 and 4000 for
-  the four installed commanders. This is a design choice: the original's
-  readable Lua passes an army's starting resources from the scenario's army
-  table (SetArmyEconomy, two call sites in the scenario utilities of
-  mohodata.scd), and none of the 61 installed scenario files defines such a
-  table, so the values a skirmish starts with are set inside the engine,
-  unreadable; the commander's storage is an observation candidate. Slot `n`'s commander is
-  placed at the marker named `ARMY_n`, at the marker's position.
+  the four installed commanders. This is a design choice. The original's
+  readable Lua passes each army's Economy table from the installed save file
+  to SetArmyEconomy in the scenario utilities of mohodata.scd; every one of
+  the 374 army tables in the 61 save files holds mass 0 and energy 0, and
+  nothing readable raises the stores afterwards. The start at the commander's
+  storage is therefore this project's departure from the readable zeros,
+  pending the head's ruling or an observation of the original. Slot `n`'s
+  commander is placed at the marker named `ARMY_n`, at the marker's position.
 - **The catalog digest.** The replay header carries a catalog digest and a
   map digest (DET-007). The catalog digest is SHA-256 over a canonical
   encoding of every unit and projectile kind in id order, in little-endian
   fixed-width fields, documented on the digest function; it therefore covers
   exactly what the sim reads, not the files they came from, so a cosmetic
   change to a blueprint file does not change it and a change to a value the
-  sim reads does. Unit kinds are keyed by the blueprint id in ASCII upper
-  case, the form the specification cites: the importer's lower-case ids are
-  upper-cased once at ingest, the buildable matcher compares them
-  case-insensitively, and the upper-case form enters the digest. Projectile
-  kinds keep the importer's id, the lower-case member path that in-data
-  references use. The map digest covers the map name, the grid, and the
+  sim reads does. Unit and projectile kinds share one id form: ASCII lower
+  case, which every installed id already is. The world stores each kind under
+  its lower-cased id, references inside the data (a weapon's projectile id,
+  the id tokens of a buildable category) are lower-cased at ingest or
+  compared ignoring case, and two kinds of one family whose ids are equal
+  after lower-casing are refused. The specification's upper case spellings
+  name the same blueprints. The lower-case form enters the digest. The map digest covers the map name, the grid, and the
   markers, because the markers place the armies.
 - **The world outside S (SIM-036).** The state holds its world by shared
   reference, set at construction and never reassigned, and the world is not
   serialized: it is identified by the two digests, so the serialized state S
   (DET-009) and the core's golden vectors are unchanged. A tick is a pure
-  function of the state, its world, and the command batch.
+  function of the state, its world, and the command batch. A world's digests
+  identify its contents only when `World::from_parts` built it; a `World`
+  assembled by hand carries whatever digests it was given.
 
 ## Consequences
 
@@ -104,8 +110,8 @@ have a ratifiable source (AGENTS.md R2, R7).
 ## Open
 
 The water, seabed, and sub passability grids wait on water-elevation
-decoding in the map loader. The original's starting values and its slope
-function remain unobserved.
+decoding in the map loader. The original's starting stores, which the readable
+zeros do not settle, and its slope function remain unobserved.
 
 ## Alternatives Considered
 
