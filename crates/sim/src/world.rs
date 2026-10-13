@@ -164,15 +164,16 @@ pub enum BuildRestriction {
 }
 
 impl BuildRestriction {
-    /// Read the field: `None` for an absent field, the restriction for
-    /// `RULEUBR_OnMassDeposit` or `RULEUBR_OnHydrocarbonDeposit`.
+    /// Read the field: `None` for an absent field or an explicit
+    /// `RULEUBR_None`, the restriction for `RULEUBR_OnMassDeposit` or
+    /// `RULEUBR_OnHydrocarbonDeposit`.
     ///
     /// # Errors
     ///
     /// [`IngestError::UnknownBuildRestriction`] for any other value.
     pub fn from_rule(rule: Option<&str>) -> Result<BuildRestriction, Error> {
         match rule {
-            None => Ok(BuildRestriction::None),
+            None | Some("RULEUBR_None") => Ok(BuildRestriction::None),
             Some("RULEUBR_OnMassDeposit") => Ok(BuildRestriction::OnMassDeposit),
             Some("RULEUBR_OnHydrocarbonDeposit") => Ok(BuildRestriction::OnHydrocarbonDeposit),
             Some(other) => Err(IngestError::UnknownBuildRestriction(other.to_owned()).into()),
