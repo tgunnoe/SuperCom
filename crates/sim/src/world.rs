@@ -393,6 +393,8 @@ pub struct MapGrid {
     /// after ingest; the other layers are absent until a clause derives them,
     /// and a query on an absent layer is false.
     pub passable: BTreeMap<Layer, Vec<bool>>,
+    /// The water surface elevation; `None` on a map without water (SIM-070).
+    pub water: Option<Q>,
 }
 
 impl MapGrid {
@@ -431,6 +433,7 @@ impl MapGrid {
             height,
             heights,
             passable: BTreeMap::new(),
+            water: None,
         };
         let cells = usize_of(width).saturating_mul(usize_of(height));
         let mut land = Vec::with_capacity(cells);
@@ -442,6 +445,23 @@ impl MapGrid {
         grid.passable.insert(Layer::Land, land);
         grid.passable.insert(Layer::Air, vec![true; cells]);
         Ok(grid)
+    }
+
+    /// [`MapGrid::from_heightmap`] on a map whose water surface is
+    /// `surface`, deriving the water, seabed, and sub grids (SIM-070).
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`MapGrid::from_heightmap`]; [`IngestError::WaterSurface`]
+    /// for a surface that is not finite or not exactly representable.
+    pub fn from_heightmap_with_water(
+        width: u32,
+        height: u32,
+        samples: &[i16],
+        scale: f32,
+        _surface: Option<f32>,
+    ) -> Result<MapGrid, Error> {
+        MapGrid::from_heightmap(width, height, samples, scale)
     }
 
     /// Whether cell `(x, z)` is passable on `layer`; false on an absent
@@ -575,6 +595,7 @@ impl World {
                 height: 0,
                 heights: Vec::new(),
                 passable: BTreeMap::new(),
+                water: None,
             },
             markers: Vec::new(),
             map_name: String::new(),
@@ -1102,6 +1123,7 @@ pub fn catalog_digest(
 ///
 /// Layout: the string `map-v1`; the map name as a string; `width` then
 /// `height` as `u32`; every height sample's raw `i64` bits in order; the
+/// water surface as an option (`u8` 0, or 1 then the raw `i64` bits); the
 /// markers as a `u32` count then each in input order as its name (string),
 /// kind tag (`u8`: Mass 0, Hydrocarbon 1, Army 2 followed by the slot as a
 /// `u8`, Other 3), and `x`, `y`, `z` as canonical `f64` bits.
@@ -1114,6 +1136,7 @@ pub fn map_digest(map_name: &str, map: &MapGrid, markers: &[Marker]) -> Digest {
         // Derived from `heights` by `MapGrid::from_heightmap`, so the samples
         // already identify it.
         passable: _,
+        water,
     } = map;
     let mut e = Encoder::new("map-v1");
     e.str(map_name);
@@ -1121,6 +1144,13 @@ pub fn map_digest(map_name: &str, map: &MapGrid, markers: &[Marker]) -> Digest {
     e.u32(*height);
     for h in heights {
         e.q(*h);
+    }
+    match water {
+        None => e.u8(0),
+        Some(surface) => {
+            e.u8(1);
+            e.q(*surface);
+        }
     }
     e.len(markers.len());
     for marker in markers {

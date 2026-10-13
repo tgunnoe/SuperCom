@@ -12,7 +12,7 @@ use std::fmt::Write as _;
 
 use sha2::{Digest as _, Sha256};
 use supercom_sim::{
-    Army, Command, Digest, Entity, EntityId, Error, GENESIS, Order, PHASES, Phase, Pos, Q,
+    Army, Command, Digest, Entity, EntityId, Error, GENESIS, Layer, Order, PHASES, Phase, Pos, Q,
     QueueMode, Rng, Schedule, ScheduleError, State, Tick, canonical_f64_bits, chain,
     first_divergence, run, schedule, serialize,
 };
@@ -359,6 +359,12 @@ fn entity(id: u32, army: u8) -> Entity {
         complete: true,
         fraction: Q::ONE,
         work: None,
+        heading: 0.0,
+        speed: 0.0,
+        layer: Layer::Land,
+        route: Vec::new(),
+        goal: None,
+        maintenance_fraction: Q::ONE,
         orders: [Order::Stop].into(),
     }
 }
@@ -427,9 +433,10 @@ fn sim_serialization_is_canonical() {
     // id, mass, energy, mass storage, energy storage as raw i64 bits, the
     // defeated flag), then the entities (count, then id, army, blueprint
     // length and bytes, x, y, z, health, max health, built, complete,
-    // fraction, work, and the queued orders, counted, in the order
-    // encoding). The counters carry builds completed and stall ticks, and
-    // each army its ledger of eight values.
+    // fraction, work, heading, speed, layer, the route, the goal, the
+    // maintenance fraction, and the queued orders, counted, in the order
+    // encoding). The counters carry builds completed, stall ticks, and moves
+    // completed, and each army its ledger of eight values.
     let mut s = State::new(5);
     s.add_army(
         Army(1),
@@ -453,6 +460,7 @@ fn sim_serialization_is_canonical() {
     want.extend_from_slice(&0u64.to_le_bytes()); // commands ignored
     want.extend_from_slice(&0u64.to_le_bytes()); // builds completed
     want.extend_from_slice(&0u64.to_le_bytes()); // stall ticks
+    want.extend_from_slice(&0u64.to_le_bytes()); // moves completed
     want.extend_from_slice(&1u32.to_le_bytes()); // one army
     want.push(1);
     for v in [3i64, 4, 5, 6] {
@@ -476,6 +484,12 @@ fn sim_serialization_is_canonical() {
     want.push(1); // complete
     want.extend_from_slice(&(1i64 << 32).to_le_bytes()); // fraction
     want.push(0); // no work
+    want.extend_from_slice(&0u64.to_le_bytes()); // heading 0.0
+    want.extend_from_slice(&0u64.to_le_bytes()); // speed 0.0
+    want.push(1); // layer Land, declaration index 1
+    want.extend_from_slice(&0u32.to_le_bytes()); // empty route
+    want.push(0); // no goal
+    want.extend_from_slice(&(1i64 << 32).to_le_bytes()); // maintenance fraction
     want.extend_from_slice(&1u32.to_le_bytes()); // one queued order
     want.push(1); // Stop
     assert_eq!(bytes_of(&s), want);

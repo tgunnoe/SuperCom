@@ -15,7 +15,8 @@ use std::sync::Arc;
 
 use sha2::{Digest as _, Sha256};
 use supercom_sim::{
-    Army, BuildRestriction, Faction, Layer, MarkerKind, MotionType, Q, UnitKind, WeaponKind, World,
+    Army, BuildRestriction, Faction, Layer, MarkerKind, MotionType, ProjectileKind, Q, UnitKind,
+    WeaponKind, World,
 };
 use supercom_sim_ingest::load_world;
 
@@ -84,64 +85,100 @@ fn put_set<'a>(out: &mut Vec<u8>, items: impl ExactSizeIterator<Item = &'a Strin
 }
 
 fn put_weapon(out: &mut Vec<u8>, w: &WeaponKind) {
-    put_opt(out, w.label.as_deref(), put_str);
-    put_q(out, w.damage);
-    put_opt(out, w.damage_radius, put_f64);
-    put_str(out, &w.damage_type);
-    for v in [
-        w.rate_of_fire,
-        w.max_radius,
-        w.min_radius,
-        w.muzzle_velocity,
-    ] {
+    // No `..`: a field added to the world type fails to compile here until
+    // this independent encoder takes it into account.
+    let WeaponKind {
+        label,
+        damage,
+        damage_radius,
+        damage_type,
+        rate_of_fire,
+        max_radius,
+        min_radius,
+        muzzle_velocity,
+        projectile_id,
+        target_layers,
+        manual_fire,
+    } = w;
+    put_opt(out, label.as_deref(), put_str);
+    put_q(out, *damage);
+    put_opt(out, *damage_radius, put_f64);
+    put_str(out, damage_type);
+    for v in [*rate_of_fire, *max_radius, *min_radius, *muzzle_velocity] {
         put_opt(out, v, put_f64);
     }
-    put_opt(out, w.projectile_id.as_deref(), put_str);
-    out.push(w.target_layers.bits());
-    out.push(u8::from(w.manual_fire));
+    put_opt(out, projectile_id.as_deref(), put_str);
+    out.push(target_layers.bits());
+    out.push(u8::from(*manual_fire));
 }
 
 fn put_unit(out: &mut Vec<u8>, u: &UnitKind) {
-    put_str(out, &u.id);
-    put_set(out, u.categories.iter());
-    put_q(out, u.build_cost_mass);
-    put_q(out, u.build_cost_energy);
+    // No `..`: a field added to the world type fails to compile here until
+    // this independent encoder takes it into account.
+    let UnitKind {
+        id,
+        categories,
+        build_cost_mass,
+        build_cost_energy,
+        build_time,
+        build_rate,
+        production_mass,
+        production_energy,
+        storage_mass,
+        storage_energy,
+        maintenance_energy,
+        buildable,
+        motion,
+        max_speed,
+        turn_rate,
+        max_acceleration,
+        max_brake,
+        elevation,
+        build_restriction,
+        build_on,
+        footprint,
+        health,
+        max_health,
+        regen_rate,
+        armor_type,
+        vision_radius,
+        command_caps,
+        weapons,
+    } = u.clone();
+    put_str(out, &id);
+    put_set(out, categories.iter());
+    put_q(out, build_cost_mass);
+    put_q(out, build_cost_energy);
     for v in [
-        u.build_time,
-        u.build_rate,
-        u.production_mass,
-        u.production_energy,
-        u.storage_mass,
-        u.storage_energy,
-        u.maintenance_energy,
+        build_time,
+        build_rate,
+        production_mass,
+        production_energy,
+        storage_mass,
+        storage_energy,
+        maintenance_energy,
     ] {
         put_opt(out, v, put_q);
     }
-    put_set(out, u.buildable.iter());
-    out.push(u.motion as u8);
-    for v in [
-        u.max_speed,
-        u.turn_rate,
-        u.max_acceleration,
-        u.max_brake,
-        u.elevation,
-    ] {
+    put_set(out, buildable.iter());
+    out.push(motion as u8);
+    for v in [max_speed, turn_rate, max_acceleration, max_brake, elevation] {
         put_opt(out, v, put_f64);
     }
-    out.push(u.build_restriction as u8);
-    out.push(u.build_on.bits());
-    put_opt(out, u.footprint, |o, (x, z)| {
+    out.push(build_restriction as u8);
+    out.push(build_on.bits());
+    put_opt(out, footprint, |o, (x, z)| {
         put_u32(o, x);
         put_u32(o, z);
     });
-    put_q(out, u.health);
-    put_q(out, u.max_health);
-    put_opt(out, u.regen_rate, put_q);
-    put_str(out, &u.armor_type);
-    put_opt(out, u.vision_radius, put_f64);
-    put_u32(out, u.command_caps.bits());
-    put_u32(out, u32::try_from(u.weapons.len()).expect("few weapons"));
-    for w in &u.weapons {
+    put_q(out, health);
+    put_q(out, max_health);
+    put_opt(out, regen_rate, put_q);
+    put_str(out, &armor_type);
+    put_opt(out, vision_radius, put_f64);
+    put_u32(out, command_caps.bits());
+    put_u32(out, u32::try_from(weapons.len()).expect("few weapons"));
+    for w in &weapons {
         put_weapon(out, w);
     }
 }
@@ -157,19 +194,25 @@ fn expected_catalog_digest(world: &World) -> [u8; 32] {
         &mut out,
         u32::try_from(world.projectiles.len()).expect("projectiles"),
     );
-    for p in world.projectiles.values() {
-        put_str(&mut out, &p.id);
-        put_set(&mut out, p.categories.iter());
-        for v in [
-            p.initial_speed,
-            p.max_speed,
-            p.acceleration,
-            p.turn_rate,
-            p.lifetime,
-        ] {
+    for shot in world.projectiles.values() {
+        let ProjectileKind {
+            id,
+            categories,
+            initial_speed,
+            max_speed,
+            acceleration,
+            turn_rate,
+            lifetime,
+            track_target,
+            use_gravity,
+            destroy_on_water,
+        } = shot.clone();
+        put_str(&mut out, &id);
+        put_set(&mut out, categories.iter());
+        for v in [initial_speed, max_speed, acceleration, turn_rate, lifetime] {
             put_opt(&mut out, v, put_f64);
         }
-        out.extend([p.track_target, p.use_gravity, p.destroy_on_water].map(u8::from));
+        out.extend([track_target, use_gravity, destroy_on_water].map(u8::from));
     }
     Sha256::digest(&out).into()
 }

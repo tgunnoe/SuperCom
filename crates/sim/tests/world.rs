@@ -430,6 +430,7 @@ fn two_army_world() -> Arc<World> {
             height: 16,
             heights: vec![Q::ZERO; 17 * 17],
             passable: BTreeMap::new(),
+            water: None,
         },
         markers: vec![
             marker("ARMY_1", MarkerKind::Army(1), 2.5, 13.5),
