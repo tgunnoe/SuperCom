@@ -63,6 +63,42 @@ the choices by clause so the design clauses have a ratifiable source
 - **Refusals count as ignored commands (SIM-061).** An order that fails a
   kind or site check is dropped when it reaches the head of the queue and
   counted in the commands-ignored counter; an order out of range waits.
+- **Placement and range are `f64` geometry (SIM-061).** Positions and
+  distances are geometry under ADR-0006's exact operations; everything
+  economic is fixed-point. The site's height is the corner sample of the
+  map cell under the order's position, not the order's own height.
+- **The completing tick charges a whole tick (SIM-059).** The request is
+  settled before the build phase knows how little work remains, so the tick
+  that completes a build charges and grants a full tick's rates. The
+  overcharge measured over the installed builder-kind pairs exceeds 1 percent
+  on 75 of 1,220 pairs and reaches 20 percent at worst. Charging only the
+  remainder is open.
+- **A producer-builder's production is scaled by its own fraction
+  (SIM-043).** A unit that produces and builds draws a fraction below 1 under
+  a shortage, which scales its production and so deepens the shortage. With
+  no other income and nothing stored, its fraction and its income fall to
+  zero and the build freezes. Whether that is reachable depends on the
+  starting-resources question, SIM-051's recorded departure: an army that
+  starts with nothing stored would meet it on its first build. Scaling production
+  by the maintenance fraction alone, or solving the settlement with
+  production unscaled, is open for the head.
+- **An army without storage is clamped to 0 (SIM-058).** The clamp takes the
+  sum of complete units' storage, so an army with none holds nothing after a
+  settlement.
+- **Mobile units occupy their cell, the builder included (SIM-061).** A site
+  over any mobile unit's cell is refused, including the cell of the builder
+  that ordered it.
+- **A replacing command clears work as a Stop does (SIM-059 to SIM-061).**
+  The replaced target stops gaining and costing from that tick and stays in
+  place unfinished; a work item naming an entity that is gone or finished is
+  cleared at the start of the build phase.
+- **Only complete entities act (SIM-059, SIM-061).** An unfinished entity
+  starts no build, takes no Guard assignment, adds no work, and requests
+  nothing; its commands queue and wait. Any complete kind with a build rate
+  can assist a build, whether or not it can build the kind itself.
+- **An assist counts from the build phase after its Guard is assigned
+  (SIM-059).** The assignment is made at the end of a build phase, so the
+  assister's first contribution is the next one.
 - **The serialized state's appended fields (DET-009).** The counters gain
   builds completed and stall ticks; each army its ledger of eight values;
   each entity its work done, completion flag, fraction, and work item, in the
@@ -77,8 +113,9 @@ the choices by clause so the design clauses have a ratifiable source
 
 ### Positive
 
-- Every rule is fixed-point and visits entities in ascending id, so the
-  economy and build phases keep the tick a pure function of the state.
+- All economic quantities are fixed-point and every rule visits entities in
+  ascending id, so the economy and build phases keep the tick a pure
+  function of the state.
 - The ledger and the counters make a stall observable to readers without a
   second source of truth.
 
@@ -98,9 +135,10 @@ SIM-051's recorded departure.
 
 ## Alternatives Considered
 
-- A global per-army fraction for every consumer: rejected, because a unit
-  short of one resource would then be starved of the other, against the
-  installed cancellation of production by the consumed fraction.
+- A global per-army fraction for every consumer: rejected, because a mass
+  fabricator, which consumes only energy, would then be throttled by a mass
+  shortage it takes no part in, against the installed cancellation of
+  production by the consumed fraction.
 - Floating-point rates with a 0.1 literal: rejected, because rates, costs,
   and progress are simulation state and the float strategy keeps them
   fixed-point (ADR-0006).
