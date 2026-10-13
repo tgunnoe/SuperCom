@@ -180,3 +180,6 @@ fn army_slot(name: &str) -> Option<u8> {
     }
     digits.parse::<u8>().ok().filter(|n| *n >= 1)
 }
+
+#[cfg(test)]
+mod map_file_tests;

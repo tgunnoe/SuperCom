@@ -260,7 +260,7 @@ fn sim_ingest_rounds_to_nearest_q_and_refuses_overflow() {
     tenth.economy.build_cost_energy = 2_147_483_647.0;
     tenth.economy.storage_mass = Some(0.1);
     let world = from_units(&[tenth]).expect("values inside the range convert");
-    let kind = world.units.get("TENTH").expect("the unit is in the world");
+    let kind = world.units.get("tenth").expect("the unit is in the world");
     assert_eq!(kind.build_cost_mass.to_bits(), 429_496_730);
     assert_eq!(kind.storage_mass.map(Q::to_bits), Some(429_496_730));
     assert_eq!(kind.build_cost_energy.to_bits(), 2_147_483_647_i64 << 32);
@@ -417,8 +417,8 @@ fn marker(name: &str, kind: MarkerKind, x: f64, z: f64) -> Marker {
 /// so an army fed another army's values is caught.
 fn two_army_world() -> Arc<World> {
     let units: BTreeMap<String, UnitKind> = [
-        commander("UEL0001", 650, 4000, 5000),
-        commander("URL0001", 700, 4100, 6000),
+        commander("uel0001", 650, 4000, 5000),
+        commander("url0001", 700, 4100, 6000),
     ]
     .into_iter()
     .map(|k| (k.id.clone(), k))
@@ -455,8 +455,8 @@ fn sim_skirmish_places_commanders_and_starts_full() {
         [Army(1), Army(2)]
     );
     for (slot, id, mass, energy, health, x, z) in [
-        (1, "UEL0001", 650, 4000, 5000, 2.5, 13.5),
-        (2, "URL0001", 700, 4100, 6000, 13.5, 2.5),
+        (1, "uel0001", 650, 4000, 5000, 2.5, 13.5),
+        (2, "url0001", 700, 4100, 6000, 13.5, 2.5),
     ] {
         let army = &state.armies[&Army(slot)];
         assert_eq!(army.mass, Q::from_num(mass), "army {slot} mass");
@@ -499,7 +499,7 @@ fn sim_skirmish_places_commanders_and_starts_full() {
     assert_eq!(
         Arc::clone(&world).skirmish(7, &[Faction::Seraphim]),
         Err(Error::Ingest(IngestError::UnknownCommander(
-            "XSL0001".into()
+            "xsl0001".into()
         )))
     );
 

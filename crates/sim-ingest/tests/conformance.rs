@@ -326,7 +326,7 @@ fn conformance_ingest_skirmish_on_scmp_012() {
         .expect("a UEF and Cybran skirmish");
     assert_eq!(state.armies.len(), 2);
     assert_eq!(state.entities.len(), 2);
-    for (slot, id, health) in [(1_u8, "UEL0001", 12_000), (2, "URL0001", 10_000)] {
+    for (slot, id, health) in [(1_u8, "uel0001", 12_000), (2, "url0001", 10_000)] {
         let kind = world.units.get(id).expect("the commander kind");
         assert_eq!(kind.storage_mass, Some(Q::from_num(650)), "{id} storage");
         assert_eq!(kind.storage_energy, Some(Q::from_num(4000)), "{id} storage");
