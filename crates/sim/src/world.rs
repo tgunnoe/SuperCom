@@ -393,12 +393,13 @@ pub struct MapGrid {
 
 impl MapGrid {
     /// Build the grid from a heightmap's `i16` samples and its scale, and
-    /// derive the land and air passability grids (SIM-048). Stub.
+    /// derive the land and air passability grids (SIM-048): land is passable
+    /// where the cell's slope is at most [`MAX_SLOPE`], air everywhere.
     ///
     /// # Errors
     ///
-    /// [`IngestError::UnsupportedScale`] unless `scale` is a power of two no
-    /// smaller than 2^-16, so that every height converts exactly to [`Q`];
+    /// [`IngestError::UnsupportedScale`] unless `scale` is a power of two from
+    /// 2^-16 to 2^8, so that every height converts exactly to [`Q`];
     /// [`IngestError::HeightmapSize`] unless `samples` holds
     /// `(width + 1) * (height + 1)` values.
     pub fn from_heightmap(
@@ -407,33 +408,120 @@ impl MapGrid {
         samples: &[i16],
         scale: f32,
     ) -> Result<MapGrid, Error> {
-        let _ = (width, height, samples, scale);
-        Err(stub())
+        let shift = scale_shift(scale).ok_or(IngestError::UnsupportedScale(scale))?;
+        let stride = usize_of(width).saturating_add(1);
+        let expected = stride.saturating_mul(usize_of(height).saturating_add(1));
+        if samples.len() != expected {
+            return Err(IngestError::HeightmapSize {
+                expected,
+                found: samples.len(),
+            }
+            .into());
+        }
+        let heights: Vec<Q> = samples
+            .iter()
+            .map(|s| Q::from_bits(i64::from(*s) << shift))
+            .collect();
+        let mut grid = MapGrid {
+            width,
+            height,
+            heights,
+            passable: BTreeMap::new(),
+        };
+        let cells = usize_of(width).saturating_mul(usize_of(height));
+        let mut land = Vec::with_capacity(cells);
+        for z in 0..height {
+            for x in 0..width {
+                land.push(grid.slope(x, z) <= MAX_SLOPE);
+            }
+        }
+        grid.passable.insert(Layer::Land, land);
+        grid.passable.insert(Layer::Air, vec![true; cells]);
+        Ok(grid)
     }
 
     /// Whether cell `(x, z)` is passable on `layer`; false on an absent
-    /// layer. Stub.
+    /// layer and outside the grid.
     #[must_use]
     pub fn passable(&self, layer: Layer, x: u32, z: u32) -> bool {
-        let _ = (layer, x, z);
-        false
+        if x >= self.width || z >= self.height {
+            return false;
+        }
+        let index = usize_of(z)
+            .saturating_mul(usize_of(self.width))
+            .saturating_add(usize_of(x));
+        self.passable
+            .get(&layer)
+            .and_then(|cells| cells.get(index))
+            .copied()
+            .unwrap_or(false)
     }
 
     /// The cell's slope: the maximum absolute difference between adjacent
     /// corner samples over the cell's four edges, never a diagonal (SIM-048).
-    /// Stub.
+    /// Zero outside the grid.
     #[must_use]
     pub fn slope(&self, x: u32, z: u32) -> Q {
-        let _ = (x, z);
-        Q::ZERO
+        if x >= self.width || z >= self.height {
+            return Q::ZERO;
+        }
+        let corners = [
+            self.height_at(x, z),
+            self.height_at(x.saturating_add(1), z),
+            self.height_at(x.saturating_add(1), z.saturating_add(1)),
+            self.height_at(x, z.saturating_add(1)),
+        ];
+        let mut slope = Q::ZERO;
+        for (i, a) in corners.iter().enumerate() {
+            let b = corners[(i + 1) % corners.len()];
+            slope = slope.max((*a).max(b).saturating_sub((*a).min(b)));
+        }
+        slope
     }
 
-    /// The corner sample at `(x, z)`. Stub.
+    /// The corner sample at `(x, z)`; zero outside the `(width + 1) *
+    /// (height + 1)` sample grid.
     #[must_use]
     pub fn height_at(&self, x: u32, z: u32) -> Q {
-        let _ = (x, z);
-        Q::ZERO
+        if x > self.width || z > self.height {
+            return Q::ZERO;
+        }
+        let index = usize_of(z)
+            .saturating_mul(usize_of(self.width).saturating_add(1))
+            .saturating_add(usize_of(x));
+        self.heights.get(index).copied().unwrap_or(Q::ZERO)
     }
+}
+
+/// The steepest cell slope land units cross: `MaxSlope` 0.75 of the
+/// pathfinding mask (SIM-048).
+const MAX_SLOPE: Q = Q::from_bits(3 << 30);
+
+/// A `u32` as an index; the platforms the sim builds for have `usize` of at
+/// least 32 bits, and saturating keeps the helper total.
+fn usize_of(v: u32) -> usize {
+    usize::try_from(v).unwrap_or(usize::MAX)
+}
+
+/// The left shift that takes a stored sample to its [`Q`] bits when `scale`
+/// is 2^k for k in -16..=8, else `None`. The scale arrives as `f32` and is
+/// only inspected, never computed with: the sign, the mantissa, and the
+/// biased exponent are read from its bits.
+fn scale_shift(scale: f32) -> Option<u32> {
+    let bits = scale.to_bits();
+    let exponent = bits >> 23;
+    // Sign clear (the exponent field with its sign bit is below 0x100) and
+    // mantissa zero.
+    let pure_power = bits & 0x007f_ffff == 0 && exponent < 0x100;
+    if !pure_power {
+        return None;
+    }
+    // Q has 32 fractional bits, so 2^k scales a raw sample by << (32 + k);
+    // the biased exponent is 127 + k.
+    exponent
+        .checked_sub(127 - 16)
+        .filter(|e| *e <= 24)
+        .map(|e| e + 16)
 }
 
 /// The four playable factions and their commanders (SIM-035).
