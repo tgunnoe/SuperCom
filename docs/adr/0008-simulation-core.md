@@ -90,18 +90,27 @@ ratifiable source.
   plugin list, the player slots, and the 64-bit seed. The plugin list is
   empty in v0 because the first release runs no plugins (Q4), but is a list
   of name and digest pairs now so a later plugin set does not change the
-  layout; readers accept any length. Player i is the slot of source i, and
+  layout; the reader parses any length and `check_content` refuses a
+  non-empty list, as this version installs no plugin. Player i is the slot of source i, and
   a record must name that slot's army, which binds a command's army to the
   source that issued it. The tick rate is not stored: SIM-001 fixes it, so
   a stored copy could only disagree. The command log follows in schedule
   order and the checkpoints after it as ascending (tick, digest) pairs.
   The reader refuses a repeated `(source, seq)` anywhere in the log (the
   schedule's per-call check cannot see a pair repeated across ticks) and
-  checks every length against the remaining input before it allocates, so a
-  hostile length costs nothing. A resumed run needs the chain head, which
+  checks every length and count against the remaining input before it
+  allocates, so it never allocates a buffer larger than the input; the
+  decoded value is linear in the input with a constant factor of about
+  four for a log of minimal commands (measured at about 4.4 times for a
+  million of them), not bounded by the input's size. The reader is
+  strict: it accepts exactly the bytes the writer can produce, so it
+  refuses bytes after the last checkpoint and any non-canonical NaN
+  (DET-022), and a length error names the first byte of the length
+  field. A resumed run needs the chain head, which
   lies outside S, so `State` gains `head` and `set_head`. Checked by
   `sim_replay_round_trip`, `sim_replay_rejects_malformed`,
-  `sim_replay_fixture_is_byte_exact`, and `sim_run_resumes_from_a_checkpoint_head`.
+  `sim_replay_fixture_is_byte_exact`, `sim_run_resumes_from_a_checkpoint_head`,
+  and the guard tests in `crates/sim/tests/replay_guards.rs`.
 
 ## Consequences
 
