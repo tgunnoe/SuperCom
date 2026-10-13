@@ -78,8 +78,9 @@ have a ratifiable source (AGENTS.md R2, R7).
   the id tokens of a buildable category) are lower-cased at ingest or
   compared ignoring case, and two kinds of one family whose ids are equal
   after lower-casing are refused. The specification's upper case spellings
-  name the same blueprints. The lower-case form enters the digest. The map digest covers the map name, the grid, and the
-  markers, because the markers place the armies.
+  name the same blueprints. The lower-case form enters the digest. The map
+  digest covers the map name, the grid, and the markers, because the markers
+  place the armies.
 - **The world outside S (SIM-036).** The state holds its world by shared
   reference, set at construction and never reassigned, and the world is not
   serialized: it is identified by the two digests, so the serialized state S
