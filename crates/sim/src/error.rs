@@ -67,7 +67,7 @@ impl fmt::Display for IngestError {
             }
             Self::UnsupportedScale(s) => write!(
                 f,
-                "the heightmap scale {s} is not a power of two of at least 2^-16"
+                "the heightmap scale {s} is not a power of two from 2^-16 to 2^8"
             ),
             Self::MissingArmyMarker(n) => write!(f, "the map has no marker ARMY_{n}"),
             Self::UnknownCommander(id) => write!(f, "the catalog has no commander {id}"),

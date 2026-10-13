@@ -117,7 +117,8 @@ pub fn load_world(install: &Path, cache_dir: &Path, map_folder: &str) -> Result<
 }
 
 /// The bytes of the one file in `folder` whose name ends `suffix`, ignoring
-/// case; 23 of the installed map folders use lower-case prefixes.
+/// case. The match is by suffix because a folder's files need not carry the
+/// folder's name as their prefix.
 fn read_map_file(folder: &Path, name: &str, suffix: &str) -> Result<Vec<u8>, Error> {
     let io = |path: &Path, source| Error::Io {
         path: path.display().to_string(),
