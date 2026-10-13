@@ -36,13 +36,17 @@ fn put_len(out: &mut Vec<u8>, len: usize) {
 /// Append the canonical serialization S of `state` to `out` (DET-009).
 ///
 /// Field order: tick (LE64), seed (LE64), the generator state (LE64), next
-/// entity id (LE32), commands applied (LE64), commands ignored (LE64); the
-/// armies, a LE32 count then each in ascending slot order as slot (u8), mass,
-/// energy, mass storage, energy storage (each the raw `i64` bits of its
-/// [`crate::Q`], LE64), defeated (u8, 0 or 1); the entities, a LE32 count then
-/// each in ascending id order as id (LE32), army (u8), blueprint (LE32 length,
-/// bytes), x, y, z (each [`canonical_f64_bits`], LE64), health and max health
-/// (raw `i64` bits, LE64), then the queued orders (LE32 count, each in
+/// entity id (LE32), commands applied (LE64), commands ignored (LE64), builds
+/// completed (LE64), stall ticks (LE64); the armies, a LE32 count then each in
+/// ascending slot order as slot (u8), mass, energy, mass storage, energy
+/// storage (each the raw `i64` bits of its [`crate::Q`], LE64), defeated (u8,
+/// 0 or 1), then the ledger's eight values (income, requested, and granted for
+/// mass then energy, then the two fractions; raw `i64` bits, LE64); the
+/// entities, a LE32 count then each in ascending id order as id (LE32), army
+/// (u8), blueprint (LE32 length, bytes), x, y, z (each [`canonical_f64_bits`],
+/// LE64), health and max health (raw `i64` bits, LE64), built (raw bits),
+/// complete (u8), fraction (raw bits), work (u8 0, or u8 1 then the id LE32),
+/// then the queued orders (LE32 count, each in
 /// [`crate::Order::encode_into`]'s encoding, front to back). The chain head is
 /// not part of S.
 ///
@@ -56,6 +60,8 @@ pub fn serialize(state: &State, out: &mut Vec<u8>) {
     out.extend_from_slice(&state.next_id.0.to_le_bytes());
     out.extend_from_slice(&state.counters.commands_applied.to_le_bytes());
     out.extend_from_slice(&state.counters.commands_ignored.to_le_bytes());
+    out.extend_from_slice(&state.counters.builds_completed.to_le_bytes());
+    out.extend_from_slice(&state.counters.stall_ticks.to_le_bytes());
 
     put_len(out, state.armies.len());
     for (slot, army) in &state.armies {
@@ -69,6 +75,19 @@ pub fn serialize(state: &State, out: &mut Vec<u8>) {
             put_q(out, q);
         }
         out.push(u8::from(army.defeated));
+        let l = &army.ledger;
+        for q in [
+            l.income_mass,
+            l.income_energy,
+            l.requested_mass,
+            l.requested_energy,
+            l.granted_mass,
+            l.granted_energy,
+            l.fraction_mass,
+            l.fraction_energy,
+        ] {
+            put_q(out, q);
+        }
     }
 
     put_len(out, state.entities.len());
@@ -82,6 +101,16 @@ pub fn serialize(state: &State, out: &mut Vec<u8>) {
         }
         put_q(out, e.health);
         put_q(out, e.max_health);
+        put_q(out, e.built);
+        out.push(u8::from(e.complete));
+        put_q(out, e.fraction);
+        match e.work {
+            None => out.push(0),
+            Some(target) => {
+                out.push(1);
+                out.extend_from_slice(&target.0.to_le_bytes());
+            }
+        }
         put_len(out, e.orders.len());
         for order in &e.orders {
             order.encode_into(out);

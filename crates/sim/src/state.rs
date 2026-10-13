@@ -1,13 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
+use crate::build::BUILD_TIME_FLOOR;
 use crate::command::{Command, Order, QueueMode};
+use crate::economy::Ledger;
 use crate::error::Error;
 use crate::hash::{Digest, GENESIS, chain, serialize};
 use crate::ids::{Army, EntityId, Pos, Q, Tick};
 use crate::rng::Rng;
 use crate::schedule::{Schedule, ScheduleError};
-use crate::world::World;
+use crate::world::{UnitKind, World};
 
 /// One phase of a tick (SIM-044).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,7 +48,31 @@ pub struct Entity {
     pub pos: Pos,
     pub health: Q,
     pub max_health: Q,
+    /// Build work accumulated so far, in build-rate-seconds (SIM-059).
+    pub built: Q,
+    /// Whether the unit is finished; a spawned unit is.
+    pub complete: bool,
+    /// The fraction of its request granted in the last economy phase; 1
+    /// when it requested nothing (SIM-043).
+    pub fraction: Q,
+    /// The entity it is building or assisting this tick.
+    pub work: Option<EntityId>,
     pub orders: VecDeque<Order>,
+}
+
+impl Entity {
+    /// Build progress in `0..=1`: 1 once complete, else the work done over
+    /// the kind's build time (floored, SIM-056).
+    #[must_use]
+    pub fn progress(&self, kind: &UnitKind) -> Q {
+        if self.complete {
+            return Q::ONE;
+        }
+        let total = kind
+            .build_time
+            .map_or(BUILD_TIME_FLOOR, |t| t.max(BUILD_TIME_FLOOR));
+        (self.built / total).min(Q::ONE)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -57,12 +83,16 @@ pub struct ArmyState {
     pub mass_storage: Q,
     pub energy_storage: Q,
     pub defeated: bool,
+    /// The last economy phase's settlement (SIM-058).
+    pub ledger: Ledger,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Counters {
     pub commands_applied: u64,
     pub commands_ignored: u64,
+    pub builds_completed: u64,
+    pub stall_ticks: u64,
 }
 
 /// The full simulation state.
@@ -125,6 +155,7 @@ impl State {
                 mass_storage,
                 energy_storage,
                 defeated: false,
+                ledger: Ledger::default(),
             },
         );
     }
@@ -140,6 +171,12 @@ impl State {
         if self.entities.contains_key(&id) {
             return id;
         }
+        let built = self
+            .world
+            .units
+            .get(&blueprint.to_ascii_lowercase())
+            .and_then(|k| k.build_time)
+            .unwrap_or(Q::ZERO);
         self.entities.insert(
             id,
             Entity {
@@ -149,10 +186,50 @@ impl State {
                 pos,
                 health,
                 max_health: health,
+                built,
+                complete: true,
+                fraction: Q::ONE,
+                work: None,
                 orders: VecDeque::new(),
             },
         );
         id
+    }
+
+    /// Spawn an unfinished entity of `blueprint` (looked up after ASCII
+    /// lower-casing and stored in that form) with health 0, no work done,
+    /// and the kind's maximum health; `None` and no spawn for an unknown
+    /// blueprint (SIM-059).
+    pub fn spawn_under_construction(
+        &mut self,
+        army: Army,
+        blueprint: &str,
+        pos: Pos,
+    ) -> Option<EntityId> {
+        let key = blueprint.to_ascii_lowercase();
+        let max_health = self.world.units.get(&key)?.max_health;
+        let id = self.next_id;
+        self.next_id = EntityId(id.0.saturating_add(1));
+        if self.entities.contains_key(&id) {
+            return Some(id);
+        }
+        self.entities.insert(
+            id,
+            Entity {
+                id,
+                army,
+                blueprint: key,
+                pos,
+                health: Q::ZERO,
+                max_health,
+                built: Q::ZERO,
+                complete: false,
+                fraction: Q::ONE,
+                work: None,
+                orders: VecDeque::new(),
+            },
+        );
+        Some(id)
     }
 
     /// Run one tick: apply `commands` in the order given (the caller passes a
@@ -282,6 +359,9 @@ impl State {
                     mass: a.mass,
                     energy: a.energy,
                     defeated: a.defeated,
+                    mass_storage: a.mass_storage,
+                    energy_storage: a.energy_storage,
+                    ledger: a.ledger,
                 })
                 .collect(),
             entities: self
@@ -293,6 +373,8 @@ impl State {
                     pos: e.pos,
                     health: e.health,
                     max_health: e.max_health,
+                    built: e.built,
+                    complete: e.complete,
                 })
                 .collect(),
         }
@@ -329,6 +411,8 @@ pub struct EntitySnapshot {
     pub pos: Pos,
     pub health: Q,
     pub max_health: Q,
+    pub built: Q,
+    pub complete: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -336,5 +420,8 @@ pub struct ArmySnapshot {
     pub id: Army,
     pub mass: Q,
     pub energy: Q,
+    pub mass_storage: Q,
+    pub energy_storage: Q,
     pub defeated: bool,
+    pub ledger: Ledger,
 }
