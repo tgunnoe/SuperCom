@@ -69,7 +69,12 @@ have a ratifiable source (AGENTS.md R2, R7).
   fixed-width fields, documented on the digest function; it therefore covers
   exactly what the sim reads, not the files they came from, so a cosmetic
   change to a blueprint file does not change it and a change to a value the
-  sim reads does. The map digest covers the map name, the grid, and the
+  sim reads does. Unit kinds are keyed by the blueprint id in ASCII upper
+  case, the form the specification cites: the importer's lower-case ids are
+  upper-cased once at ingest, the buildable matcher compares them
+  case-insensitively, and the upper-case form enters the digest. Projectile
+  kinds keep the importer's id, the lower-case member path that in-data
+  references use. The map digest covers the map name, the grid, and the
   markers, because the markers place the armies.
 - **The world outside S (SIM-036).** The state holds its world by shared
   reference, set at construction and never reassigned, and the world is not
