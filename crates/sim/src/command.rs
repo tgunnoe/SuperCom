@@ -1,3 +1,4 @@
+use crate::error::Error;
 use crate::hash::canonical_f64_bits;
 use crate::ids::{Army, EntityId, Pos, Tick};
 
@@ -101,5 +102,16 @@ impl Command {
             QueueMode::Append => 1,
         });
         self.order.encode_into(out);
+    }
+
+    /// Read one command from the front of `bytes`, returning it and the
+    /// bytes consumed: the inverse of [`Command::encode_into`].
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Replay`] for truncated or malformed bytes.
+    pub fn decode(bytes: &[u8]) -> Result<(Command, usize), Error> {
+        let _ = bytes;
+        Err(Error::Unimplemented)
     }
 }

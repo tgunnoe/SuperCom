@@ -9,6 +9,7 @@ mod command;
 mod error;
 mod hash;
 mod ids;
+mod replay;
 mod rng;
 mod schedule;
 mod state;
@@ -17,6 +18,10 @@ pub use command::{Command, Order, QueueMode};
 pub use error::Error;
 pub use hash::{Digest, GENESIS, canonical_f64_bits, chain, first_divergence, serialize};
 pub use ids::{Army, EntityId, Pos, Q, Tick};
+pub use replay::{
+    REPLAY_FORMAT_VERSION, Replay, ReplayError, ReplayHeader, check_content, commands_at,
+    read_replay, write_replay,
+};
 pub use rng::Rng;
 pub use schedule::{Schedule, ScheduleError, schedule};
 pub use state::{
