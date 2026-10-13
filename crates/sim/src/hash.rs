@@ -1,7 +1,8 @@
 use sha2::{Digest as _, Sha256};
 
+use crate::economy::Ledger;
 use crate::ids::{Q, Tick};
-use crate::state::State;
+use crate::state::{ArmyState, Counters, Entity, State};
 
 /// A SHA-256 digest.
 pub type Digest = [u8; 32];
@@ -54,65 +55,106 @@ fn put_len(out: &mut Vec<u8>, len: usize) {
 /// that just ran (`t`) carry the tick field `t+1` (the state after the
 /// advance), while the chain link over them is labelled `t`.
 pub fn serialize(state: &State, out: &mut Vec<u8>) {
+    // Entity, ArmyState, Counters, and Ledger are destructured with no `..`,
+    // so a field added to one of them fails to compile here until it is
+    // encoded or skipped by name.
     out.extend_from_slice(&state.tick.0.to_le_bytes());
     out.extend_from_slice(&state.seed.to_le_bytes());
     out.extend_from_slice(&state.rng.state().to_le_bytes());
     out.extend_from_slice(&state.next_id.0.to_le_bytes());
-    out.extend_from_slice(&state.counters.commands_applied.to_le_bytes());
-    out.extend_from_slice(&state.counters.commands_ignored.to_le_bytes());
-    out.extend_from_slice(&state.counters.builds_completed.to_le_bytes());
-    out.extend_from_slice(&state.counters.stall_ticks.to_le_bytes());
+    let Counters {
+        commands_applied,
+        commands_ignored,
+        builds_completed,
+        stall_ticks,
+    } = &state.counters;
+    for n in [
+        commands_applied,
+        commands_ignored,
+        builds_completed,
+        stall_ticks,
+    ] {
+        out.extend_from_slice(&n.to_le_bytes());
+    }
 
     put_len(out, state.armies.len());
     for (slot, army) in &state.armies {
+        // The slot key is written in place of the army's own id.
+        let ArmyState {
+            id: _,
+            mass,
+            energy,
+            mass_storage,
+            energy_storage,
+            defeated,
+            ledger,
+        } = army;
         out.push(slot.0);
-        for q in [
-            army.mass,
-            army.energy,
-            army.mass_storage,
-            army.energy_storage,
-        ] {
-            put_q(out, q);
+        for q in [mass, energy, mass_storage, energy_storage] {
+            put_q(out, *q);
         }
-        out.push(u8::from(army.defeated));
-        let l = &army.ledger;
+        out.push(u8::from(*defeated));
+        let Ledger {
+            income_mass,
+            income_energy,
+            requested_mass,
+            requested_energy,
+            granted_mass,
+            granted_energy,
+            fraction_mass,
+            fraction_energy,
+        } = ledger;
         for q in [
-            l.income_mass,
-            l.income_energy,
-            l.requested_mass,
-            l.requested_energy,
-            l.granted_mass,
-            l.granted_energy,
-            l.fraction_mass,
-            l.fraction_energy,
+            income_mass,
+            income_energy,
+            requested_mass,
+            requested_energy,
+            granted_mass,
+            granted_energy,
+            fraction_mass,
+            fraction_energy,
         ] {
-            put_q(out, q);
+            put_q(out, *q);
         }
     }
 
     put_len(out, state.entities.len());
-    for (id, e) in &state.entities {
-        out.extend_from_slice(&id.0.to_le_bytes());
-        out.push(e.army.0);
-        put_len(out, e.blueprint.len());
-        out.extend_from_slice(e.blueprint.as_bytes());
-        for v in [e.pos.x, e.pos.y, e.pos.z] {
+    for (key, entity) in &state.entities {
+        // The map key is written in place of the entity's own id.
+        let Entity {
+            id: _,
+            army,
+            blueprint,
+            pos,
+            health,
+            max_health,
+            built,
+            complete,
+            fraction,
+            work,
+            orders,
+        } = entity;
+        out.extend_from_slice(&key.0.to_le_bytes());
+        out.push(army.0);
+        put_len(out, blueprint.len());
+        out.extend_from_slice(blueprint.as_bytes());
+        for v in [pos.x, pos.y, pos.z] {
             out.extend_from_slice(&canonical_f64_bits(v).to_le_bytes());
         }
-        put_q(out, e.health);
-        put_q(out, e.max_health);
-        put_q(out, e.built);
-        out.push(u8::from(e.complete));
-        put_q(out, e.fraction);
-        match e.work {
+        put_q(out, *health);
+        put_q(out, *max_health);
+        put_q(out, *built);
+        out.push(u8::from(*complete));
+        put_q(out, *fraction);
+        match work {
             None => out.push(0),
             Some(target) => {
                 out.push(1);
                 out.extend_from_slice(&target.0.to_le_bytes());
             }
         }
-        put_len(out, e.orders.len());
-        for order in &e.orders {
+        put_len(out, orders.len());
+        for order in orders {
             order.encode_into(out);
         }
     }
