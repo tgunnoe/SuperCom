@@ -56,9 +56,12 @@ have a ratifiable source (AGENTS.md R2, R7).
   elevation, which the map loader does not yet decode.
 - **Starting resources (SIM-051).** A skirmish starts each army with stored
   mass and energy equal to its commander's storage values, 650 and 4000 for
-  the four installed commanders. This is a design choice: the original sets
-  an army's starting resources in readable Lua whose call sites are not yet
-  read, and the value is an observation candidate. Slot `n`'s commander is
+  the four installed commanders. This is a design choice: the original's
+  readable Lua passes an army's starting resources from the scenario's army
+  table (SetArmyEconomy, two call sites in the scenario utilities of
+  mohodata.scd), and none of the 61 installed scenario files defines such a
+  table, so the values a skirmish starts with are set inside the engine,
+  unreadable; the commander's storage is an observation candidate. Slot `n`'s commander is
   placed at the marker named `ARMY_n`, at the marker's position.
 - **The catalog digest.** The replay header carries a catalog digest and a
   map digest (DET-007). The catalog digest is SHA-256 over a canonical
@@ -96,7 +99,7 @@ have a ratifiable source (AGENTS.md R2, R7).
 ## Open
 
 The water, seabed, and sub passability grids wait on water-elevation
-decoding in the map loader. The original's starting resources and its slope
+decoding in the map loader. The original's starting values and its slope
 function remain unobserved.
 
 ## Alternatives Considered
