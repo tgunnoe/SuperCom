@@ -15,8 +15,6 @@ pub enum Error {
     Schedule(ScheduleError),
     /// A replay's bytes are refused.
     Replay(ReplayError),
-    /// A stub of the replay seam that has no implementation yet.
-    Unimplemented,
 }
 
 impl fmt::Display for Error {
@@ -30,7 +28,6 @@ impl fmt::Display for Error {
             ),
             Self::Schedule(e) => write!(f, "cannot schedule the commands: {e}"),
             Self::Replay(e) => write!(f, "cannot use the replay: {e}"),
-            Self::Unimplemented => f.write_str("not implemented"),
         }
     }
 }
@@ -38,7 +35,7 @@ impl fmt::Display for Error {
 impl core::error::Error for Error {
     fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
-            Self::TickOverflow | Self::WrongTick { .. } | Self::Unimplemented => None,
+            Self::TickOverflow | Self::WrongTick { .. } => None,
             Self::Schedule(e) => Some(e),
             Self::Replay(e) => Some(e),
         }
