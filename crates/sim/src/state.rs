@@ -199,7 +199,7 @@ impl State {
     /// Spawn an unfinished entity of `blueprint` (looked up after ASCII
     /// lower-casing and stored in that form) with health 0, no work done,
     /// and the kind's maximum health; `None` and no spawn for an unknown
-    /// blueprint (SIM-059).
+    /// blueprint or one without a build time (SIM-059).
     pub fn spawn_under_construction(
         &mut self,
         army: Army,
@@ -207,7 +207,10 @@ impl State {
         pos: Pos,
     ) -> Option<EntityId> {
         let key = blueprint.to_ascii_lowercase();
-        let max_health = self.world.units.get(&key)?.max_health;
+        let kind = self.world.units.get(&key)?;
+        // A kind with no build time has no work to finish (SIM-056).
+        kind.build_time?;
+        let max_health = kind.max_health;
         let id = self.next_id;
         self.next_id = EntityId(id.0.saturating_add(1));
         if self.entities.contains_key(&id) {

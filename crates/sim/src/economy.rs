@@ -118,6 +118,7 @@ impl State {
             }
             let rates = e
                 .work
+                .filter(|_| e.complete)
                 .and_then(|t| self.entities.get(&t))
                 .filter(|t| !t.complete)
                 .and_then(|t| kind_of(world, &t.blueprint))

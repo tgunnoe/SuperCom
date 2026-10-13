@@ -178,7 +178,7 @@ impl State {
         let ids: Vec<EntityId> = self.entities.keys().copied().collect();
         for id in ids {
             let building = self.entities.get(&id).is_some_and(|e| {
-                kind_of(world, &e.blueprint).is_some_and(|k| k.build_rate.is_some())
+                e.complete && kind_of(world, &e.blueprint).is_some_and(|k| k.build_rate.is_some())
             });
             let Some(e) = self.entities.get_mut(&id) else {
                 continue;
@@ -210,7 +210,9 @@ impl State {
                 let Some(c) = self.entities.get(who) else {
                     continue;
                 };
-                let rate = kind_of(world, &c.blueprint).and_then(|k| k.build_rate);
+                let rate = kind_of(world, &c.blueprint)
+                    .and_then(|k| k.build_rate)
+                    .filter(|_| c.complete);
                 if let Some(rate) = rate.filter(|_| rect.reached_from(&c.pos)) {
                     gained = gained.saturating_add(c.fraction.saturating_mul(per_tick(rate)));
                     contributors.push(*who);
@@ -248,7 +250,11 @@ impl State {
     fn start_builds(&mut self, world: &World) {
         let ids: Vec<EntityId> = self.entities.keys().copied().collect();
         for id in ids {
-            while let Some(e) = self.entities.get(&id).filter(|e| e.work.is_none()) {
+            while let Some(e) = self
+                .entities
+                .get(&id)
+                .filter(|e| e.complete && e.work.is_none())
+            {
                 let army = e.army;
                 let outcome = match e.orders.front() {
                     Some(Order::BuildMobile { blueprint, at }) => {
@@ -386,7 +392,7 @@ impl State {
     fn assign_assists(&mut self, world: &World) {
         let ids: Vec<EntityId> = self.entities.keys().copied().collect();
         for id in ids {
-            let Some(e) = self.entities.get(&id) else {
+            let Some(e) = self.entities.get(&id).filter(|e| e.complete) else {
                 continue;
             };
             let Some(Order::Guard { target }) = e.orders.front() else {
