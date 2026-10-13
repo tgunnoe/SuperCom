@@ -82,6 +82,35 @@ ratifiable source.
   `sim_rng_matches_the_reference_splitmix64`,
   `sim_rng_golden_vector_for_seed_1234567`, and
   `sim_serialized_generator_field_is_the_state_after_a_draw`.
+- **Replay header and layout (DET-007, DET-008, DET-026).** A replay opens
+  with the magic `SCREPLAY` and a format version (1), then the engine
+  version, the map name, the map's content digest and the installed-data
+  catalog digest (the installed game data is identified by those two
+  SHA-256 digests, which `check_content` compares before tick 0), the
+  plugin list, the player slots, and the 64-bit seed. The plugin list is
+  empty in v0 because the first release runs no plugins (Q4), but is a list
+  of name and digest pairs now so a later plugin set does not change the
+  layout; the reader parses any length and `check_content` refuses a
+  non-empty list, as this version installs no plugin. Player i is the slot of source i, and
+  a record must name that slot's army, which binds a command's army to the
+  source that issued it. The tick rate is not stored: SIM-001 fixes it, so
+  a stored copy could only disagree. The command log follows in schedule
+  order and the checkpoints after it as ascending (tick, digest) pairs.
+  The reader refuses a repeated `(source, seq)` anywhere in the log (the
+  schedule's per-call check cannot see a pair repeated across ticks) and
+  checks every length and count against the remaining input before it
+  allocates, so it never allocates a buffer larger than the input; the
+  decoded value is linear in the input with a constant factor of about
+  four for a log of minimal commands (measured at about 4.4 times for a
+  million of them), not bounded by the input's size. The reader is
+  strict: it accepts exactly the bytes the writer can produce, so it
+  refuses bytes after the last checkpoint and any non-canonical NaN
+  (DET-022), and a length error names the first byte of the length
+  field. A resumed run needs the chain head, which
+  lies outside S, so `State` gains `head` and `set_head`. Checked by
+  `sim_replay_round_trip`, `sim_replay_rejects_malformed`,
+  `sim_replay_fixture_is_byte_exact`, `sim_run_resumes_from_a_checkpoint_head`,
+  and the guard tests in `crates/sim/tests/replay_guards.rs`.
 
 ## Consequences
 
@@ -111,4 +140,5 @@ ratifiable source.
 ## References
 
 - ADR-0003 (the sim stack) and ADR-0006 (the float strategy).
-- Clauses DET-009, DET-025, SIM-044, SIM-045, SIM-046, and SIM-036, SIM-018.
+- Clauses DET-007, DET-008, DET-009, DET-025, DET-026, SIM-044, SIM-045,
+  SIM-046, and SIM-036, SIM-018.

@@ -1,5 +1,7 @@
+use crate::error::Error;
 use crate::hash::canonical_f64_bits;
 use crate::ids::{Army, EntityId, Pos, Tick};
+use crate::replay::Cursor;
 
 /// Whether an order replaces the unit's queue or joins it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,6 +85,10 @@ pub struct Command {
 }
 
 impl Command {
+    /// The fewest bytes one encoded command takes: tick, source, seq, army,
+    /// unit count, mode, and a one-byte order.
+    pub(crate) const MIN_ENCODED: usize = 8 + 1 + 4 + 1 + 4 + 1 + 1;
+
     /// Append the command's canonical encoding to `out`: tick (LE64), source,
     /// seq (LE32), army, unit count (LE32) then the ids (LE32 each), mode
     /// (Replace 0, Append 1), then the order (see [`Order::encode_into`]).
@@ -101,5 +107,17 @@ impl Command {
             QueueMode::Append => 1,
         });
         self.order.encode_into(out);
+    }
+
+    /// Read one command from the front of `bytes`, returning it and the
+    /// bytes consumed: the inverse of [`Command::encode_into`].
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Replay`] for truncated or malformed bytes.
+    pub fn decode(bytes: &[u8]) -> Result<(Command, usize), Error> {
+        let mut cursor = Cursor::new(bytes);
+        let command = cursor.command()?;
+        Ok((command, cursor.consumed()))
     }
 }

@@ -1,6 +1,7 @@
 use core::fmt;
 
 use crate::ids::Tick;
+use crate::replay::ReplayError;
 use crate::schedule::ScheduleError;
 
 /// Why a sim operation did not complete.
@@ -12,6 +13,8 @@ pub enum Error {
     WrongTick { tick: Tick, expected: Tick },
     /// A command set cannot be scheduled.
     Schedule(ScheduleError),
+    /// A replay's bytes are refused.
+    Replay(ReplayError),
 }
 
 impl fmt::Display for Error {
@@ -24,6 +27,7 @@ impl fmt::Display for Error {
                 tick.0, expected.0
             ),
             Self::Schedule(e) => write!(f, "cannot schedule the commands: {e}"),
+            Self::Replay(e) => write!(f, "cannot use the replay: {e}"),
         }
     }
 }
@@ -33,6 +37,7 @@ impl core::error::Error for Error {
         match self {
             Self::TickOverflow | Self::WrongTick { .. } => None,
             Self::Schedule(e) => Some(e),
+            Self::Replay(e) => Some(e),
         }
     }
 }
@@ -40,5 +45,11 @@ impl core::error::Error for Error {
 impl From<ScheduleError> for Error {
     fn from(e: ScheduleError) -> Self {
         Self::Schedule(e)
+    }
+}
+
+impl From<ReplayError> for Error {
+    fn from(e: ReplayError) -> Self {
+        Self::Replay(e)
     }
 }
