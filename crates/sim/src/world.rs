@@ -295,6 +295,8 @@ pub struct WeaponKind {
     pub max_radius: Option<f64>,
     pub min_radius: Option<f64>,
     pub muzzle_velocity: Option<f64>,
+    /// The referenced projectile's id in ASCII lower case: a key of
+    /// [`World::projectiles`].
     pub projectile_id: Option<String>,
     /// The union of the values of `FireTargetLayerCapsTable`.
     pub target_layers: LayerSet,
@@ -305,7 +307,8 @@ pub struct WeaponKind {
 /// are [`Q`] (SIM-050), geometry stays `f64`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct UnitKind {
-    /// The blueprint id in upper case, such as `UEL0001`.
+    /// The blueprint id in ASCII lower case, such as `uel0001`: the key the
+    /// world, the buildable sets, and the commander lookups share.
     pub id: String,
     pub categories: BTreeSet<String>,
     pub build_cost_mass: Q,
@@ -342,6 +345,8 @@ pub struct UnitKind {
 /// as false, because a flag the data omits is not set.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ProjectileKind {
+    /// The blueprint id in ASCII lower case, the form a weapon's
+    /// `projectile_id` takes once resolved.
     pub id: String,
     pub categories: BTreeSet<String>,
     pub initial_speed: Option<f64>,
@@ -532,14 +537,14 @@ pub enum Faction {
 }
 
 impl Faction {
-    /// The blueprint id of the faction's commander.
+    /// The lower-case blueprint id of the faction's commander.
     #[must_use]
     pub fn commander(self) -> &'static str {
         match self {
-            Faction::UEF => "UEL0001",
-            Faction::Aeon => "UAL0001",
-            Faction::Cybran => "URL0001",
-            Faction::Seraphim => "XSL0001",
+            Faction::UEF => "uel0001",
+            Faction::Aeon => "ual0001",
+            Faction::Cybran => "url0001",
+            Faction::Seraphim => "xsl0001",
         }
     }
 }
@@ -579,13 +584,19 @@ impl World {
 
     /// Build the world from parsed values: every blueprint scalar the sim
     /// holds as [`Q`] converts once through `Q::checked_from_num`, rounding
-    /// to the nearest representable value (SIM-050); the buildable sets
-    /// resolve by SIM-011's rule; both digests are computed.
+    /// to the nearest representable value (SIM-050); every unit and
+    /// projectile kind is stored under its id in ASCII lower case, and each
+    /// weapon's `projectile_id` is lower-cased the same way, so a reference
+    /// is a key whatever case the data wrote; the buildable sets resolve by
+    /// SIM-011's rule; both digests are computed.
     ///
     /// # Errors
     ///
     /// [`IngestError::ValueOverflow`] naming the field's path for a value of
-    /// magnitude 2^31 or more, or not finite; the other [`IngestError`]
+    /// magnitude 2^31 or more, or not finite;
+    /// [`IngestError::DuplicateUnitId`] and
+    /// [`IngestError::DuplicateProjectileId`] for two kinds of one family
+    /// whose ids are equal after lower-casing; the other [`IngestError`]
     /// variants for a value outside a closed set.
     pub fn from_parts(
         units: &[supercom_data::Unit],
@@ -597,12 +608,18 @@ impl World {
         let mut kinds = BTreeMap::new();
         for unit in units {
             let kind = convert_unit(unit, units)?;
-            kinds.insert(kind.id.clone(), kind);
+            let id = kind.id.clone();
+            if kinds.insert(id.clone(), kind).is_some() {
+                return Err(IngestError::DuplicateUnitId(id).into());
+            }
         }
         let mut shots = BTreeMap::new();
         for projectile in projectiles {
             let kind = convert_projectile(projectile);
-            shots.insert(kind.id.clone(), kind);
+            let id = kind.id.clone();
+            if shots.insert(id.clone(), kind).is_some() {
+                return Err(IngestError::DuplicateProjectileId(id).into());
+            }
         }
         let catalog_digest = catalog_digest(&kinds, &shots);
         let map_digest = map_digest(&map_name, &map, &markers);
@@ -636,14 +653,19 @@ impl World {
     ///
     /// # Errors
     ///
-    /// [`IngestError::MissingArmyMarker`] for a slot with no marker;
+    /// [`IngestError::TooManyFactions`] for more factions than the 255 army
+    /// slots; [`IngestError::MissingArmyMarker`] for a slot with no marker;
     /// [`IngestError::UnknownCommander`] for a commander the world lacks.
     pub fn skirmish(self: Arc<Self>, seed: u64, factions: &[Faction]) -> Result<State, Error> {
+        if u8::try_from(factions.len()).is_err() {
+            return Err(IngestError::TooManyFactions {
+                count: factions.len(),
+            }
+            .into());
+        }
         let mut state = State::with_world(Arc::clone(&self), seed);
-        for (index, faction) in factions.iter().enumerate() {
-            let slot = u8::try_from(index + 1).map_err(|_| IngestError::ValueOverflow {
-                path: format!("factions[{index}]: no army slot"),
-            })?;
+        // The count check above leaves a slot for every faction.
+        for (slot, faction) in (1..=u8::MAX).zip(factions) {
             let marker = self
                 .markers
                 .iter()
@@ -724,17 +746,10 @@ fn convert_weapon(
         max_radius: weapon.max_radius,
         min_radius: weapon.min_radius,
         muzzle_velocity: weapon.muzzle_velocity,
-        projectile_id: weapon.projectile_id.clone(),
+        projectile_id: weapon.projectile_id.as_deref().map(str::to_ascii_lowercase),
         target_layers,
         manual_fire: weapon.manual_fire.unwrap_or(false),
     })
-}
-
-/// A unit kind's id: the importer's lower-cased file stem in the upper-case
-/// form the game's own references use (`UEL0001`), which the commander
-/// lookups of SIM-035 and SIM-051 and the buildable sets share.
-fn unit_id(imported: &str) -> String {
-    imported.to_ascii_uppercase()
 }
 
 /// Whether a `BuildableCategory` token selects `target` (SIM-011): the token
@@ -759,7 +774,7 @@ fn buildable_set(
         let tokens: Vec<&str> = tokens.collect();
         for target in catalog {
             if tokens.iter().all(|t| token_selects(t, target)) {
-                selected.insert(unit_id(&target.id));
+                selected.insert(target.id.to_ascii_lowercase());
             }
         }
     }
@@ -782,7 +797,7 @@ fn convert_unit(
         .map(|(i, w)| convert_weapon(id, i, w))
         .collect::<Result<Vec<_>, Error>>()?;
     Ok(UnitKind {
-        id: unit_id(id),
+        id: id.to_ascii_lowercase(),
         categories: unit.categories.iter().cloned().collect(),
         build_cost_mass: to_q(economy.build_cost_mass, || path("build_cost_mass"))?,
         build_cost_energy: to_q(economy.build_cost_energy, || path("build_cost_energy"))?,
@@ -822,7 +837,7 @@ fn convert_unit(
 fn convert_projectile(projectile: &supercom_data::Projectile) -> ProjectileKind {
     let physics = &projectile.physics;
     ProjectileKind {
-        id: projectile.id.clone(),
+        id: projectile.id.to_ascii_lowercase(),
         categories: projectile.categories.iter().cloned().collect(),
         initial_speed: physics.initial_speed,
         max_speed: physics.max_speed,

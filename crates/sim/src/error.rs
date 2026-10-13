@@ -37,6 +37,16 @@ pub enum IngestError {
     UnsupportedScale(f32),
     MissingArmyMarker(u8),
     UnknownCommander(String),
+    /// Two unit kinds whose ids are equal after ASCII lower-casing; carries
+    /// the lower-cased id.
+    DuplicateUnitId(String),
+    /// Two projectile kinds whose ids are equal after ASCII lower-casing;
+    /// carries the lower-cased id.
+    DuplicateProjectileId(String),
+    /// More factions than army slots, which a `u8` numbers from 1 to 255.
+    TooManyFactions {
+        count: usize,
+    },
 }
 
 impl fmt::Display for IngestError {
@@ -61,6 +71,18 @@ impl fmt::Display for IngestError {
             ),
             Self::MissingArmyMarker(n) => write!(f, "the map has no marker ARMY_{n}"),
             Self::UnknownCommander(id) => write!(f, "the catalog has no commander {id}"),
+            Self::DuplicateUnitId(id) => {
+                write!(f, "two unit blueprints share the id {id} ignoring case")
+            }
+            Self::DuplicateProjectileId(id) => {
+                write!(
+                    f,
+                    "two projectile blueprints share the id {id} ignoring case"
+                )
+            }
+            Self::TooManyFactions { count } => {
+                write!(f, "{count} factions exceed the 255 army slots")
+            }
         }
     }
 }
