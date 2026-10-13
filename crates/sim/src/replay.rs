@@ -185,7 +185,7 @@ pub fn read_replay(bytes: &[u8]) -> Result<Replay, Error> {
     };
 
     let mut commands: Vec<Command> = Vec::new();
-    let mut seen = BTreeSet::new();
+    let mut issued = BTreeSet::new();
     for index in 0..c.count(Command::MIN_ENCODED)? {
         let cmd = c.command()?;
         if let Some(prev) = commands.last() {
@@ -193,7 +193,7 @@ pub fn read_replay(bytes: &[u8]) -> Result<Replay, Error> {
                 return Err(ReplayError::RecordsOutOfOrder { index }.into());
             }
         }
-        if !seen.insert((cmd.source, cmd.seq)) {
+        if !issued.insert((cmd.source, cmd.seq)) {
             return Err(ReplayError::DuplicateRecord { index }.into());
         }
         let slot = header.players.get(usize::from(cmd.source));
