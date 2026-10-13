@@ -24,7 +24,8 @@
 //! size its own fields give, in the order the file stores them: three
 //! NUL-terminated shader and sky paths; an `i32` cube map count, then a name
 //! and a path (both NUL-terminated) per cube map; the lighting block of 23
-//! `f32`; the water block (a presence byte, 23 `f32`, two paths, four `f32`
+//! `f32`; the water block (a presence byte, 23 `f32`, the first three the
+//! surface, deep, and abyss elevations and the rest skipped, two paths, four `f32`
 //! of wave repeats, then four wave normals each with two `f32` and a path);
 //! an `i32` count of wave generators, each two paths and 17 `f32`; six `i32`
 //! minimap words; and, in a version-60 file only, one more `f32`. Strings
@@ -295,7 +296,17 @@ fn skip_to_strata(file: &mut Reader<'_>, version: u32) -> Result<Option<Water>, 
     }
     file.skip(LIGHTING_FLOATS * 4)?;
     // Water: a presence byte and its numbers, two paths, the wave normals.
-    file.skip(1 + WATER_FLOATS * 4)?;
+    // The block is taken whole so a short buffer errors as one read, and the
+    // first three numbers are the elevations (importer lines 354-357); the
+    // rest of the block is never read.
+    let mut block = Reader::new(file.take(1 + WATER_FLOATS * 4)?);
+    let [present] = block.array()?;
+    let (elevation, deep, abyss) = (block.f32()?, block.f32()?, block.f32()?);
+    let water = (present == 1).then_some(Water {
+        elevation,
+        deep,
+        abyss,
+    });
     file.cstr()?;
     file.cstr()?;
     file.skip(WAVE_NORMALS * 4)?;
@@ -312,7 +323,7 @@ fn skip_to_strata(file: &mut Reader<'_>, version: u32) -> Result<Option<Water>, 
     if version > 56 {
         file.skip(4)?;
     }
-    Ok(None)
+    Ok(water)
 }
 
 /// Why a map could not be parsed.

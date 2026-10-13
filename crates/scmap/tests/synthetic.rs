@@ -122,8 +122,11 @@ impl Spec {
                     scale,
                 })
                 .collect(),
-            // The parser does not yet return the water; the decode flips this.
-            water: None,
+            water: self.water.map(|(elevation, deep, abyss)| Water {
+                elevation,
+                deep,
+                abyss,
+            }),
         }
     }
 
@@ -164,18 +167,14 @@ impl Spec {
             put_cstr(&mut out, "/textures/environment/cube.dds");
         }
         put_f32s(&mut out, &[1.5; 23]); // lighting
-        match self.water {
-            Some((elevation, deep, abyss)) => {
-                out.push(1);
-                put_f32s(&mut out, &[elevation, deep, abyss]);
-                put_f32s(&mut out, &[0.25; 20]);
-            }
-            None => {
-                out.push(0);
-                put_f32s(&mut out, &[-10_000.0; 3]);
-                put_f32s(&mut out, &[0.25; 20]);
-            }
+        if let Some((elevation, deep, abyss)) = self.water {
+            out.push(1);
+            put_f32s(&mut out, &[elevation, deep, abyss]);
+        } else {
+            out.push(0);
+            put_f32s(&mut out, &[-10_000.0; 3]);
         }
+        put_f32s(&mut out, &[0.25; 20]);
         put_cstr(&mut out, "watercube");
         put_cstr(&mut out, "waterramp");
         put_f32s(&mut out, &[2.0; 4]);
