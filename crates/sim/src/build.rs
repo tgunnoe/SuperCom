@@ -58,8 +58,10 @@ pub(crate) fn kind_of<'w>(world: &'w World, blueprint: &str) -> Option<&'w UnitK
     world.units.get(blueprint)
 }
 
-/// The total work a kind takes, floored (SIM-056).
-fn total_work(kind: &UnitKind) -> Q {
+/// The total work a kind takes, in build-rate-seconds: its build time,
+/// floored (SIM-056). Completion and progress both read it.
+#[must_use]
+pub fn total_work(kind: &UnitKind) -> Q {
     kind.build_time
         .map_or(BUILD_TIME_FLOOR, |t| t.max(BUILD_TIME_FLOOR))
 }

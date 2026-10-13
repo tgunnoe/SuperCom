@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
-use crate::build::BUILD_TIME_FLOOR;
+use crate::build::total_work;
 use crate::command::{Command, Order, QueueMode};
 use crate::economy::Ledger;
 use crate::error::Error;
@@ -70,10 +70,7 @@ impl Entity {
         if self.complete {
             return Q::ONE;
         }
-        let total = kind
-            .build_time
-            .map_or(BUILD_TIME_FLOOR, |t| t.max(BUILD_TIME_FLOOR));
-        (self.built / total).min(Q::ONE)
+        self.built.saturating_div(total_work(kind)).min(Q::ONE)
     }
 }
 

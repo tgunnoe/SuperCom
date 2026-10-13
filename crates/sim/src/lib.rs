@@ -17,7 +17,7 @@ mod schedule;
 mod state;
 mod world;
 
-pub use build::{BUILD_RANGE, BUILD_TIME_FLOOR, BuildRates, build_rates, footprint_of};
+pub use build::{BUILD_RANGE, BUILD_TIME_FLOOR, BuildRates, build_rates, footprint_of, total_work};
 pub use command::{Command, Order, QueueMode};
 pub use economy::{Ledger, per_tick};
 pub use error::{Error, IngestError};
