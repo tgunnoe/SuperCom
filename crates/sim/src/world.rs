@@ -7,10 +7,6 @@
 //! `supercom-sim-ingest`'s job, because this crate's lint forbids the
 //! filesystem. The world lies outside the serialized state S (DET-009) and is
 //! identified by the two digests the replay header carries.
-//!
-//! Every constructor and query below that carries "stub" in its documentation
-//! is a placeholder awaiting its implementation; the rules it will carry are
-//! the clauses cited at the item.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -22,10 +18,9 @@ use crate::ids::{Pos, Q};
 use crate::replay::ReplayHeader;
 use crate::state::State;
 
-/// The error every stub returns until its implementation lands.
 fn stub() -> Error {
     Error::Ingest(IngestError::ValueOverflow {
-        path: String::from("stub: not implemented"),
+        path: String::from("pending"),
     })
 }
 
@@ -62,25 +57,45 @@ pub struct LayerSet(u8);
 
 impl LayerSet {
     /// Read a `|`-separated caps string such as `Land|Water|Seabed`, each
-    /// token a layer name without its `LAYER_` prefix. Stub.
+    /// token a layer name without its `LAYER_` prefix. Tokens are trimmed,
+    /// and the empty string is the empty set.
     ///
     /// # Errors
     ///
     /// [`IngestError::UnknownLayerKey`] carrying the offending token as
     /// written.
     pub fn from_caps(caps: &str) -> Result<LayerSet, Error> {
-        let _ = caps;
-        Err(stub())
+        if caps.trim().is_empty() {
+            return Ok(LayerSet::default());
+        }
+        let mut set = LayerSet::default();
+        for token in caps.split('|').map(str::trim) {
+            let layer = Layer::from_key(&format!("LAYER_{token}"))
+                .ok_or_else(|| IngestError::UnknownLayerKey(token.to_owned()))?;
+            set = set.with(layer);
+        }
+        Ok(set)
     }
 
-    /// Read `BuildOnLayerCaps` keys such as `LAYER_Land`. Stub.
+    /// Read `BuildOnLayerCaps` keys such as `LAYER_Land`.
     ///
     /// # Errors
     ///
     /// [`IngestError::UnknownLayerKey`] carrying the offending key.
     pub fn from_keys(keys: &[String]) -> Result<LayerSet, Error> {
-        let _ = keys;
-        Err(stub())
+        keys.iter().try_fold(LayerSet::default(), |set, key| {
+            let layer =
+                Layer::from_key(key).ok_or_else(|| IngestError::UnknownLayerKey(key.clone()))?;
+            Ok(set.with(layer))
+        })
+    }
+
+    fn with(self, layer: Layer) -> LayerSet {
+        LayerSet(self.0 | 1 << (layer as u8))
+    }
+
+    fn union(self, other: LayerSet) -> LayerSet {
+        LayerSet(self.0 | other.0)
     }
 
     /// Whether `layer` is in the set.
@@ -153,14 +168,18 @@ pub enum BuildRestriction {
 
 impl BuildRestriction {
     /// Read the field: `None` for an absent field, the restriction for
-    /// `RULEUBR_OnMassDeposit` or `RULEUBR_OnHydrocarbonDeposit`. Stub.
+    /// `RULEUBR_OnMassDeposit` or `RULEUBR_OnHydrocarbonDeposit`.
     ///
     /// # Errors
     ///
     /// [`IngestError::UnknownBuildRestriction`] for any other value.
     pub fn from_rule(rule: Option<&str>) -> Result<BuildRestriction, Error> {
-        let _ = rule;
-        Err(stub())
+        match rule {
+            None => Ok(BuildRestriction::None),
+            Some("RULEUBR_OnMassDeposit") => Ok(BuildRestriction::OnMassDeposit),
+            Some("RULEUBR_OnHydrocarbonDeposit") => Ok(BuildRestriction::OnHydrocarbonDeposit),
+            Some(other) => Err(IngestError::UnknownBuildRestriction(other.to_owned()).into()),
+        }
     }
 }
 
@@ -192,11 +211,32 @@ pub enum OrderKind {
 
 impl OrderKind {
     /// The capability named by a `CommandCaps` key such as `RULEUCC_Move`.
-    /// Stub.
     #[must_use]
     pub fn from_key(key: &str) -> Option<OrderKind> {
-        let _ = key;
-        None
+        match key {
+            "RULEUCC_Attack" => Some(OrderKind::Attack),
+            "RULEUCC_CallTransport" => Some(OrderKind::CallTransport),
+            "RULEUCC_Capture" => Some(OrderKind::Capture),
+            "RULEUCC_Dive" => Some(OrderKind::Dive),
+            "RULEUCC_Dock" => Some(OrderKind::Dock),
+            "RULEUCC_Ferry" => Some(OrderKind::Ferry),
+            "RULEUCC_Guard" => Some(OrderKind::Guard),
+            "RULEUCC_Move" => Some(OrderKind::Move),
+            "RULEUCC_Nuke" => Some(OrderKind::Nuke),
+            "RULEUCC_Overcharge" => Some(OrderKind::Overcharge),
+            "RULEUCC_Patrol" => Some(OrderKind::Patrol),
+            "RULEUCC_Pause" => Some(OrderKind::Pause),
+            "RULEUCC_Reclaim" => Some(OrderKind::Reclaim),
+            "RULEUCC_Repair" => Some(OrderKind::Repair),
+            "RULEUCC_RetaliateToggle" => Some(OrderKind::RetaliateToggle),
+            "RULEUCC_Sacrifice" => Some(OrderKind::Sacrifice),
+            "RULEUCC_SiloBuildNuke" => Some(OrderKind::SiloBuildNuke),
+            "RULEUCC_SiloBuildTactical" => Some(OrderKind::SiloBuildTactical),
+            "RULEUCC_Stop" => Some(OrderKind::Stop),
+            "RULEUCC_Tactical" => Some(OrderKind::Tactical),
+            "RULEUCC_Transport" => Some(OrderKind::Transport),
+            _ => None,
+        }
     }
 }
 
@@ -205,14 +245,17 @@ impl OrderKind {
 pub struct OrderCaps(u32);
 
 impl OrderCaps {
-    /// Read `CommandCaps` keys such as `RULEUCC_Move`. Stub.
+    /// Read `CommandCaps` keys such as `RULEUCC_Move`.
     ///
     /// # Errors
     ///
     /// [`IngestError::UnknownCapability`] carrying the offending key.
     pub fn from_keys(keys: &[String]) -> Result<OrderCaps, Error> {
-        let _ = keys;
-        Err(stub())
+        keys.iter().try_fold(OrderCaps::default(), |caps, key| {
+            let kind = OrderKind::from_key(key)
+                .ok_or_else(|| IngestError::UnknownCapability(key.clone()))?;
+            Ok(OrderCaps(caps.0 | 1 << (kind as u32)))
+        })
     }
 
     /// Whether the set grants `kind`.
@@ -231,10 +274,16 @@ impl OrderCaps {
 impl Order {
     /// The capability a unit needs to accept the order. Building is gated by
     /// the builder's buildable set rather than a capability, so the two build
-    /// orders need none. Stub.
+    /// orders need none.
     #[must_use]
     pub fn capability(&self) -> Option<OrderKind> {
-        None
+        match self {
+            Order::Move { .. } => Some(OrderKind::Move),
+            Order::Stop => Some(OrderKind::Stop),
+            Order::Attack { .. } => Some(OrderKind::Attack),
+            Order::Guard { .. } => Some(OrderKind::Guard),
+            Order::BuildMobile { .. } | Order::BuildFactory { .. } => None,
+        }
     }
 }
 
