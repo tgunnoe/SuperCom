@@ -174,13 +174,16 @@ A map whose major version is not 2 MUST be rejected as malformed; the unsupporte
 The map parser MUST reject an inner version other than 56 and 60 with an unsupported-version error naming the version found (the test uses 0, 55, 57, and 61), and MUST read a version-56 map as a version-60 one apart from the one extra `f32` that only version 60 carries (`scmap_version_56_map_parses_like_version_60`).
 
 **FMT-054** `reference` `source:https://raw.githubusercontent.com/FAForever/Neroxis-Map-Generator/10b130836034/shared/src/main/java/com/faforever/neroxis/importer/SCMapImporter.java#L82`
-The map layout this project reads follows the pinned reference reader: the embedded preview (lines 78 and 446-453), the heightmap of two cell counts, a scale, signed 16-bit samples and one trailing byte (lines 82-90), and the ten strata, each a null-terminated path and a scale, after a version-dependent skip (lines 126-136).
+The map layout this project reads follows the pinned reference reader: the embedded preview (lines 78 and 446-453), the heightmap of two cell counts, a scale, signed 16-bit samples and one trailing byte (lines 82-90), the water block that follows the lighting (read at line 109): its presence byte compared with 1 (line 354) and the surface, deep, and abyss elevations (lines 355-357 of `readWaterSettings`, which starts at line 353), and the ten strata, each a null-terminated path and a scale, after a version-dependent skip (lines 126-136).
 
 **FMT-055** `design` `source:crates/scmap/src/lib.rs`
-The map parser walks the sections between the heightmap and the strata (shader and sky paths, cube maps, lighting, water and its wave generators, minimap words) with checked sizes and returns none of them; decals, props, and the sections after the strata are not read, and the `_scenario.lua` and `_save.lua` files beside a map are read by the dialect reader of FMT-014 and FMT-015, not by the map parser.
+The map parser walks the sections between the heightmap and the strata (shader and sky paths, cube maps, lighting, water and its wave generators, minimap words) with checked sizes and returns only the water: whether the map has any (the presence byte equal to 1) and the surface, deep, and abyss elevations, read from the first three floats of the water block, with none of the water's other terms (`scmap_water_block_reads_presence_and_elevations`); decals, props, and the sections after the strata are not read, and the `_scenario.lua` and `_save.lua` files beside a map are read by the dialect reader of FMT-014 and FMT-015, not by the map parser.
 
 **FMT-056** `design` `test:conformance_scmap_every_map_parses`
 The map conformance suite decodes about 106 million heightmap samples in all, the sum of `(width + 1) * (height + 1)` over the size classes of FMT-048. It is slow in a debug build (about 6 seconds on one development machine); it runs with the other conformance tests and MUST NOT be sampled to save time.
+
+**FMT-059** `game-data` `test:conformance_scmap_water_census`
+Of the 60 installed maps, 43 carry water (presence byte 1), with surface elevations from 0 to 30, the deep elevation at or below the surface and the abyss elevation at or below the deep on every one; the other 17 carry none (presence byte 0), the folders `SCMP_003`, `SCMP_004`, `SCMP_006`, `SCMP_007`, `SCMP_012`, `SCMP_013`, `SCMP_015`, `SCMP_017`, `SCMP_018`, `SCMP_022`, `SCMP_023`, `SCMP_026`, `SCMP_031`, `SCMP_036`, `SCMP_038`, `X1MP_001`, and `X1MP_002`.
 
 ## Sound banks
 

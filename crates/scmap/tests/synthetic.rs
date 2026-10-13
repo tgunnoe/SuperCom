@@ -14,7 +14,7 @@
     reason = "this file is entirely test code; clippy.toml exempts only #[test] functions, not their helpers"
 )]
 
-use supercom_scmap::{Error, Heightmap, Map, Stratum};
+use supercom_scmap::{Error, Heightmap, Map, Stratum, Water};
 
 /// Bytes in the fixed header: signature, major version, two constant words,
 /// width, height, a zero `i32`, a zero `i16`.
@@ -61,6 +61,10 @@ struct Spec {
     cube_maps: usize,
     wave_generators: usize,
     strata: Vec<(&'static str, f32)>,
+    /// Surface, deep, and abyss elevations; `None` builds an absent block.
+    water: Option<(f32, f32, f32)>,
+    /// Overwrites the presence byte after the block is written.
+    presence: Option<u8>,
 }
 
 /// A built map and the offsets the tests patch or cut at.
@@ -95,6 +99,8 @@ impl Spec {
             cube_maps: 0,
             wave_generators: 0,
             strata: strata(&[(0, "/textures/test/a.dds", 4.0)]),
+            water: Some((0.25, 0.25, 0.25)),
+            presence: None,
         }
     }
 
@@ -119,6 +125,11 @@ impl Spec {
                     scale,
                 })
                 .collect(),
+            water: self.water.map(|(elevation, deep, abyss)| Water {
+                elevation,
+                deep,
+                abyss,
+            }),
         }
     }
 
@@ -159,8 +170,18 @@ impl Spec {
             put_cstr(&mut out, "/textures/environment/cube.dds");
         }
         put_f32s(&mut out, &[1.5; 23]); // lighting
-        out.push(1); // water present
-        put_f32s(&mut out, &[0.25; 23]);
+        let presence_at = out.len();
+        if let Some((elevation, deep, abyss)) = self.water {
+            out.push(1);
+            put_f32s(&mut out, &[elevation, deep, abyss]);
+        } else {
+            out.push(0);
+            put_f32s(&mut out, &[-10_000.0; 3]);
+        }
+        put_f32s(&mut out, &[0.25; 20]);
+        if let (Some(byte), Some(slot)) = (self.presence, out.get_mut(presence_at)) {
+            *slot = byte;
+        }
         put_cstr(&mut out, "watercube");
         put_cstr(&mut out, "waterramp");
         put_f32s(&mut out, &[2.0; 4]);
@@ -405,5 +426,41 @@ fn scmap_every_prefix_before_the_strata_end_is_truncated() {
             "prefix of {len} bytes: got {:?}",
             result.err()
         );
+    }
+}
+
+/// Pins the water block: a present block (presence byte 1) yields its
+/// surface, deep, and abyss elevations and an absent one (byte 0, the
+/// elevations -10000) yields none, with the strata read from the same
+/// place either way.
+#[test]
+fn scmap_water_block_reads_presence_and_elevations() {
+    let mut present = Spec::minimal();
+    present.water = Some((17.5, 15.0, 2.5));
+    let map = parsed(&present.build().bytes);
+    assert_eq!(
+        map.water,
+        Some(Water {
+            elevation: 17.5,
+            deep: 15.0,
+            abyss: 2.5,
+        })
+    );
+    assert_eq!(map.strata, Spec::minimal().expected().strata);
+
+    let mut absent = Spec::minimal();
+    absent.water = None;
+    let map = parsed(&absent.build().bytes);
+    assert_eq!(map.water, None);
+    assert_eq!(map.strata, Spec::minimal().expected().strata);
+
+    // Only a presence byte equal to 1 means water, as in the reference.
+    for byte in [2, 255] {
+        let mut other = Spec::minimal();
+        other.water = Some((17.5, 15.0, 2.5));
+        other.presence = Some(byte);
+        let map = parsed(&other.build().bytes);
+        assert_eq!(map.water, None, "presence byte {byte}");
+        assert_eq!(map.strata, Spec::minimal().expected().strata);
     }
 }
