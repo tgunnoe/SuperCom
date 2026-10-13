@@ -95,7 +95,6 @@ impl State {
     /// digests against the header ([`World::check_replay`]), and starts here.
     #[must_use]
     pub fn with_world(world: Arc<World>, seed: u64) -> State {
-        let _ = world;
         State {
             tick: Tick(0),
             seed,
@@ -105,7 +104,7 @@ impl State {
             entities: BTreeMap::new(),
             counters: Counters::default(),
             head: GENESIS,
-            world: Arc::new(World::empty()),
+            world,
         }
     }
 

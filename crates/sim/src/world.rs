@@ -17,15 +17,9 @@ use sha2::{Digest as _, Sha256};
 use crate::command::Order;
 use crate::error::{Error, IngestError};
 use crate::hash::{Digest, GENESIS, canonical_f64_bits};
-use crate::ids::{Pos, Q};
+use crate::ids::{Army, Pos, Q};
 use crate::replay::{ReplayHeader, check_content};
 use crate::state::State;
-
-fn stub() -> Error {
-    Error::Ingest(IngestError::ValueOverflow {
-        path: String::from("pending"),
-    })
-}
 
 /// A movement or placement layer (SIM-030), in the order of `Ord`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -635,15 +629,36 @@ impl World {
     /// Start a skirmish: one army per faction, faction `i` in slot `n = i + 1`
     /// (army `n`) with its commander spawned at the marker `ARMY_n` at the
     /// marker's position and its kind's maximum health, and the army's mass
-    /// and energy equal to the commander's storage (SIM-051). Stub.
+    /// and energy equal to the commander's storage, none when the commander
+    /// has none (SIM-051). Slot `n` uses the first marker of kind
+    /// `Army(n)`; the marker is checked before the commander.
     ///
     /// # Errors
     ///
     /// [`IngestError::MissingArmyMarker`] for a slot with no marker;
     /// [`IngestError::UnknownCommander`] for a commander the world lacks.
     pub fn skirmish(self: Arc<Self>, seed: u64, factions: &[Faction]) -> Result<State, Error> {
-        let _ = (seed, factions);
-        Err(stub())
+        let mut state = State::with_world(Arc::clone(&self), seed);
+        for (index, faction) in factions.iter().enumerate() {
+            let slot = u8::try_from(index + 1).map_err(|_| IngestError::ValueOverflow {
+                path: format!("factions[{index}]: no army slot"),
+            })?;
+            let marker = self
+                .markers
+                .iter()
+                .find(|m| m.kind == MarkerKind::Army(slot))
+                .ok_or(IngestError::MissingArmyMarker(slot))?;
+            let id = faction.commander();
+            let kind = self
+                .units
+                .get(id)
+                .ok_or_else(|| IngestError::UnknownCommander(id.to_owned()))?;
+            let mass = kind.storage_mass.unwrap_or(Q::ZERO);
+            let energy = kind.storage_energy.unwrap_or(Q::ZERO);
+            state.add_army(Army(slot), mass, energy, mass, energy);
+            state.spawn(Army(slot), id, marker.pos, kind.max_health);
+        }
+        Ok(state)
     }
 }
 
