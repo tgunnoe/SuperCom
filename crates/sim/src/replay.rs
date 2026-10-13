@@ -61,6 +61,9 @@ pub enum ReplayError {
     BadMode(u8),
     BadString,
     LengthExceedsInput { at: usize },
+    TrailingBytes { at: usize },
+    NonCanonicalFloat { at: usize },
+    PluginsUnsupported { count: usize },
 }
 
 impl fmt::Display for ReplayError {
@@ -90,6 +93,18 @@ impl fmt::Display for ReplayError {
             Self::BadString => f.write_str("a string field is not valid UTF-8"),
             Self::LengthExceedsInput { at } => {
                 write!(f, "the length at byte {at} exceeds the remaining input")
+            }
+            Self::TrailingBytes { at } => {
+                write!(f, "bytes follow the last checkpoint at byte {at}")
+            }
+            Self::NonCanonicalFloat { at } => {
+                write!(f, "the float at byte {at} is a non-canonical NaN")
+            }
+            Self::PluginsUnsupported { count } => {
+                write!(
+                    f,
+                    "the replay names {count} plugins, which this version cannot run"
+                )
             }
         }
     }
