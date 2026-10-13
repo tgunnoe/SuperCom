@@ -510,7 +510,7 @@ fn scale_shift(scale: f32) -> Option<u32> {
     let exponent = bits >> 23;
     // Sign clear (the exponent field with its sign bit is below 0x100) and
     // mantissa zero.
-    let pure_power = bits & 0x007f_ffff == 0 && exponent < 0x100;
+    let pure_power = bits.trailing_zeros() >= 23 && exponent < 0x100;
     if !pure_power {
         return None;
     }
@@ -689,7 +689,7 @@ fn to_extent(value: f64, path: impl FnOnce() -> String) -> Result<u32, Error> {
         None
     };
     exact
-        .and_then(|v| v.checked_to_num::<u32>())
+        .and_then(fixed::FixedU64::checked_to_num::<u32>)
         .ok_or_else(|| IngestError::ValueOverflow { path: path() }.into())
 }
 
