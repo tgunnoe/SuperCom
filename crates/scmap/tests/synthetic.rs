@@ -14,7 +14,7 @@
     reason = "this file is entirely test code; clippy.toml exempts only #[test] functions, not their helpers"
 )]
 
-use supercom_scmap::{Error, Heightmap, Map, Stratum};
+use supercom_scmap::{Error, Heightmap, Map, Stratum, Water};
 
 /// Bytes in the fixed header: signature, major version, two constant words,
 /// width, height, a zero `i32`, a zero `i16`.
@@ -421,4 +421,30 @@ fn scmap_every_prefix_before_the_strata_end_is_truncated() {
             result.err()
         );
     }
+}
+
+/// Pins the water block: a present block (presence byte 1) yields its
+/// surface, deep, and abyss elevations and an absent one (byte 0, the
+/// elevations -10000) yields none, with the strata read from the same
+/// place either way.
+#[test]
+fn scmap_water_block_reads_presence_and_elevations() {
+    let mut present = Spec::minimal();
+    present.water = Some((17.5, 15.0, 2.5));
+    let map = parsed(&present.build().bytes);
+    assert_eq!(
+        map.water,
+        Some(Water {
+            elevation: 17.5,
+            deep: 15.0,
+            abyss: 2.5,
+        })
+    );
+    assert_eq!(map.strata, Spec::minimal().expected().strata);
+
+    let mut absent = Spec::minimal();
+    absent.water = None;
+    let map = parsed(&absent.build().bytes);
+    assert_eq!(map.water, None);
+    assert_eq!(map.strata, Spec::minimal().expected().strata);
 }
