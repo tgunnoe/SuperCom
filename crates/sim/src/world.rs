@@ -305,6 +305,7 @@ pub struct WeaponKind {
 /// are [`Q`] (SIM-050), geometry stays `f64`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct UnitKind {
+    /// The blueprint id in upper case, such as `UEL0001`.
     pub id: String,
     pub categories: BTreeSet<String>,
     pub build_cost_mass: Q,
@@ -729,6 +730,13 @@ fn convert_weapon(
     })
 }
 
+/// A unit kind's id: the importer's lower-cased file stem in the upper-case
+/// form the game's own references use (`UEL0001`), which the commander
+/// lookups of SIM-035 and SIM-051 and the buildable sets share.
+fn unit_id(imported: &str) -> String {
+    imported.to_ascii_uppercase()
+}
+
 /// Whether a `BuildableCategory` token selects `target` (SIM-011): the token
 /// is one of the target's category strings, or equals its id ignoring case.
 fn token_selects(token: &str, target: &supercom_data::Unit) -> bool {
@@ -751,7 +759,7 @@ fn buildable_set(
         let tokens: Vec<&str> = tokens.collect();
         for target in catalog {
             if tokens.iter().all(|t| token_selects(t, target)) {
-                selected.insert(target.id.clone());
+                selected.insert(unit_id(&target.id));
             }
         }
     }
@@ -774,7 +782,7 @@ fn convert_unit(
         .map(|(i, w)| convert_weapon(id, i, w))
         .collect::<Result<Vec<_>, Error>>()?;
     Ok(UnitKind {
-        id: id.clone(),
+        id: unit_id(id),
         categories: unit.categories.iter().cloned().collect(),
         build_cost_mass: to_q(economy.build_cost_mass, || path("build_cost_mass"))?,
         build_cost_energy: to_q(economy.build_cost_energy, || path("build_cost_energy"))?,
