@@ -142,6 +142,7 @@ impl State {
     /// of queued builds, then assists (SIM-059 to SIM-061).
     pub(crate) fn run_build(&mut self) {
         let world = Arc::clone(self.world());
+        self.clear_dead_work();
         self.settle_stops(&world);
         let prior: BTreeMap<EntityId, EntityId> = self
             .entities
@@ -153,9 +154,26 @@ impl State {
         self.assign_assists(&world);
     }
 
+    /// A work item naming an entity that is gone or finished explains
+    /// nothing; clearing it lets the head order be tried again.
+    fn clear_dead_work(&mut self) {
+        let live: BTreeSet<EntityId> = self
+            .entities
+            .iter()
+            .filter(|(_, e)| !e.complete)
+            .map(|(id, _)| *id)
+            .collect();
+        for e in self.entities.values_mut() {
+            if e.work.is_some_and(|t| !live.contains(&t)) {
+                e.work = None;
+            }
+        }
+    }
+
     /// A Stop at the head of a builder's queue clears its work and is popped
-    /// (the rest of its meaning is the movement family's); an entity whose
-    /// head order no longer explains its work item drops the work.
+    /// (the rest of its meaning is the movement family's). It checks nothing
+    /// else: work is set only under a build or Guard head, a replacing
+    /// command clears it, and completion clears it before popping.
     fn settle_stops(&mut self, world: &World) {
         let ids: Vec<EntityId> = self.entities.keys().copied().collect();
         for id in ids {
@@ -168,12 +186,6 @@ impl State {
             while building && matches!(e.orders.front(), Some(Order::Stop)) {
                 e.work = None;
                 e.orders.pop_front();
-            }
-            if !matches!(
-                e.orders.front(),
-                Some(Order::BuildMobile { .. } | Order::BuildFactory { .. } | Order::Guard { .. })
-            ) {
-                e.work = None;
             }
         }
     }

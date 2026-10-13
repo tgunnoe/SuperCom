@@ -91,7 +91,8 @@ the choices by clause so the design clauses have a ratifiable source
 
 ## Open
 
-Debts: resuming an unfinished structure after a Stop, and buffs and
+Debts: resuming an unfinished structure after a Stop or a replacing
+command, and buffs and
 modifiers, which are 0 and 1 in this version. Starting resources remain
 SIM-051's recorded departure.
 

@@ -326,6 +326,10 @@ impl State {
             for id in &c.units {
                 if let Some(e) = self.entities.get_mut(id) {
                     if c.mode == QueueMode::Replace {
+                        // The old head no longer explains the work item, so
+                        // the work ends here, as after a Stop (SIM-045,
+                        // SIM-061); the unfinished entity stays in place.
+                        e.work = None;
                         e.orders.clear();
                     }
                     e.orders.push_back(c.order.clone());
