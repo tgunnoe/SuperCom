@@ -11,11 +11,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use fixed::types::U32F32;
+use sha2::{Digest as _, Sha256};
+
 use crate::command::Order;
 use crate::error::{Error, IngestError};
-use crate::hash::{Digest, GENESIS};
+use crate::hash::{Digest, GENESIS, canonical_f64_bits};
 use crate::ids::{Pos, Q};
-use crate::replay::ReplayHeader;
+use crate::replay::{ReplayHeader, check_content};
 use crate::state::State;
 
 fn stub() -> Error {
@@ -582,7 +585,7 @@ impl World {
     /// Build the world from parsed values: every blueprint scalar the sim
     /// holds as [`Q`] converts once through `Q::checked_from_num`, rounding
     /// to the nearest representable value (SIM-050); the buildable sets
-    /// resolve by SIM-011's rule; both digests are computed. Stub.
+    /// resolve by SIM-011's rule; both digests are computed.
     ///
     /// # Errors
     ///
@@ -596,8 +599,37 @@ impl World {
         markers: Vec<Marker>,
         map_name: String,
     ) -> Result<World, Error> {
-        let _ = (units, projectiles, map, markers, map_name);
-        Err(stub())
+        let mut kinds = BTreeMap::new();
+        for unit in units {
+            let kind = convert_unit(unit, units)?;
+            kinds.insert(kind.id.clone(), kind);
+        }
+        let mut shots = BTreeMap::new();
+        for projectile in projectiles {
+            let kind = convert_projectile(projectile);
+            shots.insert(kind.id.clone(), kind);
+        }
+        let catalog_digest = catalog_digest(&kinds, &shots);
+        let map_digest = map_digest(&map_name, &map, &markers);
+        Ok(World {
+            units: kinds,
+            projectiles: shots,
+            map,
+            markers,
+            map_name,
+            catalog_digest,
+            map_digest,
+        })
+    }
+
+    /// Refuse, before tick 0, a replay whose content digests differ from
+    /// this world's (DET-007).
+    ///
+    /// # Errors
+    ///
+    /// As [`check_content`].
+    pub fn check_replay(&self, header: &ReplayHeader) -> Result<(), Error> {
+        check_content(header, &self.map_digest, &self.catalog_digest)
     }
 
     /// Start a skirmish: one army per faction, faction `i` in slot `n = i + 1`
@@ -609,19 +641,335 @@ impl World {
     ///
     /// [`IngestError::MissingArmyMarker`] for a slot with no marker;
     /// [`IngestError::UnknownCommander`] for a commander the world lacks.
-    pub fn check_replay(&self, header: &ReplayHeader) -> Result<(), Error> {
-        let _ = header;
-        Err(Error::TickOverflow)
-    }
-
     pub fn skirmish(self: Arc<Self>, seed: u64, factions: &[Faction]) -> Result<State, Error> {
         let _ = (seed, factions);
         Err(stub())
     }
 }
 
+/// A blueprint scalar as [`Q`], rounded to the nearest representable value
+/// (SIM-050). A value that is not finite, or whose magnitude is 2^31 or
+/// more, is refused with the field's path; so is exactly -2^31, which the
+/// checked conversion would accept, because the clause bounds the magnitude.
+fn to_q(value: f64, path: impl FnOnce() -> String) -> Result<Q, Error> {
+    const LIMIT: f64 = 2_147_483_648.0;
+    let converted = if value.is_finite() && value.abs() < LIMIT {
+        Q::checked_from_num(value)
+    } else {
+        None
+    };
+    converted.ok_or_else(|| IngestError::ValueOverflow { path: path() }.into())
+}
+
+fn to_q_opt(value: Option<f64>, path: impl FnOnce() -> String) -> Result<Option<Q>, Error> {
+    value.map(|v| to_q(v, path)).transpose()
+}
+
+/// A footprint extent: a finite, non-negative whole number below 2^32.
+fn to_extent(value: f64, path: impl FnOnce() -> String) -> Result<u32, Error> {
+    let exact = if value.is_finite() && value.fract() == 0.0 {
+        U32F32::checked_from_num(value)
+    } else {
+        None
+    };
+    exact
+        .and_then(|v| v.checked_to_num::<u32>())
+        .ok_or_else(|| IngestError::ValueOverflow { path: path() }.into())
+}
+
+fn convert_footprint(unit: &supercom_data::Unit) -> Result<Option<(u32, u32)>, Error> {
+    let Some(footprint) = &unit.footprint else {
+        return Ok(None);
+    };
+    let (Some(x), Some(z)) = (footprint.size_x, footprint.size_z) else {
+        return Ok(None);
+    };
+    let x = to_extent(x, || format!("unit {}: footprint.size_x", unit.id))?;
+    let z = to_extent(z, || format!("unit {}: footprint.size_z", unit.id))?;
+    Ok(Some((x, z)))
+}
+
+fn convert_weapon(
+    unit: &str,
+    index: usize,
+    weapon: &supercom_data::Weapon,
+) -> Result<WeaponKind, Error> {
+    let path = |field: &str| format!("unit {unit}: weapons[{index}].{field}");
+    let mut target_layers = LayerSet::default();
+    for (_, caps) in &weapon.fire_target_layer_caps {
+        target_layers = target_layers.union(LayerSet::from_caps(caps)?);
+    }
+    Ok(WeaponKind {
+        label: weapon.label.clone(),
+        damage: to_q(weapon.damage, || path("damage"))?,
+        damage_radius: weapon.damage_radius,
+        damage_type: weapon.damage_type.clone(),
+        rate_of_fire: weapon.rate_of_fire,
+        max_radius: weapon.max_radius,
+        min_radius: weapon.min_radius,
+        muzzle_velocity: weapon.muzzle_velocity,
+        projectile_id: weapon.projectile_id.clone(),
+        target_layers,
+        manual_fire: weapon.manual_fire.unwrap_or(false),
+    })
+}
+
+/// Whether a `BuildableCategory` token selects `target` (SIM-011): the token
+/// is one of the target's category strings, or equals its id ignoring case.
+fn token_selects(token: &str, target: &supercom_data::Unit) -> bool {
+    target.categories.iter().any(|c| c == token) || token.eq_ignore_ascii_case(&target.id)
+}
+
+/// The ids `builder`'s expressions select: each expression is a
+/// whitespace-separated intersection of tokens, an expression with no tokens
+/// selects nothing, and the set is the union over the expressions.
+fn buildable_set(
+    builder: &supercom_data::Unit,
+    catalog: &[supercom_data::Unit],
+) -> BTreeSet<String> {
+    let mut selected = BTreeSet::new();
+    for expression in &builder.economy.buildable_category {
+        let mut tokens = expression.split_whitespace().peekable();
+        if tokens.peek().is_none() {
+            continue;
+        }
+        let tokens: Vec<&str> = tokens.collect();
+        for target in catalog {
+            if tokens.iter().all(|t| token_selects(t, target)) {
+                selected.insert(target.id.clone());
+            }
+        }
+    }
+    selected
+}
+
+fn convert_unit(
+    unit: &supercom_data::Unit,
+    catalog: &[supercom_data::Unit],
+) -> Result<UnitKind, Error> {
+    let id = &unit.id;
+    let economy = &unit.economy;
+    let path = |field: &str| format!("unit {id}: {field}");
+    let motion = MotionType::from_rule(&unit.physics.motion_type)
+        .ok_or_else(|| IngestError::UnknownMotionType(unit.physics.motion_type.clone()))?;
+    let weapons = unit
+        .weapons
+        .iter()
+        .enumerate()
+        .map(|(i, w)| convert_weapon(id, i, w))
+        .collect::<Result<Vec<_>, Error>>()?;
+    Ok(UnitKind {
+        id: id.clone(),
+        categories: unit.categories.iter().cloned().collect(),
+        build_cost_mass: to_q(economy.build_cost_mass, || path("build_cost_mass"))?,
+        build_cost_energy: to_q(economy.build_cost_energy, || path("build_cost_energy"))?,
+        build_time: to_q_opt(economy.build_time, || path("build_time"))?,
+        build_rate: to_q_opt(economy.build_rate, || path("build_rate"))?,
+        production_mass: to_q_opt(economy.production_per_second_mass, || {
+            path("production_per_second_mass")
+        })?,
+        production_energy: to_q_opt(economy.production_per_second_energy, || {
+            path("production_per_second_energy")
+        })?,
+        storage_mass: to_q_opt(economy.storage_mass, || path("storage_mass"))?,
+        storage_energy: to_q_opt(economy.storage_energy, || path("storage_energy"))?,
+        maintenance_energy: to_q_opt(economy.maintenance_consumption_per_second_energy, || {
+            path("maintenance_consumption_per_second_energy")
+        })?,
+        buildable: buildable_set(unit, catalog),
+        motion,
+        max_speed: unit.physics.max_speed,
+        turn_rate: unit.physics.turn_rate,
+        max_acceleration: unit.physics.max_acceleration,
+        max_brake: unit.physics.max_brake,
+        elevation: unit.physics.elevation,
+        build_restriction: BuildRestriction::from_rule(unit.physics.build_restriction.as_deref())?,
+        build_on: LayerSet::from_keys(&unit.physics.build_on_layer_caps)?,
+        footprint: convert_footprint(unit)?,
+        health: to_q(unit.defense.health, || path("health"))?,
+        max_health: to_q(unit.defense.max_health, || path("max_health"))?,
+        regen_rate: to_q_opt(unit.defense.regen_rate, || path("regen_rate"))?,
+        armor_type: unit.defense.armor_type.clone(),
+        vision_radius: unit.intel.as_ref().and_then(|i| i.vision_radius),
+        command_caps: OrderCaps::from_keys(&unit.command_caps)?,
+        weapons,
+    })
+}
+
+fn convert_projectile(projectile: &supercom_data::Projectile) -> ProjectileKind {
+    let physics = &projectile.physics;
+    ProjectileKind {
+        id: projectile.id.clone(),
+        categories: projectile.categories.iter().cloned().collect(),
+        initial_speed: physics.initial_speed,
+        max_speed: physics.max_speed,
+        acceleration: physics.acceleration,
+        turn_rate: physics.turn_rate,
+        lifetime: physics.lifetime,
+        track_target: physics.track_target.unwrap_or(false),
+        use_gravity: physics.use_gravity.unwrap_or(false),
+        destroy_on_water: physics.destroy_on_water.unwrap_or(false),
+    }
+}
+
+/// The byte encoder of the two digests: every primitive of the documented
+/// layouts, streamed into SHA-256.
+struct Encoder(Sha256);
+
+impl Encoder {
+    fn new(tag: &str) -> Encoder {
+        let mut e = Encoder(Sha256::new());
+        e.str(tag);
+        e
+    }
+
+    fn u8(&mut self, v: u8) {
+        self.0.update([v]);
+    }
+
+    fn u32(&mut self, v: u32) {
+        self.0.update(v.to_le_bytes());
+    }
+
+    /// A length as `u32`; a collection over four billion entries cannot
+    /// occur, and saturating keeps the encoder total.
+    fn len(&mut self, n: usize) {
+        self.u32(u32::try_from(n).unwrap_or(u32::MAX));
+    }
+
+    fn q(&mut self, v: Q) {
+        self.0.update(v.to_bits().to_le_bytes());
+    }
+
+    fn f64(&mut self, v: f64) {
+        self.0.update(canonical_f64_bits(v).to_le_bytes());
+    }
+
+    fn str(&mut self, v: &str) {
+        self.len(v.len());
+        self.0.update(v.as_bytes());
+    }
+
+    fn option<T>(&mut self, v: Option<T>, put: impl FnOnce(&mut Encoder, T)) {
+        match v {
+            None => self.u8(0),
+            Some(v) => {
+                self.u8(1);
+                put(self, v);
+            }
+        }
+    }
+
+    fn set(&mut self, v: &BTreeSet<String>) {
+        self.len(v.len());
+        for s in v {
+            self.str(s);
+        }
+    }
+
+    fn finish(self) -> Digest {
+        self.0.finalize().into()
+    }
+
+    fn weapon(&mut self, w: &WeaponKind) {
+        self.option(w.label.as_deref(), Encoder::str);
+        self.q(w.damage);
+        self.option(w.damage_radius, Encoder::f64);
+        self.str(&w.damage_type);
+        for v in [
+            w.rate_of_fire,
+            w.max_radius,
+            w.min_radius,
+            w.muzzle_velocity,
+        ] {
+            self.option(v, Encoder::f64);
+        }
+        self.option(w.projectile_id.as_deref(), Encoder::str);
+        self.u8(w.target_layers.bits());
+        self.u8(u8::from(w.manual_fire));
+    }
+
+    fn unit(&mut self, u: &UnitKind) {
+        self.str(&u.id);
+        self.set(&u.categories);
+        self.q(u.build_cost_mass);
+        self.q(u.build_cost_energy);
+        for v in [
+            u.build_time,
+            u.build_rate,
+            u.production_mass,
+            u.production_energy,
+            u.storage_mass,
+            u.storage_energy,
+            u.maintenance_energy,
+        ] {
+            self.option(v, Encoder::q);
+        }
+        self.set(&u.buildable);
+        self.u8(u.motion as u8);
+        for v in [
+            u.max_speed,
+            u.turn_rate,
+            u.max_acceleration,
+            u.max_brake,
+            u.elevation,
+        ] {
+            self.option(v, Encoder::f64);
+        }
+        self.u8(u.build_restriction as u8);
+        self.u8(u.build_on.bits());
+        self.option(u.footprint, |e, (x, z)| {
+            e.u32(x);
+            e.u32(z);
+        });
+        self.q(u.health);
+        self.q(u.max_health);
+        self.option(u.regen_rate, Encoder::q);
+        self.str(&u.armor_type);
+        self.option(u.vision_radius, Encoder::f64);
+        self.u32(u.command_caps.bits());
+        self.len(u.weapons.len());
+        for w in &u.weapons {
+            self.weapon(w);
+        }
+    }
+
+    fn projectile(&mut self, p: &ProjectileKind) {
+        self.str(&p.id);
+        self.set(&p.categories);
+        for v in [
+            p.initial_speed,
+            p.max_speed,
+            p.acceleration,
+            p.turn_rate,
+            p.lifetime,
+        ] {
+            self.option(v, Encoder::f64);
+        }
+        for flag in [p.track_target, p.use_gravity, p.destroy_on_water] {
+            self.u8(u8::from(flag));
+        }
+    }
+
+    fn marker(&mut self, m: &Marker) {
+        self.str(&m.name);
+        match m.kind {
+            MarkerKind::Mass => self.u8(0),
+            MarkerKind::Hydrocarbon => self.u8(1),
+            MarkerKind::Army(slot) => {
+                self.u8(2);
+                self.u8(slot);
+            }
+            MarkerKind::Other => self.u8(3),
+        }
+        for v in [m.pos.x, m.pos.y, m.pos.z] {
+            self.f64(v);
+        }
+    }
+}
+
 /// The catalog digest: SHA-256 over the encoding below of the unit and
-/// projectile kinds in id order. Stub (returns the all-zero value).
+/// projectile kinds in id order.
 ///
 /// Primitives: `u8`; `u32` and `i64` little-endian; a [`Q`] as its raw `i64`
 /// bits; an `f64` as its [`crate::canonical_f64_bits`], little-endian; a
@@ -643,12 +991,19 @@ pub fn catalog_digest(
     units: &BTreeMap<String, UnitKind>,
     projectiles: &BTreeMap<String, ProjectileKind>,
 ) -> Digest {
-    let _ = (units, projectiles);
-    GENESIS
+    let mut e = Encoder::new("catalog-v1");
+    e.len(units.len());
+    for unit in units.values() {
+        e.unit(unit);
+    }
+    e.len(projectiles.len());
+    for projectile in projectiles.values() {
+        e.projectile(projectile);
+    }
+    e.finish()
 }
 
-/// The map digest: SHA-256 over the encoding below. Stub (returns the
-/// all-zero value). The primitives are those of [`catalog_digest`].
+/// The map digest: SHA-256 over the encoding below. The primitives are those of [`catalog_digest`].
 ///
 /// Layout: the string `map-v1`; the map name as a string; `width` then
 /// `height` as `u32`; every height sample's raw `i64` bits in order; the
@@ -657,6 +1012,16 @@ pub fn catalog_digest(
 /// `u8`, Other 3), and `x`, `y`, `z` as canonical `f64` bits.
 #[must_use]
 pub fn map_digest(map_name: &str, map: &MapGrid, markers: &[Marker]) -> Digest {
-    let _ = (map_name, map, markers);
-    GENESIS
+    let mut e = Encoder::new("map-v1");
+    e.str(map_name);
+    e.u32(map.width);
+    e.u32(map.height);
+    for h in &map.heights {
+        e.q(*h);
+    }
+    e.len(markers.len());
+    for marker in markers {
+        e.marker(marker);
+    }
+    e.finish()
 }
