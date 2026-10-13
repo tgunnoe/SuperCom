@@ -909,98 +909,154 @@ impl Encoder {
         self.0.finalize().into()
     }
 
+    // The four record encoders below bind their argument by a pattern that
+    // names every field, so a field added to the type does not compile until
+    // the encoder takes it or names it as skipped.
+
     fn weapon(&mut self, w: &WeaponKind) {
-        self.option(w.label.as_deref(), Encoder::str);
-        self.q(w.damage);
-        self.option(w.damage_radius, Encoder::f64);
-        self.str(&w.damage_type);
-        for v in [
-            w.rate_of_fire,
-            w.max_radius,
-            w.min_radius,
-            w.muzzle_velocity,
-        ] {
+        let WeaponKind {
+            label,
+            damage,
+            damage_radius,
+            damage_type,
+            rate_of_fire,
+            max_radius,
+            min_radius,
+            muzzle_velocity,
+            projectile_id,
+            target_layers,
+            manual_fire,
+        } = w;
+        self.option(label.as_deref(), Encoder::str);
+        self.q(*damage);
+        self.option(*damage_radius, Encoder::f64);
+        self.str(damage_type);
+        for v in [*rate_of_fire, *max_radius, *min_radius, *muzzle_velocity] {
             self.option(v, Encoder::f64);
         }
-        self.option(w.projectile_id.as_deref(), Encoder::str);
-        self.u8(w.target_layers.bits());
-        self.u8(u8::from(w.manual_fire));
+        self.option(projectile_id.as_deref(), Encoder::str);
+        self.u8(target_layers.bits());
+        self.u8(u8::from(*manual_fire));
     }
 
     fn unit(&mut self, u: &UnitKind) {
-        self.str(&u.id);
-        self.set(&u.categories);
-        self.q(u.build_cost_mass);
-        self.q(u.build_cost_energy);
+        let UnitKind {
+            id,
+            categories,
+            build_cost_mass,
+            build_cost_energy,
+            build_time,
+            build_rate,
+            production_mass,
+            production_energy,
+            storage_mass,
+            storage_energy,
+            maintenance_energy,
+            buildable,
+            motion,
+            max_speed,
+            turn_rate,
+            max_acceleration,
+            max_brake,
+            elevation,
+            build_restriction,
+            build_on,
+            footprint,
+            health,
+            max_health,
+            regen_rate,
+            armor_type,
+            vision_radius,
+            command_caps,
+            weapons,
+        } = u;
+        self.str(id);
+        self.set(categories);
+        self.q(*build_cost_mass);
+        self.q(*build_cost_energy);
         for v in [
-            u.build_time,
-            u.build_rate,
-            u.production_mass,
-            u.production_energy,
-            u.storage_mass,
-            u.storage_energy,
-            u.maintenance_energy,
+            *build_time,
+            *build_rate,
+            *production_mass,
+            *production_energy,
+            *storage_mass,
+            *storage_energy,
+            *maintenance_energy,
         ] {
             self.option(v, Encoder::q);
         }
-        self.set(&u.buildable);
-        self.u8(u.motion as u8);
+        self.set(buildable);
+        self.u8(*motion as u8);
         for v in [
-            u.max_speed,
-            u.turn_rate,
-            u.max_acceleration,
-            u.max_brake,
-            u.elevation,
+            *max_speed,
+            *turn_rate,
+            *max_acceleration,
+            *max_brake,
+            *elevation,
         ] {
             self.option(v, Encoder::f64);
         }
-        self.u8(u.build_restriction as u8);
-        self.u8(u.build_on.bits());
-        self.option(u.footprint, |e, (x, z)| {
+        self.u8(*build_restriction as u8);
+        self.u8(build_on.bits());
+        self.option(*footprint, |e, (x, z)| {
             e.u32(x);
             e.u32(z);
         });
-        self.q(u.health);
-        self.q(u.max_health);
-        self.option(u.regen_rate, Encoder::q);
-        self.str(&u.armor_type);
-        self.option(u.vision_radius, Encoder::f64);
-        self.u32(u.command_caps.bits());
-        self.len(u.weapons.len());
-        for w in &u.weapons {
+        self.q(*health);
+        self.q(*max_health);
+        self.option(*regen_rate, Encoder::q);
+        self.str(armor_type);
+        self.option(*vision_radius, Encoder::f64);
+        self.u32(command_caps.bits());
+        self.len(weapons.len());
+        for w in weapons {
             self.weapon(w);
         }
     }
 
     fn projectile(&mut self, p: &ProjectileKind) {
-        self.str(&p.id);
-        self.set(&p.categories);
+        let ProjectileKind {
+            id,
+            categories,
+            initial_speed,
+            max_speed,
+            acceleration,
+            turn_rate,
+            lifetime,
+            track_target,
+            use_gravity,
+            destroy_on_water,
+        } = p;
+        self.str(id);
+        self.set(categories);
         for v in [
-            p.initial_speed,
-            p.max_speed,
-            p.acceleration,
-            p.turn_rate,
-            p.lifetime,
+            *initial_speed,
+            *max_speed,
+            *acceleration,
+            *turn_rate,
+            *lifetime,
         ] {
             self.option(v, Encoder::f64);
         }
-        for flag in [p.track_target, p.use_gravity, p.destroy_on_water] {
+        for flag in [*track_target, *use_gravity, *destroy_on_water] {
             self.u8(u8::from(flag));
         }
     }
 
     fn marker(&mut self, m: &Marker) {
-        self.str(&m.name);
-        match m.kind {
+        let Marker { name, kind, pos } = m;
+        let Pos { x, y, z } = pos;
+        self.str(name);
+        match kind {
             MarkerKind::Mass => self.u8(0),
             MarkerKind::Hydrocarbon => self.u8(1),
             MarkerKind::Army(slot) => {
                 self.u8(2);
-                self.u8(slot);
+                self.u8(*slot);
             }
             MarkerKind::Other => self.u8(3),
         }
-        for v in [m.pos.x, m.pos.y, m.pos.z] {
+        for v in [*x, *y, *z] {
             self.f64(v);
         }
     }
@@ -1050,11 +1106,19 @@ pub fn catalog_digest(
 /// `u8`, Other 3), and `x`, `y`, `z` as canonical `f64` bits.
 #[must_use]
 pub fn map_digest(map_name: &str, map: &MapGrid, markers: &[Marker]) -> Digest {
+    let MapGrid {
+        width,
+        height,
+        heights,
+        // Derived from `heights` by `MapGrid::from_heightmap`, so the samples
+        // already identify it.
+        passable: _,
+    } = map;
     let mut e = Encoder::new("map-v1");
     e.str(map_name);
-    e.u32(map.width);
-    e.u32(map.height);
-    for h in &map.heights {
+    e.u32(*width);
+    e.u32(*height);
+    for h in heights {
         e.q(*h);
     }
     e.len(markers.len());
