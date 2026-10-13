@@ -3,6 +3,12 @@
 //! reader, the writer, or the command codec would otherwise leave green.
 //! All synthetic.
 
+#![allow(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "this file is entirely test code; clippy.toml exempts only #[test] functions, not their helpers"
+)]
+
 use supercom_sim::{
     Army, Command, Digest, EntityId, Error, Order, Pos, QueueMode, REPLAY_FORMAT_VERSION, Replay,
     ReplayError, ReplayHeader, Tick, check_content, read_replay, write_replay,
