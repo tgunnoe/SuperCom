@@ -1,5 +1,6 @@
 //! Loader for the binary `.scmap` map file: the terrain heightmap, the
-//! embedded preview image, and the terrain texture layers (strata).
+//! embedded preview image, the water's presence and elevations, and the
+//! terrain texture layers (strata).
 //!
 //! A `.scmap` is little-endian. It opens with a 30-byte fixed header
 //! (signature `0x1a70614d`, major version 2, two constant words, the map's
@@ -16,7 +17,7 @@
 //! <https://github.com/FAForever/Neroxis-Map-Generator> (commit 10b130836034,
 //! `shared/src/main/java/com/faforever/neroxis/importer/SCMapImporter.java`,
 //! lines 58-149): the preview at 78 and 446-453, the heightmap at 82-89, the
-//! strata at 126-136. The map file is binary; the `_scenario.lua` and
+//! water at 109 and 353-357, the strata at 126-136. The map file is binary; the `_scenario.lua` and
 //! `_save.lua` beside it are not read here.
 //!
 //! [`Map::parse`] walks the file front to back with a checked cursor. Each

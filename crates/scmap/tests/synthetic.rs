@@ -63,6 +63,8 @@ struct Spec {
     strata: Vec<(&'static str, f32)>,
     /// Surface, deep, and abyss elevations; `None` builds an absent block.
     water: Option<(f32, f32, f32)>,
+    /// Overwrites the presence byte after the block is written.
+    presence: Option<u8>,
 }
 
 /// A built map and the offsets the tests patch or cut at.
@@ -98,6 +100,7 @@ impl Spec {
             wave_generators: 0,
             strata: strata(&[(0, "/textures/test/a.dds", 4.0)]),
             water: Some((0.25, 0.25, 0.25)),
+            presence: None,
         }
     }
 
@@ -167,6 +170,7 @@ impl Spec {
             put_cstr(&mut out, "/textures/environment/cube.dds");
         }
         put_f32s(&mut out, &[1.5; 23]); // lighting
+        let presence_at = out.len();
         if let Some((elevation, deep, abyss)) = self.water {
             out.push(1);
             put_f32s(&mut out, &[elevation, deep, abyss]);
@@ -175,6 +179,9 @@ impl Spec {
             put_f32s(&mut out, &[-10_000.0; 3]);
         }
         put_f32s(&mut out, &[0.25; 20]);
+        if let (Some(byte), Some(slot)) = (self.presence, out.get_mut(presence_at)) {
+            *slot = byte;
+        }
         put_cstr(&mut out, "watercube");
         put_cstr(&mut out, "waterramp");
         put_f32s(&mut out, &[2.0; 4]);
@@ -446,4 +453,14 @@ fn scmap_water_block_reads_presence_and_elevations() {
     let map = parsed(&absent.build().bytes);
     assert_eq!(map.water, None);
     assert_eq!(map.strata, Spec::minimal().expected().strata);
+
+    // Only a presence byte equal to 1 means water, as in the reference.
+    for byte in [2, 255] {
+        let mut other = Spec::minimal();
+        other.water = Some((17.5, 15.0, 2.5));
+        other.presence = Some(byte);
+        let map = parsed(&other.build().bytes);
+        assert_eq!(map.water, None, "presence byte {byte}");
+        assert_eq!(map.strata, Spec::minimal().expected().strata);
+    }
 }
