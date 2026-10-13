@@ -44,6 +44,8 @@ pub const PHASES: [Phase; 10] = [
 pub struct Entity {
     pub id: EntityId,
     pub army: Army,
+    /// The kind's id in ASCII lower case, the form the world's units are
+    /// keyed by (SIM-061).
     pub blueprint: String,
     pub pos: Pos,
     pub health: Q,
@@ -161,6 +163,8 @@ impl State {
     }
 
     /// Spawn an entity at full `health` with the next id; ids ascend from 1.
+    /// The blueprint is stored ASCII lower-cased, the one form every lookup
+    /// reads (SIM-061).
     ///
     /// At saturation (`u32::MAX` spawns, which a match cannot reach) the
     /// counter stays at `u32::MAX`; the id is then already live, so this
@@ -171,10 +175,11 @@ impl State {
         if self.entities.contains_key(&id) {
             return id;
         }
+        let lower = blueprint.to_ascii_lowercase();
         let built = self
             .world
             .units
-            .get(&blueprint.to_ascii_lowercase())
+            .get(&lower)
             .and_then(|k| k.build_time)
             .unwrap_or(Q::ZERO);
         self.entities.insert(
@@ -182,7 +187,7 @@ impl State {
             Entity {
                 id,
                 army,
-                blueprint: blueprint.to_owned(),
+                blueprint: lower,
                 pos,
                 health,
                 max_health: health,

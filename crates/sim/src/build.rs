@@ -53,9 +53,9 @@ pub fn footprint_of(kind: &UnitKind) -> (u32, u32) {
     kind.footprint.map_or((1, 1), |(w, d)| (w.max(1), d.max(1)))
 }
 
-/// The kind of a blueprint id in any case.
+/// The kind of an entity's blueprint, which is stored in lower case.
 pub(crate) fn kind_of<'w>(world: &'w World, blueprint: &str) -> Option<&'w UnitKind> {
-    world.units.get(&blueprint.to_ascii_lowercase())
+    world.units.get(blueprint)
 }
 
 /// The total work a kind takes, floored (SIM-056).
