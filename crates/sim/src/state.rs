@@ -87,6 +87,15 @@ impl State {
     /// An empty state at tick 0 whose generator is seeded from `seed`.
     #[must_use]
     pub fn new(seed: u64) -> State {
+        State::with_world(Arc::new(World::empty()), seed)
+    }
+
+    /// An empty state at tick 0 in `world`, whose generator is seeded from
+    /// `seed`. The resume path of a replay builds the world, checks its
+    /// digests against the header ([`World::check_replay`]), and starts here.
+    #[must_use]
+    pub fn with_world(world: Arc<World>, seed: u64) -> State {
+        let _ = world;
         State {
             tick: Tick(0),
             seed,

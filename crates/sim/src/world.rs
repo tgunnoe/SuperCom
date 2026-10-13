@@ -19,6 +19,7 @@ use crate::command::Order;
 use crate::error::{Error, IngestError};
 use crate::hash::{Digest, GENESIS};
 use crate::ids::{Pos, Q};
+use crate::replay::ReplayHeader;
 use crate::state::State;
 
 /// The error every stub returns until its implementation lands.
@@ -471,6 +472,11 @@ impl World {
     ///
     /// [`IngestError::MissingArmyMarker`] for a slot with no marker;
     /// [`IngestError::UnknownCommander`] for a commander the world lacks.
+    pub fn check_replay(&self, header: &ReplayHeader) -> Result<(), Error> {
+        let _ = header;
+        Err(Error::TickOverflow)
+    }
+
     pub fn skirmish(self: Arc<Self>, seed: u64, factions: &[Faction]) -> Result<State, Error> {
         let _ = (seed, factions);
         Err(stub())
