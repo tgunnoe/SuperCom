@@ -1,15 +1,20 @@
 //! The replay log (DET-007, DET-008, DET-026): the project's own format, a
 //! header, the command log in schedule order, and hash checkpoints.
 //!
-//! The reader takes hostile bytes and is total. Every read goes through
+//! The reader takes hostile bytes and is total, and it is strict: it accepts
+//! exactly the bytes [`write_replay`] can produce. Every read goes through
 //! [`Cursor`], whose only primitive is `split_at_checked`, so no read can
 //! panic. A declared length is refused with `LengthExceedsInput` unless the
-//! input left holds it before any buffer is sized from it, and a declared
-//! element count is refused unless the input left holds that many minimum
-//! encodings; so every loop pass consumes at least one byte of a finite
-//! input and the number of passes is at most the input's length. A string,
-//! unit list, or checkpoint list is therefore no larger than the bytes it
-//! came from, and a command list grows only as records are actually parsed.
+//! input left holds it, and a declared element count is refused unless the
+//! input left holds that many minimum encodings, both before any buffer is
+//! sized from them; so the reader never allocates a buffer larger than the
+//! input, and every loop pass consumes at least one byte of a finite input.
+//! The decoded value's memory is linear in the input with a constant factor
+//! (about four for a log of minimal commands, from the `Command` struct's
+//! size against its 20-byte minimum encoding, plus one seen-set entry per
+//! command); no claim is made of allocation at the input's size. Bytes
+//! after the last checkpoint and any `f64` whose bits are a NaN other than
+//! the canonical one (DET-022) are refused, so parsing is injective.
 
 use core::fmt;
 
@@ -227,11 +232,15 @@ pub fn read_replay(bytes: &[u8]) -> Result<Replay, Error> {
         checkpoints.push((tick, c.digest()?));
     }
 
-    Ok(Replay {
-        header,
-        commands,
-        checkpoints,
-    })
+    if c.rest.is_empty() {
+        Ok(Replay {
+            header,
+            commands,
+            checkpoints,
+        })
+    } else {
+        Err(ReplayError::TrailingBytes { at: c.at }.into())
+    }
 }
 
 /// Refuse, before tick 0, a replay whose content digests differ from the
@@ -239,12 +248,20 @@ pub fn read_replay(bytes: &[u8]) -> Result<Replay, Error> {
 ///
 /// # Errors
 ///
-/// [`ReplayError::ContentMismatch`] on a differing digest.
+/// [`ReplayError::PluginsUnsupported`] when the header names a plugin, since
+/// this version installs none (DET-007); [`ReplayError::ContentMismatch`] on
+/// a differing digest.
 pub fn check_content(
     header: &ReplayHeader,
     map_digest: &Digest,
     catalog_digest: &Digest,
 ) -> Result<(), Error> {
+    if !header.plugins.is_empty() {
+        return Err(ReplayError::PluginsUnsupported {
+            count: header.plugins.len(),
+        }
+        .into());
+    }
     if header.map_digest == *map_digest && header.catalog_digest == *catalog_digest {
         Ok(())
     } else {
@@ -307,16 +324,21 @@ impl<'a> Cursor<'a> {
         self.array()
     }
 
-    /// A little-endian `f64` with any NaN mapped to the canonical one, the
-    /// value the sim would have hashed (DET-022).
+    /// A little-endian `f64`; a NaN other than the canonical one is refused,
+    /// because the writer never produces it (DET-022).
     fn f64(&mut self) -> Result<f64, ReplayError> {
-        let v = f64::from_bits(self.u64()?);
-        Ok(f64::from_bits(canonical_f64_bits(v)))
+        let at = self.at;
+        let bits = self.u64()?;
+        if canonical_f64_bits(f64::from_bits(bits)) == bits {
+            Ok(f64::from_bits(bits))
+        } else {
+            Err(ReplayError::NonCanonicalFloat { at })
+        }
     }
 
-    /// A declared length of `n` bytes, checked against the input left.
-    fn sized(&mut self, n: u32) -> Result<&'a [u8], ReplayError> {
-        let at = self.at;
+    /// A declared length of `n` bytes whose field began at `at`, checked
+    /// against the input left.
+    fn sized(&mut self, at: usize, n: u32) -> Result<&'a [u8], ReplayError> {
         usize::try_from(n)
             .ok()
             .and_then(|n| self.split(n))
@@ -327,8 +349,8 @@ impl<'a> Cursor<'a> {
     /// bytes: refused unless the input left could hold them, so a loop over
     /// the count consumes input every pass and ends within it.
     fn count(&mut self, min: usize) -> Result<usize, ReplayError> {
-        let n = self.u32()?;
         let at = self.at;
+        let n = self.u32()?;
         usize::try_from(n)
             .ok()
             .filter(|&n| {
@@ -339,8 +361,9 @@ impl<'a> Cursor<'a> {
     }
 
     fn string(&mut self) -> Result<String, ReplayError> {
+        let at = self.at;
         let n = self.u32()?;
-        let raw = self.sized(n)?;
+        let raw = self.sized(at, n)?;
         core::str::from_utf8(raw)
             .map(str::to_owned)
             .map_err(|_| ReplayError::BadString)
