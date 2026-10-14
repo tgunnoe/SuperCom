@@ -122,6 +122,10 @@ pub struct State {
     pub armies: BTreeMap<Army, ArmyState>,
     pub entities: BTreeMap<EntityId, Entity>,
     pub counters: Counters,
+    /// How many times the route planner has been called; a diagnostic
+    /// outside S, derived like the head and never serialized or hashed
+    /// (SIM-068).
+    pub plans: u64,
     /// The chain value after the last completed tick; not part of the
     /// serialized state, which the chain hashes after it (DET-010).
     head: Digest,
@@ -150,6 +154,7 @@ impl State {
             armies: BTreeMap::new(),
             entities: BTreeMap::new(),
             counters: Counters::default(),
+            plans: 0,
             head: GENESIS,
             world,
         }

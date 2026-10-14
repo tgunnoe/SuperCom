@@ -352,6 +352,7 @@ impl State {
             return true;
         };
         if e.goal != Some(to) {
+            self.plans = self.plans.saturating_add(1);
             let route = cell_of(&e.pos).zip(cell_of(&to)).and_then(|(from, goal)| {
                 plan_with(map, |x, z| can_enter(map, motion, x, z), from, goal)
             });
@@ -405,6 +406,7 @@ impl State {
         }
         let goal = cell_of(&target).and_then(|c| guard_goal(map, motion, c));
         if goal.is_some() && goal != e.goal.as_ref().and_then(cell_of) {
+            self.plans = self.plans.saturating_add(1);
             let route = cell_of(&e.pos).zip(goal).and_then(|(from, to)| {
                 plan_with(map, |x, z| can_enter(map, motion, x, z), from, to)
             });
