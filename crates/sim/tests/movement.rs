@@ -141,7 +141,14 @@ fn reference_step(b: &mut Body, d: &Dynamics) -> bool {
         let ddz = w[1].1 - w[0].1;
         remaining += libm::sqrt(ddx * ddx + ddz * ddz);
     }
+    // A unit still turning (the heading has not reached the desired one)
+    // and able to brake sheds speed before the braking-distance test.
+    let unturned = wrap(desired - heading).abs();
     let speed = match d.brake {
+        Some(brake) if unturned > 0.0 => {
+            b.braked += 1;
+            (b.speed - brake * dt).max(0.0)
+        }
         Some(brake) if remaining <= b.speed * b.speed / (2.0 * brake) => {
             b.braked += 1;
             (b.speed - brake * dt).max(0.0)
@@ -296,17 +303,21 @@ fn compare_ticks(
     start: (f64, f64),
     goal: (f64, f64),
     route: Vec<(u32, u32)>,
+    initial: (f64, f64),
     ticks: u32,
 ) -> (Body, Option<u32>, Vec<f64>, Vec<f64>) {
     let id = kind.id.clone();
     let w = world(vec![kind], Vec::new(), open_grid(32, 32, &[]));
     let mut s = state(&w, Q::ZERO, Q::ZERO);
     let e = s.spawn(Army(1), &id, pos(start.0, 0.0, start.1), q(100));
+    if let Some(m) = s.entities.get_mut(&e) {
+        (m.heading, m.speed) = initial;
+    }
     let mut body = Body {
         x: start.0,
         z: start.1,
-        heading: 0.0,
-        speed: 0.0,
+        heading: initial.0,
+        speed: initial.1,
         route,
         goal,
         braked: 0,
@@ -383,6 +394,7 @@ fn sim_integration_accelerates_brakes_and_turns() {
         (2.5, 5.5),
         (12.5, 5.5),
         straight((2, 5), (1, 0), 10),
+        (0.0, 0.0),
         400,
     );
     // The first three speeds in the formula's order: min(2, 0 + 1 * 0.1),
@@ -431,6 +443,7 @@ fn sim_integration_accelerates_brakes_and_turns() {
         (2.5, 2.5),
         (2.5, 12.5),
         straight((2, 2), (0, 1), 10),
+        (0.0, 0.0),
         400,
     );
     assert_eq!(speeds[0].to_bits(), 3.0_f64.to_bits());
@@ -453,6 +466,7 @@ fn sim_integration_accelerates_brakes_and_turns() {
         (2.5, 2.5),
         (2.5, 12.5),
         straight((2, 2), (0, 1), 10),
+        (0.0, 0.0),
         12,
     );
     let max_turn = 90.0_f64 * (PI / 180.0) * 0.1;
@@ -461,6 +475,33 @@ fn sim_integration_accelerates_brakes_and_turns() {
         body.heading > max_turn * 2.0,
         "the heading has turned several steps"
     );
+
+    // A fast, turn-limited kind facing away from a goal one unit along +z,
+    // at full speed: it brakes while turning and arrives, where without the
+    // rule it circles for ever. Every tick matches the restated rule.
+    let mut boat = mobile("boat", MotionType::Land, 8.0);
+    boat.max_acceleration = Some(8.0);
+    boat.max_brake = Some(8.0);
+    boat.turn_rate = Some(100.0);
+    let d = Dynamics {
+        max_speed: 8.0,
+        acceleration: Some(8.0),
+        brake: Some(8.0),
+        turn_rate: Some(100.0),
+    };
+    let (body, done, speeds, _) = compare_ticks(
+        boat,
+        &d,
+        (10.5, 10.5),
+        (10.5, 11.5),
+        straight((10, 10), (0, 1), 1),
+        (0.0, 8.0),
+        60,
+    );
+    assert!(body.braked > 0);
+    assert!(speeds[0] < 8.0, "the first tick already sheds speed");
+    let tick = done.expect("the boat arrives");
+    assert!(tick < 30, "arrives at tick {tick}");
 }
 
 // ---- SIM-068 ----------------------------------------------------------------
