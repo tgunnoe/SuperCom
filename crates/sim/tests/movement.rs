@@ -146,16 +146,16 @@ fn reference_step(b: &mut Body, d: &Dynamics) -> bool {
         let ddz = w[1].1 - w[0].1;
         remaining += libm::sqrt(ddx * ddx + ddz * ddz);
     }
-    // A unit still turning and able to brake sheds speed before the
-    // braking-distance test.
-    let speed = match d.brake {
-        Some(brake) if clamped => {
+    // A unit still turning sheds speed before the braking-distance test, at
+    // its brake, else its acceleration, else at once.
+    let speed = match d.brake.or(d.acceleration) {
+        Some(rate) if clamped || remaining <= b.speed * b.speed / (2.0 * rate) => {
             b.braked += 1;
-            (b.speed - brake * dt).max(0.0)
+            (b.speed - rate * dt).max(0.0)
         }
-        Some(brake) if remaining <= b.speed * b.speed / (2.0 * brake) => {
+        None if clamped || remaining <= 0.0 => {
             b.braked += 1;
-            (b.speed - brake * dt).max(0.0)
+            0.0
         }
         _ => match d.acceleration {
             Some(a) => d.max_speed.min(b.speed + a * dt),

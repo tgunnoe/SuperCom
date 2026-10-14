@@ -39,9 +39,10 @@ ratifiable source (AGENTS.md R2, R7).
 - **Instant defaults for absent fields, and the Air block unread
   (SIM-063, SIM-065).** The census finds 47 of the 60 air units without a
   turn rate or an acceleration and 71 movers without a brake, so a unit
-  without a turn rate turns at once, without an acceleration reaches its
-  maximum speed at once, and without a brake never brakes. These are
-  deviations, not readings. The Air block (MaxAirspeed, TurnSpeed, KTurn) is
+  without a turn rate turns at once and without an acceleration reaches its
+  maximum speed at once. A unit without a brake takes its acceleration as the
+  brake rate, and one with neither stops at once whenever a braking rule
+  applies (below). These are deviations, not readings. The Air block (MaxAirspeed, TurnSpeed, KTurn) is
   outside the typed model and is not read, so aircraft fly as other movers at
   their Physics speed over the Air layer.
 - **The planner (SIM-066, SIM-067).** A* over the eight-neighbour lattice
@@ -58,8 +59,13 @@ ratifiable source (AGENTS.md R2, R7).
   on its first move: full speed, a turn radius of several units, and a target
   one unit away. So a unit with a brake that has not yet reached the desired
   heading brakes by its brake rate, and the braking-distance and acceleration
-  rules apply once it faces its target. A kind without a brake, the 60 air
-  units among them, keeps the old rule and may circle.
+  rules apply once it faces its target. A unit is still turning when its
+  step was clamped by the turn rate. A kind without a brake brakes at its
+  acceleration, and a kind with neither brakes to a stop at once, whatever
+  its motion type: seven ground kinds carry no MaxBrake, the four commanders
+  among them, and circled under the earlier default of never braking. An air
+  kind with neither field therefore stops at once when it must brake; the
+  original's air flight is unobserved.
 - **Arrival, follow range, and stopping at a cliff (SIM-065, SIM-068).** A
   cell centre or a goal counts as reached within 0.5 units, compared as
   squares so no root is taken; a guard follows to 5 units, the build range;
@@ -110,9 +116,8 @@ ratifiable source (AGENTS.md R2, R7).
 
 ### Negative
 
-- A kind without a brake, which includes the 60 air units, can still circle
-  a waypoint that lies inside its turning circle; no steering margin is
-  modelled for it.
+- An air kind without a brake or an acceleration stops at once when it
+  must brake, which the original's air flight, unobserved, may not do.
 - Units pass through one another, so a crowd occupies one cell.
 - The integration, the planner, and the thresholds may disagree with the
   original's; the first observation reopens SIM-065, SIM-066, and SIM-070.
