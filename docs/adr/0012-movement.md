@@ -52,6 +52,14 @@ ratifiable source (AGENTS.md R2, R7).
   function (SIM-033). This is the project's first planner; the original's is
   unreadable. Routes are not string-pulled, so a route is a chain of
   adjacent cells and a unit follows it cell centre to cell centre.
+- **A unit that is still turning brakes (SIM-065).** No readable source
+  states the engine's steering. A unit whose waypoint lies inside its turning
+  circle must shed speed or never arrive, as the installed naval unit shows
+  on its first move: full speed, a turn radius of several units, and a target
+  one unit away. So a unit with a brake that has not yet reached the desired
+  heading brakes by its brake rate, and the braking-distance and acceleration
+  rules apply once it faces its target. A kind without a brake, the 60 air
+  units among them, keeps the old rule and may circle.
 - **Arrival, follow range, and stopping at a cliff (SIM-065, SIM-068).** A
   cell centre or a goal counts as reached within 0.5 units, compared as
   squares so no root is taken; a guard follows to 5 units, the build range;
@@ -102,8 +110,9 @@ ratifiable source (AGENTS.md R2, R7).
 
 ### Negative
 
-- A slow-turning unit whose next target lies inside its turning circle can
-  orbit it without arriving; no steering margin is modelled.
+- A kind without a brake, which includes the 60 air units, can still circle
+  a waypoint that lies inside its turning circle; no steering margin is
+  modelled for it.
 - Units pass through one another, so a crowd occupies one cell.
 - The integration, the planner, and the thresholds may disagree with the
   original's; the first observation reopens SIM-065, SIM-066, and SIM-070.

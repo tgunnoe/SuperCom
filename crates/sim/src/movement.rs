@@ -173,9 +173,12 @@ fn advance(mover: &mut Entity, dynamics: &Dynamics, map: &MapGrid, motion: Motio
         remaining += libm::sqrt(ddx * ddx + ddz * ddz);
         from = to;
     }
+    // A unit still turning sheds speed until it faces its target, else a
+    // waypoint inside its turning circle is circled for ever (SIM-065).
+    let turning = wrap(desired - heading).abs() > 0.0;
     let braking = dynamics
         .brake
-        .filter(|b| remaining <= mover.speed * mover.speed / (2.0 * b));
+        .filter(|b| turning || remaining <= mover.speed * mover.speed / (2.0 * b));
     let speed = match (braking, dynamics.acceleration) {
         (Some(brake), _) => (mover.speed - brake * TICK_SECONDS).max(0.0),
         (None, Some(rate)) => dynamics.max_speed.min(mover.speed + rate * TICK_SECONDS),
