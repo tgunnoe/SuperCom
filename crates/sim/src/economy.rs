@@ -96,6 +96,9 @@ impl State {
         let mut storage = Request::default();
         let mut income = Request::default();
         let mut requests: BTreeMap<EntityId, Request> = BTreeMap::new();
+        // What each entity asks for to keep running, apart from building: its
+        // production is scaled by the fraction of this alone (SIM-043).
+        let mut upkeep: BTreeMap<EntityId, Request> = BTreeMap::new();
         for (id, e) in self.entities.iter().filter(|(_, e)| e.army == slot) {
             let Some(kind) = kind_of(world, &e.blueprint) else {
                 continue;
@@ -109,12 +112,21 @@ impl State {
                     .energy
                     .saturating_add(kind.storage_energy.unwrap_or(Q::ZERO));
                 income.mass = income.mass.saturating_add(
-                    per_tick(kind.production_mass.unwrap_or(Q::ZERO)).saturating_mul(e.fraction),
+                    per_tick(kind.production_mass.unwrap_or(Q::ZERO))
+                        .saturating_mul(e.maintenance_fraction),
                 );
                 income.energy = income.energy.saturating_add(
-                    per_tick(kind.production_energy.unwrap_or(Q::ZERO)).saturating_mul(e.fraction),
+                    per_tick(kind.production_energy.unwrap_or(Q::ZERO))
+                        .saturating_mul(e.maintenance_fraction),
                 );
                 ask.energy = per_tick(kind.maintenance_energy.unwrap_or(Q::ZERO));
+                upkeep.insert(
+                    *id,
+                    Request {
+                        mass: Q::ZERO,
+                        energy: ask.energy,
+                    },
+                );
             }
             let rates = e
                 .work
@@ -172,6 +184,9 @@ impl State {
         };
         for e in self.entities.values_mut().filter(|e| e.army == slot) {
             e.fraction = fractions.get(&e.id).copied().unwrap_or(Q::ONE);
+            e.maintenance_fraction = upkeep
+                .get(&e.id)
+                .map_or(Q::ONE, |r| r.fraction(fraction_mass, fraction_energy));
         }
         fraction_mass < Q::ONE || fraction_energy < Q::ONE
     }

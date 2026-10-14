@@ -73,15 +73,18 @@ the choices by clause so the design clauses have a ratifiable source
   overcharge measured over the installed builder-kind pairs exceeds 1 percent
   on 75 of 1,220 pairs and reaches 20 percent at worst. Charging only the
   remainder is open.
-- **A producer-builder's production is scaled by its own fraction
-  (SIM-043).** A unit that produces and builds draws a fraction below 1 under
-  a shortage, which scales its production and so deepens the shortage. With
-  no other income and nothing stored, its fraction and its income fall to
-  zero and the build freezes. Whether that is reachable depends on the
-  starting-resources question, SIM-051's recorded departure: an army that
-  starts with nothing stored would meet it on its first build. Scaling production
-  by the maintenance fraction alone, or solving the settlement with
-  production unscaled, is open for the head.
+- **A producer's output is scaled by its maintenance fraction only
+  (SIM-043).** The head ruled that a unit's production is multiplied by the
+  fraction granted to its maintenance request, 1 when it makes none, and never
+  by the fraction of a build request it makes. The installed cancellation
+  (SIM-053) shows the engine scales a consuming producer, and the ten
+  commanders carry Economy.NaturalProducer (SIM-055): a producer scaled by its
+  own build request would fall to zero income at empty stores and freeze its
+  build, which an army that starts with nothing stored (SIM-051's recorded
+  departure) would meet on its first build. A mass fabricator still keeps
+  requesting its maintenance energy under a shortage. The economy phase
+  records each entity's maintenance fraction from that request's resources
+  alone, and the granted fraction keeps its meaning for the build phase.
 - **An army without storage is clamped to 0 (SIM-058).** The clamp takes the
   sum of complete units' storage, so an army with none holds nothing after a
   settlement.
