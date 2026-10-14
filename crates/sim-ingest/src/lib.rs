@@ -88,11 +88,14 @@ pub fn load_world(install: &Path, cache_dir: &Path, map_folder: &str) -> Result<
     let scmap = read_map_file(&folder, map_folder, ".scmap")?;
     let map = supercom_scmap::Map::parse(&scmap).map_err(Error::Map)?;
     let heightmap = &map.heightmap;
-    let grid = MapGrid::from_heightmap(
+    // Only the surface is read: the deep and abyss elevations stay on the
+    // parsed map (SIM-070).
+    let grid = MapGrid::from_heightmap_with_water(
         heightmap.width,
         heightmap.height,
         &heightmap.samples,
         heightmap.scale,
+        map.water.map(|w| w.elevation),
     )
     .map_err(Error::Sim)?;
 

@@ -448,20 +448,63 @@ impl MapGrid {
     }
 
     /// [`MapGrid::from_heightmap`] on a map whose water surface is
-    /// `surface`, deriving the water, seabed, and sub grids (SIM-070).
+    /// `surface`, deriving the water, seabed, and sub grids and the depth
+    /// bound of the land grid (SIM-070). A map without water is exactly what
+    /// [`MapGrid::from_heightmap`] builds.
     ///
     /// # Errors
     ///
     /// The errors of [`MapGrid::from_heightmap`]; [`IngestError::WaterSurface`]
-    /// for a surface that is not finite or not exactly representable.
+    /// for a surface that is not finite or not exactly representable in
+    /// [`Q`].
     pub fn from_heightmap_with_water(
         width: u32,
         height: u32,
         samples: &[i16],
         scale: f32,
-        _surface: Option<f32>,
+        surface: Option<f32>,
     ) -> Result<MapGrid, Error> {
-        MapGrid::from_heightmap(width, height, samples, scale)
+        let mut grid = MapGrid::from_heightmap(width, height, samples, scale)?;
+        let Some(surface) = surface else {
+            return Ok(grid);
+        };
+        // Exact means the fixed-point value converts back to the same f32:
+        // a finite f32 below 2^31 with at most 32 fractional bits does.
+        let exact = surface
+            .is_finite()
+            .then(|| Q::checked_from_num(surface))
+            .flatten()
+            .filter(|q| q.to_num::<f32>().partial_cmp(&surface) == Some(core::cmp::Ordering::Equal))
+            .ok_or(IngestError::WaterSurface(surface))?;
+        grid.water = Some(exact);
+        let cells = usize_of(width).saturating_mul(usize_of(height));
+        let mut land = Vec::with_capacity(cells);
+        let mut seabed = Vec::with_capacity(cells);
+        let mut wet = Vec::with_capacity(cells);
+        for z in 0..height {
+            for x in 0..width {
+                let depth = exact.saturating_sub(grid.height_at(x, z));
+                let flat = grid.slope(x, z) <= MAX_SLOPE;
+                land.push(grid.passable(Layer::Land, x, z) && depth <= SHALLOW);
+                seabed.push(flat && depth > Q::ZERO && depth <= SEABED_DEPTH);
+                wet.push(depth >= WATER_DEPTH);
+            }
+        }
+        grid.passable.insert(Layer::Land, land);
+        grid.passable.insert(Layer::Seabed, seabed);
+        grid.passable.insert(Layer::Sub, wet.clone());
+        grid.passable.insert(Layer::Water, wet);
+        Ok(grid)
+    }
+
+    /// The water's depth over the cell's corner sample, `None` on a map
+    /// without water or outside the grid; zero or less is dry (SIM-070).
+    #[must_use]
+    pub fn depth_at(&self, x: u32, z: u32) -> Option<Q> {
+        if x >= self.width || z >= self.height {
+            return None;
+        }
+        self.water.map(|s| s.saturating_sub(self.height_at(x, z)))
     }
 
     /// Whether cell `(x, z)` is passable on `layer`; false on an absent
@@ -520,6 +563,17 @@ impl MapGrid {
 /// The steepest cell slope land units cross: `MaxSlope` 0.75 of the
 /// pathfinding mask (SIM-048).
 const MAX_SLOPE: Q = Q::from_bits(3 << 30);
+
+/// The deepest water land units cross: the `MaxWaterDepth` 0.05 of the
+/// Vehicle rows, the nearest [`Q`] to a twentieth (SIM-070).
+pub(crate) const SHALLOW: Q = Q::from_bits(214_748_365);
+
+/// The deepest water the seabed layer holds: the 25 of the Amphibious rows.
+const SEABED_DEPTH: Q = Q::from_bits(25 << 32);
+
+/// The shallowest water the water and sub layers hold: the 1.5 of the
+/// Water and `SurfacingSub` rows.
+const WATER_DEPTH: Q = Q::from_bits(3 << 31);
 
 /// A `u32` as an index; the platforms the sim builds for have `usize` of at
 /// least 32 bits, and saturating keeps the helper total.
