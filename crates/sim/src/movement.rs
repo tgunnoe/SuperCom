@@ -152,14 +152,23 @@ fn advance(mover: &mut Entity, dynamics: &Dynamics, map: &MapGrid, motion: Motio
     let dz = tz - pz;
     let desired = libm::atan2(dz, dx);
     let delta = wrap(desired - mover.heading);
-    let turn = match dynamics.turn_rate {
+    // Only a clamped step leaves the unit still turning. A completed turn
+    // takes the desired heading itself: the sum heading + delta leaves a
+    // residue near 5e-18 that must not read as turning (SIM-065).
+    let (heading, turning) = match dynamics.turn_rate {
         Some(rate) => {
             let max_turn = rate * (PI / 180.0) * TICK_SECONDS;
-            delta.max(-max_turn).min(max_turn)
+            if delta.abs() > max_turn {
+                (
+                    wrap(mover.heading + delta.max(-max_turn).min(max_turn)),
+                    true,
+                )
+            } else {
+                (desired, false)
+            }
         }
-        None => delta,
+        None => (desired, false),
     };
-    let heading = wrap(mover.heading + turn);
 
     let mut remaining = 0.0_f64;
     let mut from = (px, pz);
@@ -175,7 +184,6 @@ fn advance(mover: &mut Entity, dynamics: &Dynamics, map: &MapGrid, motion: Motio
     }
     // A unit still turning sheds speed until it faces its target, else a
     // waypoint inside its turning circle is circled for ever (SIM-065).
-    let turning = wrap(desired - heading).abs() > 0.0;
     let braking = dynamics
         .brake
         .filter(|b| turning || remaining <= mover.speed * mover.speed / (2.0 * b));
