@@ -7,8 +7,8 @@
 ## Context
 
 The simulation core runs a movement phase after the build phase in every
-tick (ADR-0008), but the phase does nothing, so no unit moves and a builder
-cannot approach a site or an assister its builder. The installed game states
+tick (ADR-0008), but the phase does nothing, so no unit moves and an assister
+cannot approach its builder. The installed game states
 which motion type each blueprint has, which speed, turn rate, acceleration,
 and brake it carries, and the footprint table's layer caps and depth bounds
 (SIM-062, SIM-063). It states nothing of how the engine integrates a unit's
@@ -85,8 +85,12 @@ ratifiable source (AGENTS.md R2, R7).
   0, and pops.
 - **Guard follows and assists (SIM-068).** A guard farther than the follow
   range plans a route to the target's cell, or to the first passable of its
-  eight neighbours, and re-plans when that cell changes; within range it
-  stops and keeps the order. The build phase's assist rule is unchanged, so a
+  eight neighbours, and plans again only when the target's cell changes; it
+  keeps the target's cell it planned for in its goal, so a guard of a target
+  it cannot reach holds its order at speed 0 with an empty route and does not
+  search again every tick (a failed search of a split grid the size of a
+  20 km map cost 52.2 ms a tick in release). Within the follow range of the
+  target's position it stops and keeps the order. The build phase's assist rule is unchanged, so a
   guard with a build rate both follows and assists from the position the
   movement phase left.
 - **Time (SIM-069).** The integration's dt is the tick's tenth of a second;
@@ -119,7 +123,7 @@ ratifiable source (AGENTS.md R2, R7).
 
 ### Positive
 
-- Units move, builders and guards approach, and the build phase's range check
+- Units move, guards approach their targets, and the build phase's range check
   sees real positions, all inside the deterministic tick: every rule visits
   entities in ascending id and uses only exact operations and libm.
 - The planner is a pure function of its inputs, so replays agree.
@@ -132,11 +136,23 @@ ratifiable source (AGENTS.md R2, R7).
 - The integration, the planner, and the thresholds may disagree with the
   original's; the first observation reopens SIM-065, SIM-066, and SIM-070.
 - Routes follow a lattice and bend at every cell, where the original's units
-  move more directly.
+  move more directly, and each bend of a route brakes a turn-limited unit:
+  the conformance tank spent 41 of the 525 ticks of a 117-cell route braking
+  at bends.
+- A build order whose site is out of range waits where the builder stands, so
+  a Move must precede it; nothing yet walks a builder to its site, a debt for
+  the AI family.
+- A guard stops at the follow range of its target's position, not of the site
+  its builder works on, so a guard that approaches from the far side of its
+  builder from the site may stop outside the site's build range and never
+  assist. The follow rule is kept; walking an assister to build range is a
+  debt.
 
 ## Open
 
-Debts: string-pulling of routes, unit avoidance and collision, formations,
+Debts: a builder that walks to its site and an assister that walks to the
+site's build range, string-pulling of routes, unit avoidance and collision,
+formations,
 transport, patrol, dive and dock, fuel, banking and pitch, golden vectors for
 libm's cosine, arc tangent, and square root (DET-019 and DET-020 cover the
 sine and the exponential), and the engine's observed integration.

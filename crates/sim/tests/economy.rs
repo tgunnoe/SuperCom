@@ -155,9 +155,10 @@ fn sim_stall_grants_fraction_and_clamps_storage() {
     assert_eq!(s.counters.stall_ticks, 2);
 }
 
-/// SIM-043: a unit's production is multiplied by the fraction of its request
-/// granted in the last economy phase, and a fabricator keeps requesting its
-/// maintenance energy under a shortage.
+/// SIM-043: a unit's production is multiplied by the fraction granted to its
+/// maintenance request alone in the last economy phase, 1 when it makes none,
+/// and a fabricator keeps requesting its maintenance energy under a
+/// shortage.
 #[test]
 fn sim_mass_fabricator_scales_with_energy_fraction() {
     let mut fab = kind("fab", &["STRUCTURE", "MASSFABRICATION"]);
