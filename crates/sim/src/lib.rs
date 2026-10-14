@@ -26,7 +26,7 @@ pub use error::{Error, IngestError};
 pub use hash::{Digest, GENESIS, canonical_f64_bits, chain, first_divergence, serialize};
 pub use ids::{Army, EntityId, Pos, Q, Tick};
 pub use movement::{ARRIVAL_RADIUS, FOLLOW_RANGE, TICK_SECONDS, cell_centre, cell_of};
-pub use planner::plan_route;
+pub use planner::{plan_route, plan_route_expansions};
 pub use replay::{
     REPLAY_FORMAT_VERSION, Replay, ReplayError, ReplayHeader, check_content, commands_at,
     read_replay, write_replay,

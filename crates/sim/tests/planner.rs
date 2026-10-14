@@ -139,7 +139,8 @@ fn dijkstra(grid: &MapGrid, from: Cell, to: Cell) -> Option<u32> {
     (found != u32::MAX).then_some(found)
 }
 
-/// The planner of SIM-066 written out again, with the heap's tie-break on
+/// The planner of SIM-066 written out again, with the heap ordered by the
+/// estimate ascending, the cost so far descending, and the tie-break on
 /// the cell index ascending (`high` false) or descending (`high` true, the
 /// control that differs from the clause only there).
 fn astar(grid: &MapGrid, from: Cell, to: Cell, high: bool) -> Option<Vec<Cell>> {
@@ -163,7 +164,7 @@ fn astar(grid: &MapGrid, from: Cell, to: Cell, high: bool) -> Option<Vec<Cell>> 
     let mut closed = vec![false; n];
     let mut heap = BinaryHeap::new();
     g[index(from) as usize] = 0;
-    heap.push(Reverse((heuristic(from), 0_u32, key(index(from)))));
+    heap.push(Reverse((heuristic(from), u32::MAX, key(index(from)))));
     while let Some(Reverse((_, _, k))) = heap.pop() {
         let i = if high { -k } else { k };
         if closed[i as usize] {
@@ -190,7 +191,7 @@ fn astar(grid: &MapGrid, from: Cell, to: Cell, high: bool) -> Option<Vec<Cell>> 
                     g[ni as usize] = ng;
                     parent[ni as usize] = Some(i);
                     let cell = (u32::try_from(nx).expect("x"), u32::try_from(nz).expect("z"));
-                    heap.push(Reverse((ng + heuristic(cell), ng, key(ni))));
+                    heap.push(Reverse((ng + heuristic(cell), u32::MAX - ng, key(ni))));
                 }
             }
         }

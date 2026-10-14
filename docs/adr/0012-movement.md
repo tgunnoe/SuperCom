@@ -48,9 +48,14 @@ ratifiable source (AGENTS.md R2, R7).
 - **The planner (SIM-066, SIM-067).** A* over the eight-neighbour lattice
   with costs of 10 and 14, a diagonal step only when both orthogonal cells it
   cuts are passable (no corner cutting), the heuristic 10 times the larger
-  axis distance plus 4 times the smaller, and ties broken by ascending cell
-  index with the earlier parent kept on equal cost, so the planner is a pure
-  function (SIM-033). This is the project's first planner; the original's is
+  axis distance plus 4 times the smaller, and ties broken by the larger cost so far
+  and then the ascending cell index, with the earlier parent kept on equal
+  cost, so the planner is a pure function (SIM-033). Among equal estimates the
+  cell furthest along is expanded first because the other order sweeps the
+  whole band of equal-cost routes on open ground: one open plan took 22.6,
+  88.7, and 394.7 ms on grids of 1024, 2048, and 4096 cells a side in
+  release, where preferring the larger cost so far took 1.5, 4.2, and 17.4
+  ms for routes of the same length. This is the project's first planner; the original's is
   unreadable. Routes are not string-pulled, so a route is a chain of
   adjacent cells and a unit follows it cell centre to cell centre.
 - **A unit that is still turning brakes (SIM-065).** No readable source

@@ -26,6 +26,19 @@ pub fn plan_route(
     plan_with(grid, |x, z| grid.passable(layer, x, z), from, to)
 }
 
+/// [`plan_route`] with the number of cells the search expanded, the cells
+/// popped from the open set and not already closed; a diagnostic of the
+/// search's cost for tests (SIM-067).
+#[must_use]
+pub fn plan_route_expansions(
+    grid: &MapGrid,
+    layer: Layer,
+    from: (u32, u32),
+    to: (u32, u32),
+) -> Option<(Vec<(u32, u32)>, usize)> {
+    search(grid, |x, z| grid.passable(layer, x, z), from, to)
+}
+
 /// [`plan_route`] over any passability predicate of the grid's cells, so a
 /// kind that moves on two layers plans over their union (SIM-070). `open`
 /// is asked only about cells inside the grid.
@@ -35,6 +48,15 @@ pub(crate) fn plan_with(
     from: (u32, u32),
     to: (u32, u32),
 ) -> Option<Vec<(u32, u32)>> {
+    search(grid, open, from, to).map(|(route, _)| route)
+}
+
+fn search(
+    grid: &MapGrid,
+    open: impl Fn(u32, u32) -> bool,
+    from: (u32, u32),
+    to: (u32, u32),
+) -> Option<(Vec<(u32, u32)>, usize)> {
     let inside = |(x, z): (u32, u32)| x < grid.width && z < grid.height && open(x, z);
     if !inside(from) || !inside(to) {
         return None;
@@ -57,6 +79,7 @@ pub(crate) fn plan_with(
     let mut cost = vec![u32::MAX; cells];
     let mut parent: Vec<Option<usize>> = vec![None; cells];
     let mut closed = vec![false; cells];
+    let mut expanded = 0_usize;
     // Ordered by the estimate, the cost so far, then the cell index, each
     // ascending (SIM-067).
     let mut heap = BinaryHeap::new();
@@ -67,6 +90,7 @@ pub(crate) fn plan_with(
             continue;
         }
         *closed.get_mut(cell)? = true;
+        expanded = expanded.saturating_add(1);
         if cell == goal {
             break;
         }
@@ -116,7 +140,7 @@ pub(crate) fn plan_with(
         at = (*parent.get(at)?)?;
     }
     route.reverse();
-    Some(route)
+    Some((route, expanded))
 }
 
 /// The cell offset from `cell` by `(dx, dz)`, `None` below zero or beyond
