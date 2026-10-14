@@ -734,14 +734,28 @@ fn strip_samples() -> Vec<i16> {
 fn sim_water_layers_from_depth() {
     let samples = strip_samples();
     let scale = 0.007_812_5_f32;
-    // 17.5 is exact; 0.1 is not; NaN and infinity are not numbers.
+    // 17.5 is exact, and so is 0.1 as an f32 (27 fractional bits); 2^-40
+    // needs more fractional bits than the type has, 3e9 is beyond 2^31, and
+    // NaN and infinity are not numbers.
     let wet =
         MapGrid::from_heightmap_with_water(14, 4, &samples, scale, Some(4.0)).expect("a wet strip");
     assert_eq!(wet.water, Some(q(4)));
     let exact = MapGrid::from_heightmap_with_water(14, 4, &samples, scale, Some(17.5))
         .expect("17.5 is exact");
     assert_eq!(exact.water, Some(Q::from_bits(35 << 31)));
-    for bad in [0.1_f32, f32::INFINITY, f32::NEG_INFINITY] {
+    assert_eq!(
+        MapGrid::from_heightmap_with_water(14, 4, &samples, scale, Some(0.1))
+            .expect("0.1 is exact as an f32")
+            .water,
+        // 0.1_f32 is 13421773 * 2^-27, which is 13421773 << 5 in raw bits.
+        Some(Q::from_bits(429_496_736)),
+    );
+    for bad in [
+        f32::from_bits(0x2B80_0000),
+        3.0e9_f32,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+    ] {
         assert_eq!(
             MapGrid::from_heightmap_with_water(14, 4, &samples, scale, Some(bad)),
             Err(Error::Ingest(IngestError::WaterSurface(bad)))
