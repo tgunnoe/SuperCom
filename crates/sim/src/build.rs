@@ -7,6 +7,7 @@ use std::sync::Arc;
 use crate::command::Order;
 use crate::economy::per_tick;
 use crate::ids::{EntityId, Pos, Q};
+use crate::movement::stop_head;
 use crate::state::{Entity, State};
 use crate::world::{BuildRestriction, Layer, MarkerKind, UnitKind, World};
 
@@ -172,10 +173,10 @@ impl State {
         }
     }
 
-    /// A Stop at the head of a builder's queue clears its work and is popped
-    /// (the rest of its meaning is the movement family's). It checks nothing
-    /// else: work is set only under a build or Guard head, a replacing
-    /// command clears it, and completion clears it before popping.
+    /// A Stop at the head of a builder's queue is handled by the shared Stop
+    /// helper, which the movement phase also calls (SIM-068). It checks
+    /// nothing else: work is set only under a build or Guard head, a
+    /// replacing command clears it, and completion clears it before popping.
     fn settle_stops(&mut self, world: &World) {
         let ids: Vec<EntityId> = self.entities.keys().copied().collect();
         for id in ids {
@@ -186,8 +187,7 @@ impl State {
                 continue;
             };
             while building && matches!(e.orders.front(), Some(Order::Stop)) {
-                e.work = None;
-                e.orders.pop_front();
+                stop_head(e);
             }
         }
     }

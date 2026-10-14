@@ -327,16 +327,16 @@ impl State {
         Ok(())
     }
 
-    /// The commands, economy, and build phases run their rules; the others
-    /// are no-ops until theirs land. Each that visits entities does so in
+    /// The commands, economy, build, and movement phases run their rules; the
+    /// others are no-ops until theirs land. Each that visits entities does so in
     /// ascending id (SIM-036).
     fn run_phase(&mut self, phase: Phase, commands: &[Command]) {
         match phase {
             Phase::Commands => self.apply_commands(commands),
             Phase::Economy => self.run_economy(),
             Phase::Build => self.run_build(),
-            Phase::Movement
-            | Phase::Weapons
+            Phase::Movement => self.run_movement(),
+            Phase::Weapons
             | Phase::Projectiles
             | Phase::Damage
             | Phase::Death
