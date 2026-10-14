@@ -1,7 +1,7 @@
 use sha2::{Digest as _, Sha256};
 
 use crate::economy::Ledger;
-use crate::ids::{Q, Tick};
+use crate::ids::{EntityId, Q, Tick};
 use crate::state::{ArmyState, Counters, Entity, State};
 
 /// A SHA-256 digest.
@@ -38,7 +38,7 @@ fn put_len(out: &mut Vec<u8>, len: usize) {
 ///
 /// Field order: tick (LE64), seed (LE64), the generator state (LE64), next
 /// entity id (LE32), commands applied (LE64), commands ignored (LE64), builds
-/// completed (LE64), stall ticks (LE64); the armies, a LE32 count then each in
+/// completed (LE64), stall ticks (LE64), moves completed (LE64); the armies, a LE32 count then each in
 /// ascending slot order as slot (u8), mass, energy, mass storage, energy
 /// storage (each the raw `i64` bits of its [`crate::Q`], LE64), defeated (u8,
 /// 0 or 1), then the ledger's eight values (income, requested, and granted for
@@ -47,7 +47,10 @@ fn put_len(out: &mut Vec<u8>, len: usize) {
 /// (u8), blueprint (LE32 length, bytes), x, y, z (each [`canonical_f64_bits`],
 /// LE64), health and max health (raw `i64` bits, LE64), built (raw bits),
 /// complete (u8), fraction (raw bits), work (u8 0, or u8 1 then the id LE32),
-/// then the queued orders (LE32 count, each in
+/// heading and speed ([`canonical_f64_bits`], LE64 each), layer (u8, its
+/// declaration index), the route (LE32 count, then each cell as two LE32, x
+/// then z), goal (u8 0, or u8 1 then x, y, z as [`canonical_f64_bits`]),
+/// maintenance fraction (raw bits), then the queued orders (LE32 count, each in
 /// [`crate::Order::encode_into`]'s encoding, front to back). The chain head is
 /// not part of S.
 ///
@@ -67,12 +70,14 @@ pub fn serialize(state: &State, out: &mut Vec<u8>) {
         commands_ignored,
         builds_completed,
         stall_ticks,
+        moves_completed,
     } = &state.counters;
     for n in [
         commands_applied,
         commands_ignored,
         builds_completed,
         stall_ticks,
+        moves_completed,
     ] {
         out.extend_from_slice(&n.to_le_bytes());
     }
@@ -120,43 +125,73 @@ pub fn serialize(state: &State, out: &mut Vec<u8>) {
 
     put_len(out, state.entities.len());
     for (key, entity) in &state.entities {
-        // The map key is written in place of the entity's own id.
-        let Entity {
-            id: _,
-            army,
-            blueprint,
-            pos,
-            health,
-            max_health,
-            built,
-            complete,
-            fraction,
-            work,
-            orders,
-        } = entity;
-        out.extend_from_slice(&key.0.to_le_bytes());
-        out.push(army.0);
-        put_len(out, blueprint.len());
-        out.extend_from_slice(blueprint.as_bytes());
-        for v in [pos.x, pos.y, pos.z] {
-            out.extend_from_slice(&canonical_f64_bits(v).to_le_bytes());
+        put_entity(out, *key, entity);
+    }
+}
+
+/// One entity's bytes, in the order `serialize` documents; `key` is the map key,
+/// written in place of the entity's own id.
+fn put_entity(out: &mut Vec<u8>, key: EntityId, entity: &Entity) {
+    let Entity {
+        id: _,
+        army,
+        blueprint,
+        pos,
+        health,
+        max_health,
+        built,
+        complete,
+        fraction,
+        work,
+        heading,
+        speed,
+        layer,
+        route,
+        goal,
+        maintenance_fraction,
+        orders,
+    } = entity;
+    out.extend_from_slice(&key.0.to_le_bytes());
+    out.push(army.0);
+    put_len(out, blueprint.len());
+    out.extend_from_slice(blueprint.as_bytes());
+    for v in [pos.x, pos.y, pos.z] {
+        out.extend_from_slice(&canonical_f64_bits(v).to_le_bytes());
+    }
+    put_q(out, *health);
+    put_q(out, *max_health);
+    put_q(out, *built);
+    out.push(u8::from(*complete));
+    put_q(out, *fraction);
+    match work {
+        None => out.push(0),
+        Some(target) => {
+            out.push(1);
+            out.extend_from_slice(&target.0.to_le_bytes());
         }
-        put_q(out, *health);
-        put_q(out, *max_health);
-        put_q(out, *built);
-        out.push(u8::from(*complete));
-        put_q(out, *fraction);
-        match work {
-            None => out.push(0),
-            Some(target) => {
-                out.push(1);
-                out.extend_from_slice(&target.0.to_le_bytes());
+    }
+    for v in [heading, speed] {
+        out.extend_from_slice(&canonical_f64_bits(*v).to_le_bytes());
+    }
+    out.push(*layer as u8);
+    put_len(out, route.len());
+    for (x, z) in route {
+        out.extend_from_slice(&x.to_le_bytes());
+        out.extend_from_slice(&z.to_le_bytes());
+    }
+    match goal {
+        None => out.push(0),
+        Some(p) => {
+            out.push(1);
+            for v in [p.x, p.y, p.z] {
+                out.extend_from_slice(&canonical_f64_bits(v).to_le_bytes());
             }
         }
-        put_len(out, orders.len());
-        for order in orders {
-            order.encode_into(out);
-        }
+    }
+    put_q(out, *maintenance_fraction);
+    put_len(out, orders.len());
+    for order in orders {
+        order.encode_into(out);
     }
 }
 

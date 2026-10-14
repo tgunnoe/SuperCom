@@ -10,7 +10,9 @@
 
 use std::collections::VecDeque;
 
-use supercom_sim::{Army, ArmyState, Entity, EntityId, Ledger, Pos, Q, State, Tick, serialize};
+use supercom_sim::{
+    Army, ArmyState, Entity, EntityId, Layer, Ledger, Pos, Q, State, Tick, serialize,
+};
 
 fn le64(out: &mut Vec<u8>, v: u64) {
     out.extend_from_slice(&v.to_le_bytes());
@@ -31,6 +33,10 @@ fn q(bits: i64) -> Q {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one vector pins every byte of the state, so it reads top to bottom"
+)]
 fn serialization_pins_every_field_in_the_documented_order() {
     let mut s = State::new(0x0102_0304_0506_0708);
     s.tick = Tick(0x11);
@@ -39,6 +45,7 @@ fn serialization_pins_every_field_in_the_documented_order() {
     s.counters.commands_ignored = 0x32;
     s.counters.builds_completed = 0x33;
     s.counters.stall_ticks = 0x34;
+    s.counters.moves_completed = 0x35;
     s.armies.insert(
         Army(7),
         ArmyState {
@@ -78,18 +85,28 @@ fn serialization_pins_every_field_in_the_documented_order() {
             complete: false,
             fraction: q(0x64),
             work: Some(EntityId(0x7788)),
+            heading: 0.5,
+            speed: 2.0,
+            layer: Layer::Water,
+            route: vec![(3, 4), (5, 6)],
+            goal: Some(Pos {
+                x: 4.5,
+                y: 5.5,
+                z: 6.5,
+            }),
+            maintenance_fraction: q(0x65),
             orders: VecDeque::new(),
         },
     );
 
     let mut want = Vec::new();
     // Tick, seed, generator state (a fresh generator holds the seed), next
-    // entity id, then the four counters.
+    // entity id, then the five counters.
     le64(&mut want, 0x11);
     le64(&mut want, 0x0102_0304_0506_0708);
     le64(&mut want, 0x0102_0304_0506_0708);
     le32(&mut want, 0x2233);
-    for c in [0x31, 0x32, 0x33, 0x34] {
+    for c in [0x31, 0x32, 0x33, 0x34, 0x35] {
         le64(&mut want, c);
     }
     // One army: slot, four amounts, defeated, the ledger's eight values in
@@ -105,7 +122,10 @@ fn serialization_pins_every_field_in_the_documented_order() {
     }
     // One entity: id, army, blueprint length and bytes, x, y, z as f64
     // bits, health, max health, built, complete, fraction, work present and
-    // its id, and an empty queue.
+    // its id, heading and speed as f64 bits, the layer's declaration index
+    // (Water is 5), the route as a count and two LE32 per cell, the goal
+    // present and its x, y, z as f64 bits, the maintenance fraction, and an
+    // empty queue.
     le32(&mut want, 1);
     le32(&mut want, 5);
     want.push(7);
@@ -121,6 +141,22 @@ fn serialization_pins_every_field_in_the_documented_order() {
     raw(&mut want, 0x64);
     want.push(1);
     le32(&mut want, 0x7788);
+    le64(&mut want, 0x3FE0_0000_0000_0000);
+    le64(&mut want, 0x4000_0000_0000_0000);
+    want.push(5);
+    le32(&mut want, 2);
+    for cell in [3, 4, 5, 6] {
+        le32(&mut want, cell);
+    }
+    want.push(1);
+    for bits in [
+        0x4012_0000_0000_0000,
+        0x4016_0000_0000_0000,
+        0x401A_0000_0000_0000,
+    ] {
+        le64(&mut want, bits);
+    }
+    raw(&mut want, 0x65);
     le32(&mut want, 0);
 
     let mut got = Vec::new();

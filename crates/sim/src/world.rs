@@ -393,6 +393,8 @@ pub struct MapGrid {
     /// after ingest; the other layers are absent until a clause derives them,
     /// and a query on an absent layer is false.
     pub passable: BTreeMap<Layer, Vec<bool>>,
+    /// The water surface elevation; `None` on a map without water (SIM-070).
+    pub water: Option<Q>,
 }
 
 impl MapGrid {
@@ -431,6 +433,7 @@ impl MapGrid {
             height,
             heights,
             passable: BTreeMap::new(),
+            water: None,
         };
         let cells = usize_of(width).saturating_mul(usize_of(height));
         let mut land = Vec::with_capacity(cells);
@@ -442,6 +445,66 @@ impl MapGrid {
         grid.passable.insert(Layer::Land, land);
         grid.passable.insert(Layer::Air, vec![true; cells]);
         Ok(grid)
+    }
+
+    /// [`MapGrid::from_heightmap`] on a map whose water surface is
+    /// `surface`, deriving the water, seabed, and sub grids and the depth
+    /// bound of the land grid (SIM-070). A map without water is exactly what
+    /// [`MapGrid::from_heightmap`] builds.
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`MapGrid::from_heightmap`]; [`IngestError::WaterSurface`]
+    /// for a surface that is not finite or not exactly representable in
+    /// [`Q`].
+    pub fn from_heightmap_with_water(
+        width: u32,
+        height: u32,
+        samples: &[i16],
+        scale: f32,
+        surface: Option<f32>,
+    ) -> Result<MapGrid, Error> {
+        let mut grid = MapGrid::from_heightmap(width, height, samples, scale)?;
+        let Some(surface) = surface else {
+            return Ok(grid);
+        };
+        // Exact means the fixed-point value converts back to the same f32:
+        // a finite f32 below 2^31 with at most 32 fractional bits does.
+        let exact = surface
+            .is_finite()
+            .then(|| Q::checked_from_num(surface))
+            .flatten()
+            .filter(|q| q.to_num::<f32>().partial_cmp(&surface) == Some(core::cmp::Ordering::Equal))
+            .ok_or(IngestError::WaterSurface(surface))?;
+        grid.water = Some(exact);
+        let cells = usize_of(width).saturating_mul(usize_of(height));
+        let mut land = Vec::with_capacity(cells);
+        let mut seabed = Vec::with_capacity(cells);
+        let mut wet = Vec::with_capacity(cells);
+        for z in 0..height {
+            for x in 0..width {
+                let depth = exact.saturating_sub(grid.height_at(x, z));
+                let flat = grid.slope(x, z) <= MAX_SLOPE;
+                land.push(grid.passable(Layer::Land, x, z) && depth <= SHALLOW);
+                seabed.push(flat && depth > Q::ZERO && depth <= SEABED_DEPTH);
+                wet.push(depth >= WATER_DEPTH);
+            }
+        }
+        grid.passable.insert(Layer::Land, land);
+        grid.passable.insert(Layer::Seabed, seabed);
+        grid.passable.insert(Layer::Sub, wet.clone());
+        grid.passable.insert(Layer::Water, wet);
+        Ok(grid)
+    }
+
+    /// The water's depth over the cell's corner sample, `None` on a map
+    /// without water or outside the grid; zero or less is dry (SIM-070).
+    #[must_use]
+    pub fn depth_at(&self, x: u32, z: u32) -> Option<Q> {
+        if x >= self.width || z >= self.height {
+            return None;
+        }
+        self.water.map(|s| s.saturating_sub(self.height_at(x, z)))
     }
 
     /// Whether cell `(x, z)` is passable on `layer`; false on an absent
@@ -500,6 +563,17 @@ impl MapGrid {
 /// The steepest cell slope land units cross: `MaxSlope` 0.75 of the
 /// pathfinding mask (SIM-048).
 const MAX_SLOPE: Q = Q::from_bits(3 << 30);
+
+/// The deepest water land units cross: the `MaxWaterDepth` 0.05 of the
+/// Vehicle rows, the nearest [`Q`] to a twentieth (SIM-070).
+pub(crate) const SHALLOW: Q = Q::from_bits(214_748_365);
+
+/// The deepest water the seabed layer holds: the 25 of the Amphibious rows.
+const SEABED_DEPTH: Q = Q::from_bits(25 << 32);
+
+/// The shallowest water the water and sub layers hold: the 1.5 of the
+/// Water and `SurfacingSub` rows.
+const WATER_DEPTH: Q = Q::from_bits(3 << 31);
 
 /// A `u32` as an index; the platforms the sim builds for have `usize` of at
 /// least 32 bits, and saturating keeps the helper total.
@@ -575,6 +649,7 @@ impl World {
                 height: 0,
                 heights: Vec::new(),
                 passable: BTreeMap::new(),
+                water: None,
             },
             markers: Vec::new(),
             map_name: String::new(),
@@ -1102,6 +1177,7 @@ pub fn catalog_digest(
 ///
 /// Layout: the string `map-v1`; the map name as a string; `width` then
 /// `height` as `u32`; every height sample's raw `i64` bits in order; the
+/// water surface as an option (`u8` 0, or 1 then the raw `i64` bits); the
 /// markers as a `u32` count then each in input order as its name (string),
 /// kind tag (`u8`: Mass 0, Hydrocarbon 1, Army 2 followed by the slot as a
 /// `u8`, Other 3), and `x`, `y`, `z` as canonical `f64` bits.
@@ -1114,6 +1190,7 @@ pub fn map_digest(map_name: &str, map: &MapGrid, markers: &[Marker]) -> Digest {
         // Derived from `heights` by `MapGrid::from_heightmap`, so the samples
         // already identify it.
         passable: _,
+        water,
     } = map;
     let mut e = Encoder::new("map-v1");
     e.str(map_name);
@@ -1121,6 +1198,13 @@ pub fn map_digest(map_name: &str, map: &MapGrid, markers: &[Marker]) -> Digest {
     e.u32(*height);
     for h in heights {
         e.q(*h);
+    }
+    match water {
+        None => e.u8(0),
+        Some(surface) => {
+            e.u8(1);
+            e.q(*surface);
+        }
     }
     e.len(markers.len());
     for marker in markers {

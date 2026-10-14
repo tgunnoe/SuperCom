@@ -9,7 +9,7 @@ use crate::hash::{Digest, GENESIS, chain, serialize};
 use crate::ids::{Army, EntityId, Pos, Q, Tick};
 use crate::rng::Rng;
 use crate::schedule::{Schedule, ScheduleError};
-use crate::world::{UnitKind, World};
+use crate::world::{Layer, UnitKind, World};
 
 /// One phase of a tick (SIM-044).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,6 +59,22 @@ pub struct Entity {
     pub fraction: Q,
     /// The entity it is building or assisting this tick.
     pub work: Option<EntityId>,
+    /// Facing in radians in the x-z plane: 0 along +x, increasing toward
+    /// +z; 0 at spawn (SIM-065).
+    pub heading: f64,
+    /// Speed in world units per second; 0 at spawn (SIM-065).
+    pub speed: f64,
+    /// The movement layer, assigned each movement phase from the kind's
+    /// motion type and the terrain under the entity (SIM-064); land at
+    /// spawn.
+    pub layer: Layer,
+    /// The cells still to visit, front first; empty when idle (SIM-068).
+    pub route: Vec<(u32, u32)>,
+    /// The current Move's destination; `None` when idle (SIM-068).
+    pub goal: Option<Pos>,
+    /// The fraction granted to the entity's maintenance request in the
+    /// last economy phase; 1 when it made none (SIM-043).
+    pub maintenance_fraction: Q,
     pub orders: VecDeque<Order>,
 }
 
@@ -92,6 +108,8 @@ pub struct Counters {
     pub commands_ignored: u64,
     pub builds_completed: u64,
     pub stall_ticks: u64,
+    /// Moves that reached their goal (SIM-068).
+    pub moves_completed: u64,
 }
 
 /// The full simulation state.
@@ -104,6 +122,10 @@ pub struct State {
     pub armies: BTreeMap<Army, ArmyState>,
     pub entities: BTreeMap<EntityId, Entity>,
     pub counters: Counters,
+    /// How many times the route planner has been called; a diagnostic
+    /// outside S, derived like the head and never serialized or hashed
+    /// (SIM-068).
+    pub plans: u64,
     /// The chain value after the last completed tick; not part of the
     /// serialized state, which the chain hashes after it (DET-010).
     head: Digest,
@@ -132,6 +154,7 @@ impl State {
             armies: BTreeMap::new(),
             entities: BTreeMap::new(),
             counters: Counters::default(),
+            plans: 0,
             head: GENESIS,
             world,
         }
@@ -192,6 +215,12 @@ impl State {
                 complete: true,
                 fraction: Q::ONE,
                 work: None,
+                heading: 0.0,
+                speed: 0.0,
+                layer: Layer::Land,
+                route: Vec::new(),
+                goal: None,
+                maintenance_fraction: Q::ONE,
                 orders: VecDeque::new(),
             },
         );
@@ -231,6 +260,12 @@ impl State {
                 complete: false,
                 fraction: Q::ONE,
                 work: None,
+                heading: 0.0,
+                speed: 0.0,
+                layer: Layer::Land,
+                route: Vec::new(),
+                goal: None,
+                maintenance_fraction: Q::ONE,
                 orders: VecDeque::new(),
             },
         );
@@ -297,16 +332,16 @@ impl State {
         Ok(())
     }
 
-    /// The commands, economy, and build phases run their rules; the others
-    /// are no-ops until theirs land. Each that visits entities does so in
+    /// The commands, economy, build, and movement phases run their rules; the
+    /// others are no-ops until theirs land. Each that visits entities does so in
     /// ascending id (SIM-036).
     fn run_phase(&mut self, phase: Phase, commands: &[Command]) {
         match phase {
             Phase::Commands => self.apply_commands(commands),
             Phase::Economy => self.run_economy(),
             Phase::Build => self.run_build(),
-            Phase::Movement
-            | Phase::Weapons
+            Phase::Movement => self.run_movement(),
+            Phase::Weapons
             | Phase::Projectiles
             | Phase::Damage
             | Phase::Death
@@ -385,6 +420,9 @@ impl State {
                     max_health: e.max_health,
                     built: e.built,
                     complete: e.complete,
+                    heading: e.heading,
+                    speed: e.speed,
+                    layer: e.layer,
                 })
                 .collect(),
         }
@@ -423,6 +461,9 @@ pub struct EntitySnapshot {
     pub max_health: Q,
     pub built: Q,
     pub complete: bool,
+    pub heading: f64,
+    pub speed: f64,
+    pub layer: Layer,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

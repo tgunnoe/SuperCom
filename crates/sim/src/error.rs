@@ -47,6 +47,9 @@ pub enum IngestError {
     TooManyFactions {
         count: usize,
     },
+    /// A water surface elevation that is not finite or not exactly
+    /// representable in the fixed-point type (SIM-070).
+    WaterSurface(f32),
 }
 
 impl fmt::Display for IngestError {
@@ -82,6 +85,9 @@ impl fmt::Display for IngestError {
             }
             Self::TooManyFactions { count } => {
                 write!(f, "{count} factions exceed the 255 army slots")
+            }
+            Self::WaterSurface(v) => {
+                write!(f, "the water surface {v} is not exactly representable")
             }
         }
     }
