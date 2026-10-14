@@ -80,11 +80,13 @@ fn search(
     let mut parent: Vec<Option<usize>> = vec![None; cells];
     let mut closed = vec![false; cells];
     let mut expanded = 0_usize;
-    // Ordered by the estimate, the cost so far, then the cell index, each
-    // ascending (SIM-067).
+    // Ordered by the estimate ascending, the cost so far descending, then the
+    // cell index ascending (SIM-067): among equal estimates the cell furthest
+    // along goes first, so open ground is crossed along one route instead of
+    // being swept across the band of equal-cost routes.
     let mut heap = BinaryHeap::new();
     *cost.get_mut(start)? = 0;
-    heap.push(Reverse((estimate(from), 0_u32, start)));
+    heap.push(Reverse((estimate(from), u32::MAX, start)));
     while let Some(Reverse((_, _, cell))) = heap.pop() {
         if closed.get(cell).copied().unwrap_or(true) {
             continue;
@@ -120,7 +122,7 @@ fn search(
                     *parent.get_mut(slot)? = Some(cell);
                     heap.push(Reverse((
                         through.saturating_add(estimate(next)),
-                        through,
+                        u32::MAX - through,
                         slot,
                     )));
                 }
