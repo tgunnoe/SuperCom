@@ -184,13 +184,18 @@ fn advance(mover: &mut Entity, dynamics: &Dynamics, map: &MapGrid, motion: Motio
     }
     // A unit still turning sheds speed until it faces its target, else a
     // waypoint inside its turning circle is circled for ever (SIM-065).
-    let braking = dynamics
-        .brake
-        .filter(|b| turning || remaining <= mover.speed * mover.speed / (2.0 * b));
-    let speed = match (braking, dynamics.acceleration) {
-        (Some(brake), _) => (mover.speed - brake * TICK_SECONDS).max(0.0),
-        (None, Some(rate)) => dynamics.max_speed.min(mover.speed + rate * TICK_SECONDS),
-        (None, None) => dynamics.max_speed,
+    // The brake rate falls back to the acceleration, and to an instant stop
+    // when the kind has neither, so no mover is left without a way to shed
+    // speed (SIM-065).
+    let speed = match dynamics.brake.or(dynamics.acceleration) {
+        Some(rate) if turning || remaining <= mover.speed * mover.speed / (2.0 * rate) => {
+            (mover.speed - rate * TICK_SECONDS).max(0.0)
+        }
+        None if turning || remaining <= 0.0 => 0.0,
+        _ => match dynamics.acceleration {
+            Some(rate) => dynamics.max_speed.min(mover.speed + rate * TICK_SECONDS),
+            None => dynamics.max_speed,
+        },
     };
     let stride = speed * TICK_SECONDS;
     let distance = libm::sqrt(dx * dx + dz * dz);
