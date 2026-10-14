@@ -123,14 +123,19 @@ fn reference_step(b: &mut Body, d: &Dynamics) -> bool {
     let dz = tz - b.z;
     let desired = libm::atan2(dz, dx);
     let delta = wrap(desired - b.heading);
-    let step = match d.turn_rate {
+    // A clamped step leaves the unit still turning; any other turn
+    // completes, and the heading is the desired one exactly.
+    let (heading, clamped) = match d.turn_rate {
         Some(rate) => {
             let max_turn = rate * (PI / 180.0) * dt;
-            delta.max(-max_turn).min(max_turn)
+            if delta.abs() > max_turn {
+                (wrap(b.heading + delta.max(-max_turn).min(max_turn)), true)
+            } else {
+                (desired, false)
+            }
         }
-        None => delta,
+        None => (desired, false),
     };
-    let heading = wrap(b.heading + step);
 
     let mut points = vec![(b.x, b.z)];
     points.extend(b.route.iter().map(|c| centre(*c)));
@@ -141,11 +146,10 @@ fn reference_step(b: &mut Body, d: &Dynamics) -> bool {
         let ddz = w[1].1 - w[0].1;
         remaining += libm::sqrt(ddx * ddx + ddz * ddz);
     }
-    // A unit still turning (the heading has not reached the desired one)
-    // and able to brake sheds speed before the braking-distance test.
-    let unturned = wrap(desired - heading).abs();
+    // A unit still turning and able to brake sheds speed before the
+    // braking-distance test.
     let speed = match d.brake {
-        Some(brake) if unturned > 0.0 => {
+        Some(brake) if clamped => {
             b.braked += 1;
             (b.speed - brake * dt).max(0.0)
         }
