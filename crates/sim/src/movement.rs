@@ -50,7 +50,8 @@ pub fn cell_centre(cell: (u32, u32)) -> (f64, f64) {
 
 /// Whether a kind of `motion` can stand on cell `(x, z)` (SIM-064, SIM-070):
 /// the cell is passable on one of the layers the motion type uses, a hover
-/// unit crossing any water deeper than the land bound.
+/// or floating unit crossing any water deeper than the land bound, so that
+/// it steps across a gradual shore.
 pub(crate) fn can_enter(map: &MapGrid, motion: MotionType, x: u32, z: u32) -> bool {
     let on = |layer: Layer| map.passable(layer, x, z);
     match motion {
@@ -60,8 +61,9 @@ pub(crate) fn can_enter(map: &MapGrid, motion: MotionType, x: u32, z: u32) -> bo
         MotionType::Water => on(Layer::Water),
         MotionType::SurfacingSub => on(Layer::Sub),
         MotionType::Amphibious => on(Layer::Land) || on(Layer::Seabed),
-        MotionType::AmphibiousFloating => on(Layer::Land) || on(Layer::Water),
-        MotionType::Hover => on(Layer::Land) || map.depth_at(x, z).is_some_and(|d| d > SHALLOW),
+        MotionType::AmphibiousFloating | MotionType::Hover => {
+            on(Layer::Land) || map.depth_at(x, z).is_some_and(|d| d > SHALLOW)
+        }
     }
 }
 
@@ -76,8 +78,11 @@ fn layer_for(map: &MapGrid, motion: MotionType, cell: Option<(u32, u32)>) -> Lay
         MotionType::Water => Layer::Water,
         MotionType::SurfacingSub => Layer::Sub,
         MotionType::Amphibious if on(Layer::Seabed) && !on(Layer::Land) => Layer::Seabed,
-        MotionType::AmphibiousFloating if on(Layer::Water) => Layer::Water,
-        MotionType::Hover if map.depth_at(x, z).is_some_and(|d| d > SHALLOW) => Layer::Water,
+        MotionType::AmphibiousFloating | MotionType::Hover
+            if map.depth_at(x, z).is_some_and(|d| d > SHALLOW) =>
+        {
+            Layer::Water
+        }
         _ => Layer::Land,
     }
 }
