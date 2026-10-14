@@ -94,7 +94,12 @@ ratifiable source (AGENTS.md R2, R7).
   depth is the surface less its corner height; each layer takes one threshold,
   the bound of the footprint rows its motion types use most (SIM-062), and the
   rest are deviations: Land adds a depth bound of 0.05 (the eight
-  amphibious-floating kinds' rows allow 1 and 5), Seabed is depth above 0 and
+  amphibious-floating kinds' WaterLand rows bound depth at 0.1 to 1 and 0 to
+  5, and both are deviated from: those kinds move on the Land-passable cells
+  and every cell of depth above 0.05, as the hover unit does, because the
+  union of Land and Water leaves a gap between 0.05 and 1.5 that a gradual
+  shore always falls in, and on 28 of the 40 installed maps with water cells
+  it had no step across at all), Seabed is depth above 0 and
   at most 25 with the slope bound, Water and Sub are depth at least 1.5 (the
   row of 0.25 is deviated from), and a hover unit takes Water over any depth
   above 0.05 because no hover row exists. Water presence does not imply a

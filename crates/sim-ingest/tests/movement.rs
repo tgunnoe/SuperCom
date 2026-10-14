@@ -395,3 +395,77 @@ fn conformance_movement_naval_unit_crosses_scmp_037() {
     assert_eq!(state.counters.commands_ignored, 1);
     assert_eq!(state.counters.moves_completed, 0);
 }
+
+// ---- the floating unit crossing a shore on SCMP_037 ------------------------------
+
+/// A floating kind (an engineer of the amphibious-floating motion type)
+/// ordered from its commander's land cell to the nearest water cell arrives;
+/// the union of the land layer and the water layer has no step across a
+/// gradual shore, so under it the Move is dropped (SIM-070).
+#[test]
+fn conformance_movement_floating_unit_crosses_a_shore_on_scmp_037() {
+    let Some(fa) = supercom_testkit::require_game() else {
+        return;
+    };
+    let cache = tempfile::tempdir().expect("a cache directory");
+    let world = load_world(&fa, cache.path(), "SCMP_037").expect("SCMP_037 loads");
+    let kind = world.units.get("uel0105").expect("uel0105 is installed");
+    assert_eq!(kind.motion, MotionType::AmphibiousFloating);
+    let mut state = Arc::clone(&world)
+        .skirmish(1, &[Faction::UEF, Faction::Cybran])
+        .expect("a skirmish");
+    let commander = state
+        .entities
+        .values()
+        .find(|e| e.army == Army(1))
+        .expect("the UEF commander")
+        .pos;
+    let from = cell_of(&commander);
+    assert!(
+        world.map.passable(Layer::Land, from.0, from.1),
+        "the commander stands on land"
+    );
+    let (w, h) = (world.map.width, world.map.height);
+    // The nearest water-passable cell by the distance between cell centres,
+    // ties by ascending index.
+    let distance = |c: &(u32, u32)| {
+        let (dx, dz) = (
+            i64::from(c.0) - i64::from(from.0),
+            i64::from(c.1) - i64::from(from.1),
+        );
+        dx * dx + dz * dz
+    };
+    let goal = (0..h)
+        .flat_map(|z| (0..w).map(move |x| (x, z)))
+        .filter(|c| world.map.passable(Layer::Water, c.0, c.1))
+        .min_by_key(|c| (distance(c), index(w, c.0, c.1)))
+        .expect("a water cell");
+    let (unit, command) = spawn_and_command(
+        &mut state,
+        1,
+        &kind.id,
+        commander,
+        kind.max_health,
+        centre(goal),
+    );
+    let mut arrived = false;
+    for tick in 0..3000_u64 {
+        let batch = if tick == 0 {
+            vec![command.clone()]
+        } else {
+            Vec::new()
+        };
+        state.step(&batch).expect("a valid tick");
+        if state.counters.moves_completed == 1 {
+            arrived = true;
+            break;
+        }
+    }
+    assert_eq!(state.counters.commands_ignored, 0, "the Move is planned");
+    assert!(arrived, "the engineer arrives within 3000 ticks");
+    let e = state.entities.get(&unit).expect("the engineer exists");
+    assert_eq!(e.layer, Layer::Water);
+    let target = centre(goal);
+    let (ex, ez) = (e.pos.x - target.x, e.pos.z - target.z);
+    assert!(ex * ex + ez * ez <= ARRIVAL_RADIUS * ARRIVAL_RADIUS);
+}
