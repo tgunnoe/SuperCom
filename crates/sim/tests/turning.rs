@@ -205,3 +205,43 @@ fn sim_a_kind_without_a_turn_rate_is_never_still_turning() {
     assert_eq!(clamps, 0);
     assert!(slowed > 0, "the final approach brakes");
 }
+
+/// The clamp is exact at its boundary: a delta equal to `max_turn` completes
+/// the turn (heading set to desired, no braking), and one a hair above it
+/// is clamped (heading short of desired, speed shed).
+#[test]
+fn sim_a_delta_above_max_turn_is_clamped_and_one_at_it_is_not() {
+    let max_turn = 90.0_f64 * (PI / 180.0) * DT;
+    for (offset, clamped) in [(0.0, false), (1e-12, true)] {
+        let w = world(vec![mover("tank", Some(90.0))], Vec::new(), open_grid(64));
+        let mut st = state(&w, Q::ZERO, Q::ZERO);
+        let e = st.spawn(Army(1), "tank", pos(5.5, 0.0, 5.5), q(100));
+        if let Some(m) = st.entities.get_mut(&e) {
+            m.heading = -(max_turn + offset);
+            m.speed = 2.0;
+        }
+        step(
+            &mut st,
+            &[order_cmd(
+                0,
+                0,
+                e,
+                Order::Move {
+                    to: pos(20.5, 0.0, 5.5),
+                },
+                QueueMode::Replace,
+            )],
+        );
+        let got = st.entities.get(&e).expect("the entity exists");
+        if clamped {
+            assert_eq!(
+                got.heading.to_bits(),
+                (-(max_turn + offset) + max_turn).to_bits()
+            );
+            assert_eq!(got.speed.to_bits(), (2.0_f64 - 3.0 * DT).to_bits());
+        } else {
+            assert_eq!(got.heading.to_bits(), 0.0_f64.to_bits());
+            assert_eq!(got.speed.to_bits(), 3.0_f64.min(2.0 + 3.0 * DT).to_bits());
+        }
+    }
+}
