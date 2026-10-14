@@ -404,27 +404,30 @@ impl State {
             e.goal = None;
             return true;
         }
-        let goal = cell_of(&target).and_then(|c| guard_goal(map, motion, c));
-        if goal.is_some() && goal != e.goal.as_ref().and_then(cell_of) {
-            self.plans = self.plans.saturating_add(1);
-            let route = cell_of(&e.pos).zip(goal).and_then(|(from, to)| {
-                plan_with(map, |x, z| can_enter(map, motion, x, z), from, to)
+        // The goal records the target's cell the plan was made for, so a
+        // plan that found no route is not repeated until the cell changes.
+        let cell = cell_of(&target);
+        if cell != e.goal.as_ref().and_then(cell_of) {
+            e.route.clear();
+            e.goal = cell.map(|c| {
+                let (x, z) = cell_centre(c);
+                Pos { x, y: 0.0, z }
             });
-            if let Some((route, cell)) = route.zip(goal) {
-                let (x, z) = cell_centre(cell);
-                e.route = route;
-                e.goal = Some(Pos { x, y: 0.0, z });
-            } else {
-                e.route.clear();
-                e.goal = None;
+            if let Some((from, to)) =
+                cell_of(&e.pos).zip(cell.and_then(|c| guard_goal(map, motion, c)))
+            {
+                self.plans = self.plans.saturating_add(1);
+                e.route = plan_with(map, |x, z| can_enter(map, motion, x, z), from, to)
+                    .unwrap_or_default();
             }
         }
-        if e.goal.is_none() {
+        // A guard follows its route only; within the follow range of the
+        // target it never needs more, so an empty route is a hold.
+        if e.route.is_empty() {
             e.speed = 0.0;
         } else if advance(e, dynamics, map, motion) {
             e.speed = 0.0;
             e.route.clear();
-            e.goal = None;
         }
         true
     }
