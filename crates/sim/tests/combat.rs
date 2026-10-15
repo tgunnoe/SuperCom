@@ -21,6 +21,7 @@ mod support;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use supercom_sim::distance_xz;
 use supercom_sim::{
     Army, EntityId, Layer, LayerSet, MapGrid, MotionType, Order, Pos, Projectile, ProjectileId,
     ProjectileKind, Q, QueueMode, State, UnitKind, WeaponKind, World,
@@ -1100,4 +1101,287 @@ fn sim_weapon_never_takes_an_own_army_target() {
     assert!(s.entities.get(&turret).expect("turret").orders.is_empty());
     assert_eq!(s.counters.commands_applied, 2);
     assert_eq!(s.counters.commands_ignored, 2);
+}
+
+fn turret_of(weapon: WeaponKind) -> Vec<UnitKind> {
+    vec![armed("turret", vec![weapon]), dummy()]
+}
+
+/// SIM-075: both radii are inclusive; a target exactly at the maximum and
+/// one exactly at the minimum are taken.
+#[test]
+fn sim_weapon_radii_are_inclusive() {
+    let mut weapon = gun("Direct Fire", 10.0, 1.0, 0);
+    weapon.min_radius = Some(3.0);
+    let units = turret_of(weapon);
+    // 20.5 - 10.5 and 13.5 - 10.5 are exact in binary64.
+    for (x, what) in [(20.5, "at the maximum"), (13.5, "at the minimum")] {
+        let mut s = plain(units.clone(), vec![]);
+        let turret = put(&mut s, 1, "turret", 10.5, 10.5, 100);
+        let target = put(&mut s, 2, "dummy", x, 10.5, 100);
+        step(&mut s, &[]);
+        assert_eq!(targets(&s, turret), vec![Some(target)], "{what}");
+    }
+    for (x, what) in [(20.6, "past the maximum"), (13.4, "inside the minimum")] {
+        let mut s = plain(units.clone(), vec![]);
+        let turret = put(&mut s, 1, "turret", 10.5, 10.5, 100);
+        put(&mut s, 2, "dummy", x, 10.5, 100);
+        step(&mut s, &[]);
+        assert_eq!(targets(&s, turret), vec![None], "{what}");
+    }
+}
+
+/// SIM-075: a held target stays held while it remains allowed, even when a
+/// nearer enemy appears.
+#[test]
+fn sim_weapon_keeps_a_held_target() {
+    let mut s = plain(turret_of(gun("Direct Fire", 20.0, 0.1, 0)), vec![]);
+    let turret = put(&mut s, 1, "turret", 10.5, 10.5, 100);
+    let far = put(&mut s, 2, "dummy", 25.5, 10.5, 100);
+    step(&mut s, &[]);
+    assert_eq!(targets(&s, turret), vec![Some(far)]);
+    let _near = put(&mut s, 2, "dummy", 15.5, 10.5, 100);
+    step(&mut s, &[]);
+    assert_eq!(targets(&s, turret), vec![Some(far)], "held over a nearer");
+}
+
+/// SIM-075: the head Attack's target is taken ahead of a nearer enemy.
+#[test]
+fn sim_weapon_prefers_the_attack_target() {
+    let mut s = plain(turret_of(gun("Direct Fire", 20.0, 0.1, 0)), vec![]);
+    let turret = put(&mut s, 1, "turret", 10.5, 10.5, 100);
+    let far = put(&mut s, 2, "dummy", 25.5, 10.5, 100);
+    let _near = put(&mut s, 2, "dummy", 15.5, 10.5, 100);
+    let cmd = order_cmd(
+        0,
+        0,
+        turret,
+        Order::Attack { target: far },
+        QueueMode::Replace,
+    );
+    step(&mut s, &[cmd]);
+    assert_eq!(targets(&s, turret), vec![Some(far)]);
+}
+
+/// SIM-076: the cooldown is the ceiling of ten over the rate.
+#[test]
+fn sim_cooldown_is_the_ceiling_of_ten_over_the_rate() {
+    assert_eq!(supercom_sim::cooldown_ticks(3.0), 4, "3.33 rounds up");
+    assert_eq!(supercom_sim::cooldown_ticks(0.03), 334, "333.3 rounds up");
+    assert_eq!(supercom_sim::cooldown_ticks(2.0), 5, "exact stays exact");
+    assert_eq!(supercom_sim::cooldown_ticks(100.0), 1, "at least 1");
+}
+
+/// SIM-077: a falling shell aimed beyond its speed squared over 4.9 on
+/// flat ground launches at 45 degrees (the arcsine argument is clamped).
+#[test]
+fn sim_falling_shot_beyond_reach_launches_at_45_degrees() {
+    let mut arc = shot_kind("arc", 10.0);
+    arc.use_gravity = true;
+    let mut cannon = gun("Artillery", 40.0, 0.03, 5);
+    cannon.projectile_id = Some("arc".to_owned());
+    cannon.muzzle_velocity = Some(10.0);
+    let mut s = plain(turret_of(cannon), vec![arc]);
+    put(&mut s, 1, "turret", 10.5, 10.5, 100);
+    put(&mut s, 2, "dummy", 40.5, 10.5, 1000);
+    step(&mut s, &[]);
+    let p = s.projectiles.values().next().expect("fired");
+    // Reach is 100 / 4.9 = 20.4 and the target is 30 away; the projectiles
+    // phase has already moved the shell once, but its x velocity is the
+    // launch's, and gravity has lowered only vy.
+    let half = 10.0 * (0.5_f64).sqrt();
+    near(p.vel[0], half);
+    near(p.vel[1], half - 4.9 * 0.1);
+    near(p.vel[2], 0.0);
+}
+
+/// SIM-077: an aim straight above or below the firer, at planar distance 0,
+/// is an instant hit, not a projectile.
+#[test]
+fn sim_aim_at_planar_distance_zero_hits_at_once() {
+    let mut weapon = gun("Direct Fire", 20.0, 1.0, 10);
+    weapon.projectile_id = Some("shell".to_owned());
+    weapon.muzzle_velocity = Some(10.0);
+    let mut s = plain(turret_of(weapon), vec![shot_kind("shell", 10.0)]);
+    put(&mut s, 1, "turret", 10.5, 10.5, 100);
+    let target = put(&mut s, 2, "dummy", 10.5, 10.5, 100);
+    s.entities.get_mut(&target).expect("target").pos.y = 5.0;
+    step(&mut s, &[]);
+    assert!(s.projectiles.is_empty(), "no projectile");
+    assert_eq!(s.counters.projectile_impacts, 1);
+    assert_eq!(health(&s, target), q(90));
+}
+
+/// SIM-077: acceleration raises the speed by acceleration times 0.1 a tick
+/// up to the maximum, and holds it there.
+#[test]
+fn sim_projectile_accelerates_to_its_maximum_speed() {
+    let mut rocket = shot_kind("rocket", 2.0);
+    rocket.acceleration = Some(10.0);
+    rocket.max_speed = Some(5.0);
+    let mut s = plain(vec![dummy()], vec![rocket]);
+    launch(
+        &mut s,
+        proj(
+            1,
+            Some("rocket"),
+            pos(10.5, 0.0, 10.5),
+            [2.0, 0.0, 0.0],
+            None,
+            pos(60.5, 0.0, 10.5),
+            1,
+            0.0,
+        ),
+    );
+    let mut x = 10.5;
+    let mut before = 2.0;
+    for speed in [3.0, 4.0, 5.0, 5.0, 5.0] {
+        step(&mut s, &[]);
+        let p = alive(&s, 1).expect("in flight");
+        near(p.vel[0], speed);
+        x += (before + speed) / 2.0 * 0.1;
+        near(p.pos.x, x);
+        before = speed;
+    }
+}
+
+/// SIM-077: a shot that passes the target at a distance between the step
+/// and the step plus the impact radius lands on it.
+#[test]
+fn sim_projectile_impacts_within_the_impact_radius() {
+    let (mut s, t) = stepped_arena(vec![shot_kind("bullet", 10.0)]);
+    // The shell flies along z = 10.5 past a target 1.2 off its line: the
+    // step is 1.0, the least distance 1.2, the reach 1.5.
+    move_to(&mut s, t, 20.5, 11.7);
+    launch(
+        &mut s,
+        proj(
+            1,
+            Some("bullet"),
+            pos(10.5, 0.0, 10.5),
+            [10.0, 0.0, 0.0],
+            Some(t),
+            pos(20.5, 0.0, 11.7),
+            7,
+            0.0,
+        ),
+    );
+    for _ in 0..20 {
+        step(&mut s, &[]);
+    }
+    assert_eq!(s.counters.projectile_impacts, 1);
+    assert_eq!(health(&s, t), q(993));
+}
+
+/// SIM-078: an unfinished entity is marked for death by positive damage
+/// only; a zero-damage hit at work 0 leaves it standing.
+#[test]
+fn sim_zero_damage_does_not_kill_a_site() {
+    let mut site = dummy();
+    site.id = "site".to_owned();
+    site.build_time = Some(q(64));
+    site.max_health = q(128);
+    let mut s = plain(vec![site], vec![]);
+    let id = s
+        .spawn_under_construction(Army(2), "site", pos(20.5, 0.0, 20.5))
+        .expect("a site");
+    launch(
+        &mut s,
+        proj(
+            1,
+            None,
+            pos(1.5, 0.0, 1.5),
+            [0.0; 3],
+            Some(id),
+            pos(20.5, 0.0, 20.5),
+            0,
+            0.0,
+        ),
+    );
+    step(&mut s, &[]);
+    assert_eq!(s.counters.projectile_impacts, 1);
+    assert!(s.entities.contains_key(&id), "zero damage does not kill");
+    assert_eq!(s.counters.deaths, 0);
+}
+
+/// SIM-079: regeneration heals complete entities only; a site built partway
+/// and hurt gains nothing.
+#[test]
+fn sim_regen_skips_a_part_built_site() {
+    let mut site = dummy();
+    site.id = "site".to_owned();
+    site.build_time = Some(q(64));
+    site.max_health = q(128);
+    site.regen_rate = Some(q(10));
+    let mut s = plain(vec![site], vec![]);
+    let id = s
+        .spawn_under_construction(Army(1), "site", pos(20.5, 0.0, 20.5))
+        .expect("a site");
+    {
+        let e = s.entities.get_mut(&id).expect("site");
+        e.built = q(32);
+        e.health = q(64);
+    }
+    step(&mut s, &[]);
+    assert_eq!(health(&s, id), q(64));
+}
+
+/// SIM-081: a mobile unit's Attack on an own-army unit moves nothing and is
+/// popped and counted.
+#[test]
+fn sim_attack_on_own_army_does_not_move_the_attacker() {
+    let mut tank = armed("tank", vec![gun("Direct Fire", 10.0, 1.0, 40)]);
+    tank.motion = MotionType::Land;
+    tank.max_speed = Some(3.0);
+    let mut s = plain(vec![tank, dummy()], vec![]);
+    let tank_id = put(&mut s, 1, "tank", 5.5, 5.5, 100);
+    let friend = put(&mut s, 1, "dummy", 35.5, 5.5, 100);
+    let cmd = order_cmd(
+        0,
+        0,
+        tank_id,
+        Order::Attack { target: friend },
+        QueueMode::Replace,
+    );
+    step(&mut s, &[cmd]);
+    for _ in 0..4 {
+        step(&mut s, &[]);
+    }
+    let e = s.entities.get(&tank_id).expect("tank");
+    near(e.pos.x, 5.5);
+    near(e.pos.z, 5.5);
+    assert!(e.orders.is_empty());
+    assert_eq!(s.counters.commands_ignored, 1);
+}
+
+/// SIM-081: an attacker closes to its weapon range and stops there, short
+/// of the guard's follow range.
+#[test]
+fn sim_attacker_stops_at_its_weapon_range() {
+    let mut tank = armed("tank", vec![gun("Direct Fire", 10.0, 1.0, 0)]);
+    tank.motion = MotionType::Land;
+    tank.max_speed = Some(3.0);
+    let mut s = plain(vec![tank, dummy()], vec![]);
+    let tank_id = put(&mut s, 1, "tank", 5.5, 5.5, 100);
+    let enemy = put(&mut s, 2, "dummy", 35.5, 5.5, 100);
+    let cmd = order_cmd(
+        0,
+        0,
+        tank_id,
+        Order::Attack { target: enemy },
+        QueueMode::Replace,
+    );
+    step(&mut s, &[cmd]);
+    for _ in 0..119 {
+        step(&mut s, &[]);
+    }
+    let gap = distance_xz(
+        &s.entities.get(&tank_id).expect("tank").pos,
+        &pos(35.5, 0.0, 5.5),
+    );
+    assert!(gap <= 10.0, "within the weapon range: {gap}");
+    assert!(
+        gap > supercom_sim::FOLLOW_RANGE,
+        "and no closer than the follow range: {gap}"
+    );
 }
