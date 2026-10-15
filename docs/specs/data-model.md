@@ -19,7 +19,7 @@ All 568 installed unit bodies MUST pass the unit contract and project into the t
 ## Optional fields and lists
 
 **DAT-005** `design` `test:minimal_unit_projects_with_absent_fields_as_none`
-A scalar field that the installed data omits MUST be an `Option` in the typed model and read as `None` when absent, and a list it omits MUST be an empty `Vec`; the model MUST NOT invent an engine default. The optional scalars are `BuildTime`, `BuildRate`, the production and storage fields, `MaxSpeed`, `TurnRate`, `RegenRate`, `VisionRadius`, `RadarRadius`, `RateOfFire`, `MaxRadius`, and the weapon's `Label` and `ProjectileId`, together with the optional scalars that DAT-032 to DAT-036 pin (the maintenance drain, the extra physics scalars and the build restriction, the footprint's three fields, and the weapon and projectile-physics scalars and flags); the optional lists are `BuildableCategory`, `TargetPriorities`, and `FireTargetLayerCapsTable`; the optional blocks are `Intel` and `Footprint`, each reading as `None` when absent, and the `Weapon` list. The blocks `General` (with its `CommandCaps` table) and the projectile `Physics`, and the weapon's `DamageType` and `WeaponCategory`, are required, as every installed entry carries them.
+A scalar field that the installed data omits MUST be an `Option` in the typed model and read as `None` when absent, and a list it omits MUST be an empty `Vec`; the model MUST NOT invent an engine default. The optional scalars are `BuildTime`, `BuildRate`, the production and storage fields, `MaxSpeed`, `TurnRate`, `RegenRate`, `VisionRadius`, `RadarRadius`, `RateOfFire`, `MaxRadius`, and the weapon's `Label`, `ProjectileId`, and `EnabledByEnhancement`, together with the optional scalars that DAT-032 to DAT-036 pin (the maintenance drain, the extra physics scalars and the build restriction, the footprint's three fields, and the weapon and projectile-physics scalars and flags); the optional lists are `BuildableCategory`, `TargetPriorities`, and `FireTargetLayerCapsTable`; the optional blocks are `Intel` and `Footprint`, each reading as `None` when absent, and the `Weapon` list. The blocks `General` (with its `CommandCaps` table) and the projectile `Physics`, and the weapon's `DamageType` and `WeaponCategory`, are required, as every installed entry carries them.
 
 **DAT-006** `game-data` `script:tools/spec_eval/data-model/absence.py DAT-006`
 The optional fields of DAT-005 are optional exactly where the installed data omits them: `BuildTime` is absent in 16 of 568 units, `VisionRadius` in 4 of 395 `Intel` blocks, `RateOfFire` in 91 and `MaxRadius` in 86 of 494 weapon entries (the 91 holding 90 and the 86 holding all 86 with `WeaponCategory` `Death`), and `Categories` in 90 of 365 projectiles and 37 of 336 props.
@@ -70,6 +70,9 @@ A weapon's `ManualFire` stored as a Boolean MUST read as itself and stored as th
 **DAT-039** `game-data` `test:conformance_data_build_on_layer_caps`
 All 568 installed units MUST carry a `Physics.BuildOnLayerCaps` table whose values are all booleans, over exactly the six keys `LAYER_Air`, `LAYER_Land`, `LAYER_Orbit`, `LAYER_Seabed`, `LAYER_Sub`, and `LAYER_Water` that SIM-030 names. The projection MUST list the true keys of each unit in ascending order, which gives `LAYER_Air` true on 62 units, `LAYER_Land` on 440, `LAYER_Orbit` on none, `LAYER_Seabed` on 23, `LAYER_Sub` on 18, and `LAYER_Water` on 87; an absent table projects as an empty list, by DAT-005.
 
+**DAT-040** `game-data` `test:conformance_data_weapon_enhancement_gate`
+Among the 494 weapon entries of the installed units, `EnabledByEnhancement` MUST project for 6, each a string naming an enhancement, with 6 distinct values, on 4 units: one entry each on `ual0001` and `url0301`, two each on `uel0001` and `url0001`; 2 of the 6 also carry `ManualFire`. The field reads as `None` on every other entry, by DAT-005.
+
 ## Catalog and ids
 
 **DAT-013** `game-data` `test:conformance_import_catalog_counts`
@@ -92,8 +95,8 @@ Loading a catalog twice through the cache MUST leave a cache file after the firs
 **DAT-018** `game-data` `test:conformance_import_cache_key_is_stable`
 The cache key MUST be non-empty and the same on two calls over an unchanged install.
 
-**DAT-019** `design` `test:conformance_import_cache_format_is_three`
-The cache key MUST lead with the format version (currently `v3`), so a cache written under another format version never matches and is a miss.
+**DAT-019** `design` `test:conformance_import_cache_format_is_four`
+The cache key MUST lead with the format version (currently `v4`), so a cache written under another format version never matches and is a miss.
 
 **DAT-020** `design` `test:float_bits::round_trip_sweep_of_bit_patterns_keeps_bits`
 The cache's encoding MUST round-trip every finite `f64` bit-exactly (the test sweeps 100,000 bit patterns from a seeded generator; the literal set is `float_bits::round_trip_of_literals_keeps_bits`), because the catalog is a candidate input to the lockstep initial state (DAT-024).

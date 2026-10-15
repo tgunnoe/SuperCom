@@ -214,16 +214,16 @@ fn conformance_import_projectile_references_resolve() {
     );
 }
 
-/// Pins the cache format: the key leads with `v3`, so a cache written
-/// under format 2 (key `v2;...`) never matches and is a miss.
+/// Pins the cache format: the key leads with `v4`, so a cache written
+/// under format 3 (key `v3;...`) never matches and is a miss.
 #[test]
-fn conformance_import_cache_format_is_three() {
+fn conformance_import_cache_format_is_four() {
     let Some(fa) = supercom_testkit::require_game() else {
         return;
     };
     let key = cache_key(&fa);
     assert!(
-        key.as_ref().is_ok_and(|k| k.starts_with("v3;")),
-        "the key must lead with v3, got {key:?}"
+        key.as_ref().is_ok_and(|k| k.starts_with("v4;")),
+        "the key must lead with v4, got {key:?}"
     );
 }

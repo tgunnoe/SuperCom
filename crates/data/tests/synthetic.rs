@@ -872,3 +872,26 @@ fn a_non_boolean_build_on_layer_cap_names_its_path() {
         })
     );
 }
+
+/// `EnabledByEnhancement` projects its string, reads `None` when absent,
+/// and a number is a type error at the weapon's path.
+#[test]
+fn enabled_by_enhancement_projects_and_defaults_to_none() {
+    let with_field = unit_with_weapon(vec![("EnabledByEnhancement", s("TacticalMissile"))]);
+    let unit = unit_from_value("xyz0030", &with_field).expect("must project");
+    assert_eq!(
+        unit.weapons[0].enabled_by_enhancement.as_deref(),
+        Some("TacticalMissile")
+    );
+    let without = unit_with_weapon(vec![]);
+    let unit = unit_from_value("xyz0031", &without).expect("must project");
+    assert_eq!(unit.weapons[0].enabled_by_enhancement, None);
+    let number = unit_with_weapon(vec![("EnabledByEnhancement", num(1.0))]);
+    assert_eq!(
+        unit_from_value("xyz0032", &number).map(|_| ()),
+        Err(Error::Type {
+            field: "Weapon[0].EnabledByEnhancement".into(),
+            expected: "String".into(),
+        })
+    );
+}

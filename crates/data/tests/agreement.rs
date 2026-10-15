@@ -380,3 +380,16 @@ fn manual_fire_accepts_one_and_refuses_two_and_a_string_in_both_verdicts() {
         );
     }
 }
+
+/// `EnabledByEnhancement` is a string; both accept one and refuse a number.
+#[test]
+fn agreement_on_an_enabled_by_enhancement_string() {
+    assert_both(
+        &weapon_with("EnabledByEnhancement", s("TacticalMissile")),
+        &Ok(()),
+    );
+    assert_both(
+        &weapon_with("EnabledByEnhancement", num(1.0)),
+        &type_error("Weapon[0].EnabledByEnhancement", "String"),
+    );
+}

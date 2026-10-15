@@ -158,6 +158,9 @@ pub struct Weapon {
     pub turreted: Option<bool>,
     /// Manual fire; stored as a boolean or as the number 1, which reads as true.
     pub manual_fire: Option<bool>,
+    /// The enhancement that must be built before the weapon may fire; `None`
+    /// when the entry carries no such field.
+    pub enabled_by_enhancement: Option<String>,
 }
 
 /// A unit blueprint's v0 fields.
@@ -902,6 +905,7 @@ fn weapons_of(body: &Value) -> Result<Vec<Weapon>, Error> {
                 weapon_category: req_string(t, "WeaponCategory", &parent)?,
                 turreted: opt_bool(t, "Turreted", &parent)?,
                 manual_fire: opt_manual_fire(t, "ManualFire", &parent)?,
+                enabled_by_enhancement: None,
             })
         })
         .collect()

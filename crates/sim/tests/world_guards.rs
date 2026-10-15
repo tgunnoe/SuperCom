@@ -88,6 +88,7 @@ fn typed_weapon(projectile: &str) -> data::Weapon {
         weapon_category: "Direct Fire".to_owned(),
         turreted: None,
         manual_fire: None,
+        enabled_by_enhancement: None,
     }
 }
 
