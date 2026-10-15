@@ -1312,4 +1312,15 @@ mod refusals {
         }
         assert!(nickel_check(Kind::Unit, &body).is_err());
     }
+
+    #[test]
+    fn the_contract_refuses_a_numeric_enabled_by_enhancement() {
+        assert!(
+            nickel_check(
+                Kind::Unit,
+                &unit_with_weapon("EnabledByEnhancement", num(1.0))
+            )
+            .is_err()
+        );
+    }
 }
