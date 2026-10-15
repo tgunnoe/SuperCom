@@ -78,9 +78,8 @@ impl std::error::Error for Error {
             Self::Catalog(e) => Some(e),
             Self::Io { source, .. } => Some(source),
             Self::Map(e) => Some(e),
-            Self::Save(e) => Some(e),
+            Self::Save(e) | Self::ArmourParse(e) => Some(e),
             Self::Archive(e) => Some(e),
-            Self::ArmourParse(e) => Some(e),
             Self::Sim(e) => Some(e),
             Self::MissingMapFile { .. } | Self::AmbiguousMapFile { .. } | Self::Armour { .. } => {
                 None
@@ -141,7 +140,10 @@ pub fn load_world(install: &Path, cache_dir: &Path, map_folder: &str) -> Result<
 /// The armour table of `lua/armordefinition.lua`, read through the archive
 /// layer's mount order: each entry is an armour name and its
 /// `(damage type, multiplier)` pairs, from strings such as `Normal 1.0`.
-fn read_armour(install: &Path) -> Result<Vec<(String, Vec<(String, f64)>)>, Error> {
+/// An armour name and its damage-type multipliers.
+type ArmourRow = (String, Vec<(String, f64)>);
+
+fn read_armour(install: &Path) -> Result<Vec<ArmourRow>, Error> {
     let malformed = |reason: String| Error::Armour { reason };
     let bytes = Vfs::from_install(install)
         .and_then(|vfs| vfs.read("lua/armordefinition.lua"))
