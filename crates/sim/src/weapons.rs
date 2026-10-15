@@ -132,15 +132,15 @@ impl State {
         attack: Option<EntityId>,
         held: Option<EntityId>,
     ) -> Option<EntityId> {
-        let hits = |id: EntityId, enemy_only: bool| {
+        let hits = |id: EntityId| {
             self.entities
                 .get(&id)
-                .is_some_and(|t| (!enemy_only || t.army != army) && can_hit(weapon, pos, t))
+                .is_some_and(|t| t.army != army && can_hit(weapon, pos, t))
         };
-        if let Some(t) = attack.filter(|t| hits(*t, false)) {
+        if let Some(t) = attack.filter(|t| hits(*t)) {
             return Some(t);
         }
-        if let Some(h) = held.filter(|h| hits(*h, true)) {
+        if let Some(h) = held.filter(|h| hits(*h)) {
             return Some(h);
         }
         self.entities
