@@ -1213,12 +1213,13 @@ fn sim_aim_at_planar_distance_zero_hits_at_once() {
 }
 
 /// SIM-077: acceleration raises the speed by acceleration times 0.1 a tick
-/// up to the maximum, and holds it there.
+/// up to the maximum, which a step of 10 * 0.1 from 4 overshoots, and
+/// holds it there.
 #[test]
 fn sim_projectile_accelerates_to_its_maximum_speed() {
     let mut rocket = shot_kind("rocket", 2.0);
     rocket.acceleration = Some(10.0);
-    rocket.max_speed = Some(5.0);
+    rocket.max_speed = Some(4.5);
     let mut s = plain(vec![dummy()], vec![rocket]);
     launch(
         &mut s,
@@ -1235,7 +1236,7 @@ fn sim_projectile_accelerates_to_its_maximum_speed() {
     );
     let mut x = 10.5;
     let mut before = 2.0;
-    for speed in [3.0, 4.0, 5.0, 5.0, 5.0] {
+    for speed in [3.0, 4.0, 4.5, 4.5, 4.5] {
         step(&mut s, &[]);
         let p = alive(&s, 1).expect("in flight");
         near(p.vel[0], speed);
