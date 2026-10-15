@@ -41,12 +41,12 @@ source (AGENTS.md R2, R7).
   that the engine stub documents and no installed Lua sets (SIM-073). A
   projectile impacts when it comes within the step plus 0.5 of its target,
   because a step of 2.5 units at speed 25 can jump over a sphere of radius
-  0.5. The ground rule is a strict test against the terrain height minus the
-  impact radius: the projectile is the same half-unit sphere the swept test
-  uses, so a flat shot may skim the ground within its radius. Semi-implicit
-  Euler lowers a near-flat trajectory by a small amount per step (a 7-unit
-  shot at speed 25 sinks to about -0.01 on its second tick) and the tolerance
-  absorbs it; shots at the ballistic maximum are out of scope. A projectile
+  0.5. The position moves by the mean of the old and new velocity, which is exact
+  for a constant acceleration; moving by the new velocity alone (semi-implicit
+  Euler) sinks below the parabola in proportion to the flight time, so no fixed
+  ground tolerance covers long flights. The ground rule is then a strict test
+  against the terrain height. Shots at the ballistic maximum are out of scope.
+  A projectile
   leaves the map when its position is outside the grid, not only when its cell
   is absent.
 - **Damage is the multiplier at impact, uniform in the radius, to enemies
