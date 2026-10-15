@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
 use crate::build::total_work;
+use crate::combat::{Projectile, ProjectileId, Scratch, WeaponState, fresh_weapons};
 use crate::command::{Command, Order, QueueMode};
 use crate::economy::Ledger;
 use crate::error::Error;
@@ -75,6 +76,9 @@ pub struct Entity {
     /// The fraction granted to the entity's maintenance request in the
     /// last economy phase; 1 when it made none (SIM-043).
     pub maintenance_fraction: Q,
+    /// One state per weapon of the kind, in the kind's order; empty for a
+    /// kind without weapons or an unknown blueprint (SIM-075).
+    pub weapons: Vec<WeaponState>,
     pub orders: VecDeque<Order>,
 }
 
@@ -110,6 +114,10 @@ pub struct Counters {
     pub stall_ticks: u64,
     /// Moves that reached their goal (SIM-068).
     pub moves_completed: u64,
+    /// Projectile impacts, on a unit or the ground (SIM-078).
+    pub projectile_impacts: u64,
+    /// Entities removed by the death phase (SIM-080).
+    pub deaths: u64,
 }
 
 /// The full simulation state.
@@ -122,6 +130,10 @@ pub struct State {
     pub armies: BTreeMap<Army, ArmyState>,
     pub entities: BTreeMap<EntityId, Entity>,
     pub counters: Counters,
+    /// The projectiles in flight, by id (SIM-077).
+    pub projectiles: BTreeMap<ProjectileId, Projectile>,
+    /// The id the next launched projectile takes; starts at 1.
+    pub next_projectile_id: ProjectileId,
     /// How many times the route planner has been called; a diagnostic
     /// outside S, derived like the head and never serialized or hashed
     /// (SIM-068).
@@ -154,6 +166,8 @@ impl State {
             armies: BTreeMap::new(),
             entities: BTreeMap::new(),
             counters: Counters::default(),
+            projectiles: BTreeMap::new(),
+            next_projectile_id: ProjectileId(1),
             plans: 0,
             head: GENESIS,
             world,
@@ -202,6 +216,7 @@ impl State {
             .get(&lower)
             .and_then(|k| k.build_time)
             .unwrap_or(Q::ZERO);
+        let weapons = fresh_weapons(&self.world, &lower);
         self.entities.insert(
             id,
             Entity {
@@ -221,6 +236,7 @@ impl State {
                 route: Vec::new(),
                 goal: None,
                 maintenance_fraction: Q::ONE,
+                weapons,
                 orders: VecDeque::new(),
             },
         );
@@ -242,6 +258,7 @@ impl State {
         // A kind with no build time has no work to finish (SIM-056).
         kind.build_time?;
         let max_health = kind.max_health;
+        let weapons = vec![WeaponState::default(); kind.weapons.len()];
         let id = self.next_id;
         self.next_id = EntityId(id.0.saturating_add(1));
         if self.entities.contains_key(&id) {
@@ -266,6 +283,7 @@ impl State {
                 route: Vec::new(),
                 goal: None,
                 maintenance_fraction: Q::ONE,
+                weapons,
                 orders: VecDeque::new(),
             },
         );
@@ -298,9 +316,10 @@ impl State {
         let next = Tick(ran.0.checked_add(1).ok_or(Error::TickOverflow)?);
         self.check_batch(commands)?;
         let mut trace = Vec::with_capacity(PHASES.len());
+        let mut scratch = Scratch::default();
         for phase in PHASES {
             trace.push(phase);
-            self.run_phase(phase, commands);
+            self.run_phase(phase, commands, &mut scratch);
         }
         self.tick = next;
         let mut bytes = Vec::new();
@@ -335,7 +354,7 @@ impl State {
     /// The commands, economy, build, and movement phases run their rules; the
     /// others are no-ops until theirs land. Each that visits entities does so in
     /// ascending id (SIM-036).
-    fn run_phase(&mut self, phase: Phase, commands: &[Command]) {
+    fn run_phase(&mut self, phase: Phase, commands: &[Command], _scratch: &mut Scratch) {
         match phase {
             Phase::Commands => self.apply_commands(commands),
             Phase::Economy => self.run_economy(),
@@ -423,6 +442,16 @@ impl State {
                     heading: e.heading,
                     speed: e.speed,
                     layer: e.layer,
+                    targets: e.weapons.iter().map(|w| w.target).collect(),
+                })
+                .collect(),
+            projectiles: self
+                .projectiles
+                .values()
+                .map(|p| ProjectileSnapshot {
+                    id: p.id,
+                    army: p.army,
+                    pos: p.pos,
                 })
                 .collect(),
         }
@@ -450,6 +479,8 @@ pub struct Snapshot {
     pub tick: Tick,
     pub armies: Vec<ArmySnapshot>,
     pub entities: Vec<EntitySnapshot>,
+    /// The projectiles in flight, ascending by id.
+    pub projectiles: Vec<ProjectileSnapshot>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -464,6 +495,15 @@ pub struct EntitySnapshot {
     pub heading: f64,
     pub speed: f64,
     pub layer: Layer,
+    /// The weapons' targets, in the kind's order.
+    pub targets: Vec<Option<EntityId>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ProjectileSnapshot {
+    pub id: ProjectileId,
+    pub army: Army,
+    pub pos: Pos,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
