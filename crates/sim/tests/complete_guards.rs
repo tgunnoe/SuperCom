@@ -93,7 +93,9 @@ fn an_unfinished_builder_waits_with_its_order_until_complete() {
     assert_eq!(entity(&s, b).orders.len(), 1, "the order waits");
     assert_eq!(requested(&s), (Q::ZERO, Q::ZERO));
 
-    s.entities.get_mut(&b).expect("the worker exists").complete = true;
+    let worker = s.entities.get_mut(&b).expect("the worker exists");
+    worker.complete = true;
+    worker.health = worker.max_health;
     step(&mut s, &[]);
     assert_eq!(s.entities.len(), 2, "the site spawns once complete");
     assert_eq!(entity(&s, b).work, Some(EntityId(2)));

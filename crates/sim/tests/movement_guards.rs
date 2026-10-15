@@ -86,7 +86,9 @@ fn sim_unfinished_entities_are_skipped_by_the_movement_phase() {
     assert_eq!(e.orders.len(), 1, "the queue is untouched");
     assert_eq!(e.goal, None);
     assert_eq!(e.speed.to_bits(), 0.0_f64.to_bits());
-    s.entities.get_mut(&id).expect("exists").complete = true;
+    let e = s.entities.get_mut(&id).expect("exists");
+    e.complete = true;
+    e.health = e.max_health;
     step(&mut s, &[]);
     let e = ent(&s, id);
     assert_eq!(e.pos.x.to_bits(), (4.5_f64 + 3.0 * 0.1).to_bits());
