@@ -381,7 +381,8 @@ fn sim_projectile_flies_falls_tracks_and_impacts() {
 
     // A falling shell from a weapon at a target 7 away on flat ground. The
     // test replays the recurrence: gravity on vy, then the swept test on the
-    // distance before the move, then the move.
+    // distance before the move, then the move by the mean of the old and
+    // new velocity.
     let mut arc = shot_kind("arc", 25.0);
     arc.use_gravity = true;
     let mut cannon = gun("Artillery", 30.0, 0.03, 5);
@@ -395,6 +396,7 @@ fn sim_projectile_flies_falls_tracks_and_impacts() {
     let (mut x, mut y) = (10.5, 0.0);
     let mut expected = Vec::new();
     let hit = loop {
+        let old_vy = vy;
         vy -= 4.9 * 0.1;
         let reach = libm::sqrt(vx * vx + vy * vy) * 0.1 + 0.5;
         let d = libm::sqrt((17.5 - x) * (17.5 - x) + y * y);
@@ -402,7 +404,7 @@ fn sim_projectile_flies_falls_tracks_and_impacts() {
             break expected.len() + 1;
         }
         x += vx * 0.1;
-        y += vy * 0.1;
+        y += (old_vy + vy) / 2.0 * 0.1;
         expected.push((x, y));
         assert!(expected.len() < 10, "the replay must reach the target");
     };
@@ -411,7 +413,7 @@ fn sim_projectile_flies_falls_tracks_and_impacts() {
         let p = alive(&s, 1).unwrap_or_else(|| panic!("in flight at tick {k}"));
         near(p.pos.x, *ex);
         near(p.pos.y, *ey);
-        assert!(p.pos.y >= -0.5, "the flat shot skims, never lands");
+        assert!(p.pos.y >= 0.0, "the flat shot stays above the ground");
     }
     step(&mut s, &[]);
     assert!(alive(&s, 1).is_none(), "impact in phase {hit}");
