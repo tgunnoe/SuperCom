@@ -1061,3 +1061,43 @@ fn sim_armour_table_from_parsed_values() {
     assert!(without.armour.is_empty());
     assert_ne!(with.catalog_digest, without.catalog_digest);
 }
+
+/// SIM-075: no weapon takes a target of its own army, not even the head
+/// Attack's. A turret ordered to attack one own-army unit, then another,
+/// launches nothing, hurts nothing, and has both orders popped and counted.
+#[test]
+fn sim_weapon_never_takes_an_own_army_target() {
+    let units = vec![
+        armed("turret", vec![gun("Direct Fire", 20.0, 1.0, 10)]),
+        dummy(),
+    ];
+    let mut s = plain(units, vec![]);
+    let turret = put(&mut s, 1, "turret", 10.5, 10.5, 100);
+    let first = put(&mut s, 1, "dummy", 14.5, 10.5, 100);
+    let second = put(&mut s, 1, "dummy", 16.5, 10.5, 100);
+    let cmds = [
+        order_cmd(
+            0,
+            0,
+            turret,
+            Order::Attack { target: first },
+            QueueMode::Replace,
+        ),
+        order_cmd(
+            0,
+            1,
+            turret,
+            Order::Attack { target: second },
+            QueueMode::Append,
+        ),
+    ];
+    step(&mut s, &cmds);
+    step(&mut s, &[]);
+    assert!(s.projectiles.is_empty());
+    assert_eq!(s.counters.projectile_impacts, 0);
+    assert_eq!((health(&s, first), health(&s, second)), (q(100), q(100)));
+    assert_eq!(targets(&s, turret), vec![None]);
+    assert!(s.entities.get(&turret).expect("turret").orders.is_empty());
+    assert_eq!(s.counters.commands_applied, 2);
+    assert_eq!(s.counters.commands_ignored, 2);
+}
