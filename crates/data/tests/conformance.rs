@@ -640,3 +640,62 @@ fn conformance_data_projectile_physics_fields() {
         assert_eq!(count_some(&p, get), expected, "{field} present");
     }
 }
+
+/// Pins the enhancement gate (DAT-040): `EnabledByEnhancement` on 6 of the
+/// 494 weapon entries, each a string, 6 distinct values, on 4 units, 2 of
+/// the 6 entries also manual; the raw count is re-measured at parser level.
+#[test]
+fn conformance_data_weapon_enhancement_gate() {
+    let Some(fa) = supercom_testkit::require_game() else {
+        return;
+    };
+    let mut per_unit: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    let mut values = BTreeSet::new();
+    let mut manual = 0;
+    let mut projected = 0;
+    for unit in projected_units(&fa) {
+        for w in &unit.weapons {
+            if let Some(name) = &w.enabled_by_enhancement {
+                projected += 1;
+                *per_unit.entry(unit.id.to_ascii_lowercase()).or_default() += 1;
+                values.insert(name.clone());
+                if w.manual_fire == Some(true) {
+                    manual += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(projected, 6, "weapons projecting EnabledByEnhancement");
+    assert_eq!(values.len(), 6, "distinct enhancement names");
+    let per_unit: Vec<(&str, usize)> = per_unit.iter().map(|(k, v)| (k.as_str(), *v)).collect();
+    assert_eq!(
+        per_unit,
+        [
+            ("ual0001", 1),
+            ("uel0001", 2),
+            ("url0001", 2),
+            ("url0301", 1)
+        ],
+        "entries per unit"
+    );
+    assert_eq!(manual, 2, "entries also manual");
+
+    // Parser level: the raw count, every value a string.
+    let (_, bodies) = unit_bodies(&fa);
+    let (mut raw, mut strings) = (0, 0);
+    for (_, body) in &bodies {
+        if let Some(Value::Table(entries)) = body.get("Weapon") {
+            for (_, weapon) in entries {
+                match weapon.get("EnabledByEnhancement") {
+                    Some(Value::Str(_)) => {
+                        raw += 1;
+                        strings += 1;
+                    }
+                    Some(_) => raw += 1,
+                    None => {}
+                }
+            }
+        }
+    }
+    assert_eq!((raw, strings), (6, 6), "raw entries and string values");
+}

@@ -158,6 +158,9 @@ pub struct Weapon {
     pub turreted: Option<bool>,
     /// Manual fire; stored as a boolean or as the number 1, which reads as true.
     pub manual_fire: Option<bool>,
+    /// The enhancement that must be built before the weapon may fire; `None`
+    /// when the entry carries no such field.
+    pub enabled_by_enhancement: Option<String>,
 }
 
 /// A unit blueprint's v0 fields.
@@ -416,6 +419,7 @@ const WEAPON: &[&str] = &[
     "WeaponCategory",
     "Turreted",
     "ManualFire",
+    "EnabledByEnhancement",
 ];
 const GENERAL: &[&str] = &["CommandCaps"];
 const FOOTPRINT: &[&str] = &["SizeX", "SizeZ", "MinWaterDepth"];
@@ -902,6 +906,7 @@ fn weapons_of(body: &Value) -> Result<Vec<Weapon>, Error> {
                 weapon_category: req_string(t, "WeaponCategory", &parent)?,
                 turreted: opt_bool(t, "Turreted", &parent)?,
                 manual_fire: opt_manual_fire(t, "ManualFire", &parent)?,
+                enabled_by_enhancement: opt_string(t, "EnabledByEnhancement", &parent)?,
             })
         })
         .collect()
@@ -1306,5 +1311,16 @@ mod refusals {
             entries.push((Key::Name("Physics".to_owned()), physics));
         }
         assert!(nickel_check(Kind::Unit, &body).is_err());
+    }
+
+    #[test]
+    fn the_contract_refuses_a_numeric_enabled_by_enhancement() {
+        assert!(
+            nickel_check(
+                Kind::Unit,
+                &unit_with_weapon("EnabledByEnhancement", num(1.0))
+            )
+            .is_err()
+        );
     }
 }
