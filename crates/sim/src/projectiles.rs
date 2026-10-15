@@ -88,6 +88,10 @@ fn steered(p: &Projectile, kind: &ProjectileKind, goal: Option<&Pos>) -> [f64; 3
     vel
 }
 
+#[expect(
+    clippy::manual_midpoint,
+    reason = "SIM-077 states the step as (v + v') / 2 in plain binary64 operations, not the library midpoint"
+)]
 fn advance(world: &World, entities: &BTreeMap<EntityId, Entity>, p: &mut Projectile) -> Outcome {
     if let Some(left) = p.lifetime {
         let left = left - TICK_SECONDS;
