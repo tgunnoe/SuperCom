@@ -71,7 +71,7 @@ fn world() -> Arc<World> {
     let mut launcher: UnitKind = kind("launcher", &["STRUCTURE"]);
     launcher.weapons = vec![gun("Missile", "missile", 4.0, 0.5, 45)];
     let mut bunker: UnitKind = kind("bunker", &["STRUCTURE"]);
-    bunker.armor_type = "Heavy".to_owned();
+    "Heavy".clone_into(&mut bunker.armor_type);
     bunker.health = q(400);
     bunker.max_health = q(400);
     let soft = kind("soft", &["STRUCTURE"]);
