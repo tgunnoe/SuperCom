@@ -45,7 +45,8 @@ source (AGENTS.md R2, R7).
   for a constant acceleration; moving by the new velocity alone (semi-implicit
   Euler) sinks below the parabola in proportion to the flight time, so no fixed
   ground tolerance covers long flights. The ground rule is then a strict test
-  against the terrain height. Shots at the ballistic maximum are out of scope.
+  against the terrain height. Shots beyond the ballistic maximum are launched at
+  45 degrees and miss (see Consequences).
   A projectile
   leaves the map when its position is outside the grid, not only when its cell
   is absent.
@@ -94,8 +95,7 @@ source (AGENTS.md R2, R7).
 - Acquisition, the clock, and the flight model are this project's reading and
   will drift from the original's feel; the first observation reopens them.
 - Salvo weapons fire one projectile per shot, so burst weapons are weaker.
-- A shell fired from the ballistic maximum falls short; artillery at range is
-  out of scope here.
+- A falling shell hits at every range up to and at its speed squared over 4.9 on flat ground; a target beyond that is launched at 45 degrees and missed, which 16 of the 367 active installed weapons can be ordered to do (8 Anti Navy, 8 Defense, no Artillery); the elevation uses the planar distance only, so a target at another height is reached at the firer's height.
 
 ## Open
 

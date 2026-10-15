@@ -137,12 +137,12 @@ pub fn load_world(install: &Path, cache_dir: &Path, map_folder: &str) -> Result<
     .map_err(Error::Sim)
 }
 
-/// The armour table of `lua/armordefinition.lua`, read through the archive
-/// layer's mount order: each entry is an armour name and its
-/// `(damage type, multiplier)` pairs, from strings such as `Normal 1.0`.
 /// An armour name and its damage-type multipliers.
 type ArmourRow = (String, Vec<(String, f64)>);
 
+/// The armour table of `lua/armordefinition.lua`, read through the archive
+/// layer's mount order: each entry is an armour name and its
+/// `(damage type, multiplier)` pairs, from strings such as `Normal 1.0`.
 fn read_armour(install: &Path) -> Result<Vec<ArmourRow>, Error> {
     let malformed = |reason: String| Error::Armour { reason };
     let bytes = Vfs::from_install(install)

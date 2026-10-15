@@ -78,9 +78,9 @@ pub(crate) fn fresh_weapons(world: &World, blueprint: &str) -> Vec<WeaponState> 
 }
 
 /// The ticks between shots of a weapon of `rate_of_fire` shots per second:
-/// the ceiling of ten over the rate, at least 1 (SIM-076). A rate that is
-/// zero or negative gives the longest cooldown, one that is not a number the
-/// shortest.
+/// the ceiling of ten over the rate, at least 1 (SIM-076). A rate of zero
+/// gives the longest cooldown; a negative, negative-zero, or undefined rate
+/// gives 1.
 #[must_use]
 pub fn cooldown_ticks(rate_of_fire: f64) -> u32 {
     #[expect(

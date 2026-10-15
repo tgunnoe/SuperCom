@@ -964,13 +964,9 @@ fn sim_attack_order_approaches_and_fires() {
         } else {
             Vec::new()
         };
-        let ids = s.next_projectile_id;
         let impacts = s.counters.projectile_impacts;
         step(&mut s, &cmds);
         let x = s.entities.get(&tank_id).expect("tank").pos.x;
-        // Instant hits do not advance the projectile counter's collection,
-        // so count shots by impacts, which land in the same tick.
-        let _ = ids;
         if s.counters.projectile_impacts > impacts {
             shots.push(tick);
             at_shot.push((gap_before, 35.5 - x));
