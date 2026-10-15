@@ -657,7 +657,7 @@ fn conformance_data_weapon_enhancement_gate() {
         for w in &unit.weapons {
             if let Some(name) = &w.enabled_by_enhancement {
                 projected += 1;
-                *per_unit.entry(unit.id.clone()).or_default() += 1;
+                *per_unit.entry(unit.id.to_ascii_lowercase()).or_default() += 1;
                 values.insert(name.clone());
                 if w.manual_fire == Some(true) {
                     manual += 1;
@@ -671,10 +671,10 @@ fn conformance_data_weapon_enhancement_gate() {
     assert_eq!(
         per_unit,
         [
-            ("UAL0001", 1),
-            ("UEL0001", 2),
-            ("URL0001", 2),
-            ("URL0301", 1)
+            ("ual0001", 1),
+            ("uel0001", 2),
+            ("url0001", 2),
+            ("url0301", 1)
         ],
         "entries per unit"
     );
