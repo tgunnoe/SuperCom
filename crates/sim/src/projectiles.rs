@@ -116,6 +116,7 @@ fn advance(world: &World, entities: &BTreeMap<EntityId, Entity>, p: &mut Project
         };
     };
     let kind = world.projectiles.get(kind_id);
+    let old_vel = p.vel;
     if let Some(kind) = kind {
         p.vel = steered(p, kind, target.as_ref().map(|(_, pos)| pos));
     }
@@ -125,9 +126,12 @@ fn advance(world: &World, entities: &BTreeMap<EntityId, Entity>, p: &mut Project
         None if length(between(&p.pos, &p.aim)) <= reach => return impact(p.aim, None),
         _ => {}
     }
-    p.pos.x += p.vel[0] * TICK_SECONDS;
-    p.pos.y += p.vel[1] * TICK_SECONDS;
-    p.pos.z += p.vel[2] * TICK_SECONDS;
+    // The mean of the old and new velocity is exact for a constant
+    // acceleration; the new velocity alone sinks below a parabola in
+    // proportion to the flight time.
+    p.pos.x += (old_vel[0] + p.vel[0]) / 2.0 * TICK_SECONDS;
+    p.pos.y += (old_vel[1] + p.vel[1]) / 2.0 * TICK_SECONDS;
+    p.pos.z += (old_vel[2] + p.vel[2]) / 2.0 * TICK_SECONDS;
     let map = &world.map;
     // Leaving the map is leaving the grid, not only an absent cell.
     let Some((cx, cz)) = cell_of(&p.pos).filter(|(x, z)| *x < map.width && *z < map.height) else {
@@ -138,9 +142,7 @@ fn advance(world: &World, entities: &BTreeMap<EntityId, Entity>, p: &mut Project
     if drowned {
         return Outcome::Gone;
     }
-    // The projectile is the same sphere of IMPACT_RADIUS the swept test
-    // uses, so a flat shot may skim the ground within that radius.
-    if p.pos.y < map.height_at(cx, cz).to_num::<f64>() - IMPACT_RADIUS {
+    if p.pos.y < map.height_at(cx, cz).to_num::<f64>() {
         return impact(p.pos, None);
     }
     Outcome::Flying
