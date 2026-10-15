@@ -694,20 +694,29 @@ impl World {
     }
 
     /// [`World::from_parts`] with the armour table: each entry is an armour
-    /// type and its `(damage type, multiplier)` pairs.
+    /// type and its `(damage type, multiplier)` pairs, each multiplier
+    /// converted by SIM-050's rule.
     ///
     /// # Errors
     ///
-    /// The errors of [`World::from_parts`].
+    /// The errors of [`World::from_parts`]; [`IngestError::ValueOverflow`]
+    /// naming the armour and damage type for a multiplier outside that rule.
     pub fn from_parts_with_armour(
         units: &[supercom_data::Unit],
         projectiles: &[supercom_data::Projectile],
         map: MapGrid,
         markers: Vec<Marker>,
         map_name: String,
-        _armour: &[(String, Vec<(String, f64)>)],
+        table: &[(String, Vec<(String, f64)>)],
     ) -> Result<World, Error> {
-        let armour = BTreeMap::new();
+        let mut armour: BTreeMap<String, BTreeMap<String, Q>> = BTreeMap::new();
+        for (name, multipliers) in table {
+            let row = armour.entry(name.clone()).or_default();
+            for (damage_type, multiplier) in multipliers {
+                let q = to_q(*multiplier, || format!("armour {name}: {damage_type}"))?;
+                row.insert(damage_type.clone(), q);
+            }
+        }
         let mut kinds = BTreeMap::new();
         for unit in units {
             let kind = convert_unit(unit, units)?;
@@ -741,8 +750,12 @@ impl World {
     /// The multiplier a hit of `damage_type` takes on a target of `armour`;
     /// 1 when either key is absent from the table (SIM-078).
     #[must_use]
-    pub fn armour_multiplier(&self, _armour: &str, _damage_type: &str) -> Q {
-        Q::ONE
+    pub fn armour_multiplier(&self, armour: &str, damage_type: &str) -> Q {
+        self.armour
+            .get(armour)
+            .and_then(|row| row.get(damage_type))
+            .copied()
+            .unwrap_or(Q::ONE)
     }
 
     /// Refuse, before tick 0, a replay whose content digests differ from

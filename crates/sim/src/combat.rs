@@ -63,10 +63,6 @@ pub(crate) struct Impact {
 /// Values that live for one tick only: the step creates them and passes
 /// them to the phases, so nothing survives a step by construction.
 #[derive(Debug, Default)]
-#[expect(
-    dead_code,
-    reason = "the projectiles and damage phases fill and read it when they land"
-)]
 pub(crate) struct Scratch {
     /// The impacts of the projectiles phase, in projectile-id order.
     pub impacts: Vec<Impact>,
@@ -81,14 +77,24 @@ pub(crate) fn fresh_weapons(world: &World, blueprint: &str) -> Vec<WeaponState> 
     vec![WeaponState::default(); count]
 }
 
-/// The ticks between shots of a weapon of `rate_of_fire` shots per second.
+/// The ticks between shots of a weapon of `rate_of_fire` shots per second:
+/// the ceiling of ten over the rate, at least 1 (SIM-076). A rate that is
+/// zero or negative gives the longest cooldown, one that is not a number the
+/// shortest.
 #[must_use]
-pub fn cooldown_ticks(_rate_of_fire: f64) -> u32 {
-    0
+pub fn cooldown_ticks(rate_of_fire: f64) -> u32 {
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "the cast saturates: a ceiling above u32::MAX is the longest cooldown, and a negative or undefined one is raised to 1 below"
+    )]
+    let ticks = (10.0 / rate_of_fire).ceil() as u32;
+    ticks.max(1)
 }
 
 /// The planar distance between two positions, ignoring y.
 #[must_use]
-pub fn distance_xz(_a: &Pos, _b: &Pos) -> f64 {
-    0.0
+pub fn distance_xz(a: &Pos, b: &Pos) -> f64 {
+    let (dx, dz) = (a.x - b.x, a.z - b.z);
+    libm::sqrt(dx * dx + dz * dz)
 }

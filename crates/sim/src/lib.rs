@@ -8,16 +8,19 @@
 mod build;
 mod combat;
 mod command;
+mod damage;
 mod economy;
 mod error;
 mod hash;
 mod ids;
 mod movement;
 mod planner;
+mod projectiles;
 mod replay;
 mod rng;
 mod schedule;
 mod state;
+mod weapons;
 mod world;
 
 pub use build::{BUILD_RANGE, BUILD_TIME_FLOOR, BuildRates, build_rates, footprint_of, total_work};
