@@ -419,6 +419,7 @@ const WEAPON: &[&str] = &[
     "WeaponCategory",
     "Turreted",
     "ManualFire",
+    "EnabledByEnhancement",
 ];
 const GENERAL: &[&str] = &["CommandCaps"];
 const FOOTPRINT: &[&str] = &["SizeX", "SizeZ", "MinWaterDepth"];
@@ -905,7 +906,7 @@ fn weapons_of(body: &Value) -> Result<Vec<Weapon>, Error> {
                 weapon_category: req_string(t, "WeaponCategory", &parent)?,
                 turreted: opt_bool(t, "Turreted", &parent)?,
                 manual_fire: opt_manual_fire(t, "ManualFire", &parent)?,
-                enabled_by_enhancement: None,
+                enabled_by_enhancement: opt_string(t, "EnabledByEnhancement", &parent)?,
             })
         })
         .collect()
