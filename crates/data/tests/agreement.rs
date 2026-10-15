@@ -250,6 +250,7 @@ fn a_fully_populated_unit_validates() {
             name("TargetCheckInterval", num(0.5)),
             name("Turreted", Value::Bool(true)),
             name("ManualFire", num(1.0)),
+            name("EnabledByEnhancement", s("TacticalMissile")),
         ])
     };
     let body = table(vec![
