@@ -11,6 +11,8 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
+use supercom_bp::Value;
+use supercom_scd::Vfs;
 use supercom_sim::{MapGrid, Marker, MarkerKind, Pos, World};
 
 /// Why the world could not be built.
@@ -35,6 +37,14 @@ pub enum Error {
     Map(supercom_scmap::Error),
     /// The save file did not parse.
     Save(supercom_bp::Error),
+    /// The archive layer could not mount the install or read the armour
+    /// table.
+    Archive(supercom_scd::Error),
+    /// The armour table's text did not parse.
+    ArmourParse(supercom_bp::Error),
+    /// The armour table parsed but is not a table of named multiplier
+    /// strings.
+    Armour { reason: String },
     /// The sim refused the parsed values.
     Sim(supercom_sim::Error),
 }
@@ -49,6 +59,9 @@ impl fmt::Display for Error {
             }
             Self::Map(e) => write!(f, "cannot parse the map: {e}"),
             Self::Save(e) => write!(f, "cannot parse the save file: {e}"),
+            Self::Archive(e) => write!(f, "cannot read the armour table: {e}"),
+            Self::ArmourParse(e) => write!(f, "cannot parse the armour table: {e}"),
+            Self::Armour { reason } => write!(f, "malformed armour table: {reason}"),
             Self::Sim(e) => write!(f, "the sim refused the world: {e}"),
             Self::AmbiguousMapFile {
                 folder,
@@ -66,8 +79,12 @@ impl std::error::Error for Error {
             Self::Io { source, .. } => Some(source),
             Self::Map(e) => Some(e),
             Self::Save(e) => Some(e),
+            Self::Archive(e) => Some(e),
+            Self::ArmourParse(e) => Some(e),
             Self::Sim(e) => Some(e),
-            Self::MissingMapFile { .. } | Self::AmbiguousMapFile { .. } => None,
+            Self::MissingMapFile { .. } | Self::AmbiguousMapFile { .. } | Self::Armour { .. } => {
+                None
+            }
         }
     }
 }
@@ -108,15 +125,68 @@ pub fn load_world(install: &Path, cache_dir: &Path, map_folder: &str) -> Result<
         .map(convert_marker)
         .collect();
 
-    World::from_parts(
+    let armour = read_armour(install)?;
+    World::from_parts_with_armour(
         &catalog.units,
         &catalog.projectiles,
         grid,
         markers,
         map_folder.to_owned(),
+        &armour,
     )
     .map(Arc::new)
     .map_err(Error::Sim)
+}
+
+/// The armour table of `lua/armordefinition.lua`, read through the archive
+/// layer's mount order: each entry is an armour name and its
+/// `(damage type, multiplier)` pairs, from strings such as `Normal 1.0`.
+fn read_armour(install: &Path) -> Result<Vec<(String, Vec<(String, f64)>)>, Error> {
+    let malformed = |reason: String| Error::Armour { reason };
+    let bytes = Vfs::from_install(install)
+        .and_then(|vfs| vfs.read("lua/armordefinition.lua"))
+        .map_err(Error::Archive)?;
+    // The installed Lua is ISO-8859 text: one byte, one character.
+    let text: String = bytes.iter().map(|&b| char::from(b)).collect();
+    let assignments = supercom_bp::parse_script(&text).map_err(Error::ArmourParse)?;
+    let Some((_, Value::Table(rows))) = assignments
+        .iter()
+        .find(|(name, _)| name == "armordefinition")
+    else {
+        return Err(malformed("no armordefinition table".to_owned()));
+    };
+    rows.iter()
+        .map(|(_, row)| {
+            let Value::Table(items) = row else {
+                return Err(malformed("an armour entry is not a table".to_owned()));
+            };
+            let mut strings = items.iter().map(|(_, item)| match item {
+                Value::Str(s) => Ok(s.as_str()),
+                other => Err(malformed(format!("expected a string, found {other:?}"))),
+            });
+            let name = strings
+                .next()
+                .ok_or_else(|| malformed("an armour entry is empty".to_owned()))??;
+            let multipliers = strings
+                .map(|s| {
+                    let s = s?;
+                    let mut words = s.split_whitespace();
+                    let (Some(damage_type), Some(value), None) =
+                        (words.next(), words.next(), words.next())
+                    else {
+                        return Err(malformed(format!(
+                            "{name}: {s:?} is not a damage type and a multiplier"
+                        )));
+                    };
+                    let value = value
+                        .parse::<f64>()
+                        .map_err(|e| malformed(format!("{name}: {value:?}: {e}")))?;
+                    Ok((damage_type.to_owned(), value))
+                })
+                .collect::<Result<Vec<_>, Error>>()?;
+            Ok((name.to_owned(), multipliers))
+        })
+        .collect()
 }
 
 /// The bytes of the one file in `folder` whose name ends `suffix`, ignoring
