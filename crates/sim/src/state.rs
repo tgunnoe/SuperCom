@@ -380,8 +380,7 @@ impl State {
         Ok(())
     }
 
-    /// The commands, economy, build, movement, and combat phases run their
-    /// rules; the intel phase runs its rule; the victory phase is a no-op until its rule lands. Each that visits entities does so in
+    /// Every phase runs its rule; each that visits entities does so in
     /// ascending id (SIM-036).
     fn run_phase(&mut self, phase: Phase, commands: &[Command], scratch: &mut Scratch) {
         match phase {
@@ -394,16 +393,17 @@ impl State {
             Phase::Damage => self.run_damage(scratch),
             Phase::Death => self.run_death(scratch),
             Phase::Intel => self.run_intel(),
-            Phase::Victory => {}
+            Phase::Victory => self.run_victory(),
         }
     }
 
     /// Apply a command only if every unit it names exists and belongs to its
-    /// army; otherwise ignore it whole, so a foreign command cannot clear or
-    /// extend a queue (SIM-045).
+    /// army and the army is not defeated; otherwise ignore it whole, so a
+    /// foreign command cannot clear or extend a queue (SIM-045, SIM-084).
     fn apply_commands(&mut self, commands: &[Command]) {
         for c in commands {
             let owned = !c.units.is_empty()
+                && !self.armies.get(&c.army).is_some_and(|a| a.defeated)
                 && c.units
                     .iter()
                     .all(|id| self.entities.get(id).is_some_and(|e| e.army == c.army));
