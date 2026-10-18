@@ -6,20 +6,27 @@
 //! the design choices this crate makes.
 
 mod build;
+mod combat;
 mod command;
+mod damage;
 mod economy;
 mod error;
 mod hash;
 mod ids;
 mod movement;
 mod planner;
+mod projectiles;
 mod replay;
 mod rng;
 mod schedule;
 mod state;
+mod weapons;
 mod world;
 
 pub use build::{BUILD_RANGE, BUILD_TIME_FLOOR, BuildRates, build_rates, footprint_of, total_work};
+pub use combat::{
+    GRAVITY, IMPACT_RADIUS, Projectile, ProjectileId, WeaponState, cooldown_ticks, distance_xz,
+};
 pub use command::{Command, Order, QueueMode};
 pub use economy::{Ledger, per_tick};
 pub use error::{Error, IngestError};
@@ -34,7 +41,8 @@ pub use replay::{
 pub use rng::Rng;
 pub use schedule::{Schedule, ScheduleError, schedule};
 pub use state::{
-    ArmySnapshot, ArmyState, Counters, Entity, EntitySnapshot, PHASES, Phase, Snapshot, State, run,
+    ArmySnapshot, ArmyState, Counters, Entity, EntitySnapshot, PHASES, Phase, ProjectileSnapshot,
+    Snapshot, State, run,
 };
 pub use world::{
     BuildRestriction, Faction, Layer, LayerSet, MapGrid, Marker, MarkerKind, MotionType, OrderCaps,

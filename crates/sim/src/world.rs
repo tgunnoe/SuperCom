@@ -289,6 +289,8 @@ impl Order {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WeaponKind {
     pub label: Option<String>,
+    /// The `WeaponCategory` name, such as `Direct Fire` or `Death`.
+    pub category: String,
     pub damage: Q,
     pub damage_radius: Option<f64>,
     pub damage_type: String,
@@ -302,6 +304,9 @@ pub struct WeaponKind {
     /// The union of the values of `FireTargetLayerCapsTable`.
     pub target_layers: LayerSet,
     pub manual_fire: bool,
+    /// Whether the weapon is enabled by an enhancement, which no sim rule
+    /// builds yet, so it never fires (SIM-075).
+    pub enabled_by_enhancement: bool,
 }
 
 /// A unit blueprint as the sim holds it: scalars that enter state arithmetic
@@ -629,6 +634,9 @@ impl Faction {
 pub struct World {
     pub units: BTreeMap<String, UnitKind>,
     pub projectiles: BTreeMap<String, ProjectileKind>,
+    /// Armour type to damage type to multiplier (SIM-078); empty for a
+    /// world built without a table.
+    pub armour: BTreeMap<String, BTreeMap<String, Q>>,
     pub map: MapGrid,
     pub markers: Vec<Marker>,
     pub map_name: String,
@@ -644,6 +652,7 @@ impl World {
         World {
             units: BTreeMap::new(),
             projectiles: BTreeMap::new(),
+            armour: BTreeMap::new(),
             map: MapGrid {
                 width: 0,
                 height: 0,
@@ -681,6 +690,33 @@ impl World {
         markers: Vec<Marker>,
         map_name: String,
     ) -> Result<World, Error> {
+        World::from_parts_with_armour(units, projectiles, map, markers, map_name, &[])
+    }
+
+    /// [`World::from_parts`] with the armour table: each entry is an armour
+    /// type and its `(damage type, multiplier)` pairs, each multiplier
+    /// converted by SIM-050's rule.
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`World::from_parts`]; [`IngestError::ValueOverflow`]
+    /// naming the armour and damage type for a multiplier outside that rule.
+    pub fn from_parts_with_armour(
+        units: &[supercom_data::Unit],
+        projectiles: &[supercom_data::Projectile],
+        map: MapGrid,
+        markers: Vec<Marker>,
+        map_name: String,
+        table: &[(String, Vec<(String, f64)>)],
+    ) -> Result<World, Error> {
+        let mut armour: BTreeMap<String, BTreeMap<String, Q>> = BTreeMap::new();
+        for (name, multipliers) in table {
+            let row = armour.entry(name.clone()).or_default();
+            for (damage_type, multiplier) in multipliers {
+                let q = to_q(*multiplier, || format!("armour {name}: {damage_type}"))?;
+                row.insert(damage_type.clone(), q);
+            }
+        }
         let mut kinds = BTreeMap::new();
         for unit in units {
             let kind = convert_unit(unit, units)?;
@@ -697,17 +733,29 @@ impl World {
                 return Err(IngestError::DuplicateProjectileId(id).into());
             }
         }
-        let catalog_digest = catalog_digest(&kinds, &shots);
+        let catalog_digest = catalog_digest(&kinds, &shots, &armour);
         let map_digest = map_digest(&map_name, &map, &markers);
         Ok(World {
             units: kinds,
             projectiles: shots,
+            armour,
             map,
             markers,
             map_name,
             catalog_digest,
             map_digest,
         })
+    }
+
+    /// The multiplier a hit of `damage_type` takes on a target of `armour`;
+    /// 1 when either key is absent from the table (SIM-078).
+    #[must_use]
+    pub fn armour_multiplier(&self, armour: &str, damage_type: &str) -> Q {
+        self.armour
+            .get(armour)
+            .and_then(|row| row.get(damage_type))
+            .copied()
+            .unwrap_or(Q::ONE)
     }
 
     /// Refuse, before tick 0, a replay whose content digests differ from
@@ -815,6 +863,7 @@ fn convert_weapon(
     }
     Ok(WeaponKind {
         label: weapon.label.clone(),
+        category: weapon.weapon_category.clone(),
         damage: to_q(weapon.damage, || path("damage"))?,
         damage_radius: weapon.damage_radius,
         damage_type: weapon.damage_type.clone(),
@@ -825,6 +874,7 @@ fn convert_weapon(
         projectile_id: weapon.projectile_id.as_deref().map(str::to_ascii_lowercase),
         target_layers,
         manual_fire: weapon.manual_fire.unwrap_or(false),
+        enabled_by_enhancement: weapon.enabled_by_enhancement.is_some(),
     })
 }
 
@@ -992,6 +1042,7 @@ impl Encoder {
     fn weapon(&mut self, w: &WeaponKind) {
         let WeaponKind {
             label,
+            category,
             damage,
             damage_radius,
             damage_type,
@@ -1002,8 +1053,10 @@ impl Encoder {
             projectile_id,
             target_layers,
             manual_fire,
+            enabled_by_enhancement,
         } = w;
         self.option(label.as_deref(), Encoder::str);
+        self.str(category);
         self.q(*damage);
         self.option(*damage_radius, Encoder::f64);
         self.str(damage_type);
@@ -1013,6 +1066,7 @@ impl Encoder {
         self.option(projectile_id.as_deref(), Encoder::str);
         self.u8(target_layers.bits());
         self.u8(u8::from(*manual_fire));
+        self.u8(u8::from(*enabled_by_enhancement));
     }
 
     fn unit(&mut self, u: &UnitKind) {
@@ -1153,13 +1207,18 @@ impl Encoder {
 /// `build_on` is [`LayerSet::bits`], `command_caps` is [`OrderCaps::bits`],
 /// `footprint` is an option of two `u32`, and `weapons` is a sequence of
 /// [`WeaponKind`] with its fields in declaration order (`target_layers` as
-/// [`LayerSet::bits`], `manual_fire` as a `u8`); then the projectiles as a
-/// `u32` count then each [`ProjectileKind`] in id order with its fields in
-/// declaration order (the three flags as a `u8` each).
+/// [`LayerSet::bits`], `manual_fire` and `enabled_by_enhancement` as a `u8`
+/// each, and `category` a string right after `label`); then the projectiles
+/// as a `u32` count then each [`ProjectileKind`] in id order with its fields
+/// in declaration order (the three flags as a `u8` each); then the armour
+/// table as a `u32` count of armour entries in name order, each as its name
+/// (string), a `u32` count, and each damage type in name order as a string
+/// then the multiplier's raw `i64` bits.
 #[must_use]
 pub fn catalog_digest(
     units: &BTreeMap<String, UnitKind>,
     projectiles: &BTreeMap<String, ProjectileKind>,
+    armour: &BTreeMap<String, BTreeMap<String, Q>>,
 ) -> Digest {
     let mut e = Encoder::new("catalog-v1");
     e.len(units.len());
@@ -1169,6 +1228,15 @@ pub fn catalog_digest(
     e.len(projectiles.len());
     for projectile in projectiles.values() {
         e.projectile(projectile);
+    }
+    e.len(armour.len());
+    for (name, multipliers) in armour {
+        e.str(name);
+        e.len(multipliers.len());
+        for (damage_type, multiplier) in multipliers {
+            e.str(damage_type);
+            e.q(*multiplier);
+        }
     }
     e.finish()
 }

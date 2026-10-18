@@ -365,6 +365,7 @@ fn entity(id: u32, army: u8) -> Entity {
         route: Vec::new(),
         goal: None,
         maintenance_fraction: Q::ONE,
+        weapons: Vec::new(),
         orders: [Order::Stop].into(),
     }
 }
@@ -434,9 +435,11 @@ fn sim_serialization_is_canonical() {
     // defeated flag), then the entities (count, then id, army, blueprint
     // length and bytes, x, y, z, health, max health, built, complete,
     // fraction, work, heading, speed, layer, the route, the goal, the
-    // maintenance fraction, and the queued orders, counted, in the order
-    // encoding). The counters carry builds completed, stall ticks, and moves
-    // completed, and each army its ledger of eight values.
+    // maintenance fraction, the weapons, counted, and the queued orders,
+    // counted, in the order encoding), then the next projectile id and the
+    // projectiles, counted. The counters carry builds completed, stall ticks,
+    // moves completed, projectile impacts, and deaths, and each army its
+    // ledger of eight values.
     let mut s = State::new(5);
     s.add_army(
         Army(1),
@@ -461,6 +464,8 @@ fn sim_serialization_is_canonical() {
     want.extend_from_slice(&0u64.to_le_bytes()); // builds completed
     want.extend_from_slice(&0u64.to_le_bytes()); // stall ticks
     want.extend_from_slice(&0u64.to_le_bytes()); // moves completed
+    want.extend_from_slice(&0u64.to_le_bytes()); // projectile impacts
+    want.extend_from_slice(&0u64.to_le_bytes()); // deaths
     want.extend_from_slice(&1u32.to_le_bytes()); // one army
     want.push(1);
     for v in [3i64, 4, 5, 6] {
@@ -490,8 +495,11 @@ fn sim_serialization_is_canonical() {
     want.extend_from_slice(&0u32.to_le_bytes()); // empty route
     want.push(0); // no goal
     want.extend_from_slice(&(1i64 << 32).to_le_bytes()); // maintenance fraction
+    want.extend_from_slice(&0u32.to_le_bytes()); // no weapons
     want.extend_from_slice(&1u32.to_le_bytes()); // one queued order
     want.push(1); // Stop
+    want.extend_from_slice(&1u32.to_le_bytes()); // next projectile id
+    want.extend_from_slice(&0u32.to_le_bytes()); // no projectiles
     assert_eq!(bytes_of(&s), want);
 }
 

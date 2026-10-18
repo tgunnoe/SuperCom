@@ -12,6 +12,7 @@ use crate::command::Order;
 use crate::ids::{EntityId, Pos};
 use crate::planner::plan_with;
 use crate::state::{Entity, State};
+use crate::weapons::attack_range;
 use crate::world::{Layer, MapGrid, MotionType, SHALLOW, UnitKind, World};
 
 /// One tick in seconds: a tenth, from SIM-001 and SIM-002 (SIM-069).
@@ -310,9 +311,25 @@ impl State {
                 }
                 Order::Guard { target } => {
                     let target_pos = self.entities.get(&target).map(|t| t.pos);
-                    if self.follow_guard(map, motion, &dynamics, id, target_pos) {
+                    if self.follow_guard(map, motion, &dynamics, id, target_pos, FOLLOW_RANGE) {
                         break;
                     }
+                }
+                Order::Attack { target } => {
+                    // Approach by the guard rule to the longest weapon range;
+                    // an Attack that cannot be followed stays where it is for
+                    // the weapons phase to judge the same tick (SIM-081).
+                    let goal = self
+                        .entities
+                        .get(&id)
+                        .map(|e| e.army)
+                        .and_then(|army| self.entities.get(&target).filter(|t| t.army != army))
+                        .map(|t| t.pos)
+                        .zip(attack_range(kind));
+                    if let Some((target_pos, range)) = goal {
+                        self.follow_guard(map, motion, &dynamics, id, Some(target_pos), range);
+                    }
+                    break;
                 }
                 _ => {
                     if let Some(e) = self.entities.get_mut(&id) {
@@ -376,8 +393,8 @@ impl State {
         true
     }
 
-    /// Follow a guard's target; false when the Guard was dropped, so the
-    /// caller looks at the next head.
+    /// Follow a target to within `range`; false when a Guard was dropped, so
+    /// the caller looks at the next head.
     fn follow_guard(
         &mut self,
         map: &MapGrid,
@@ -385,6 +402,7 @@ impl State {
         dynamics: &Dynamics,
         id: EntityId,
         target: Option<Pos>,
+        range: f64,
     ) -> bool {
         let Some(e) = self.entities.get_mut(&id) else {
             return true;
@@ -398,7 +416,7 @@ impl State {
             return false;
         };
         let (dx, dz) = (e.pos.x - target.x, e.pos.z - target.z);
-        if dx * dx + dz * dz <= FOLLOW_RANGE * FOLLOW_RANGE {
+        if dx * dx + dz * dz <= range * range {
             e.speed = 0.0;
             e.route.clear();
             e.goal = None;

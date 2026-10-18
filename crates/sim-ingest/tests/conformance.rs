@@ -89,6 +89,7 @@ fn put_weapon(out: &mut Vec<u8>, w: &WeaponKind) {
     // this independent encoder takes it into account.
     let WeaponKind {
         label,
+        category,
         damage,
         damage_radius,
         damage_type,
@@ -99,8 +100,10 @@ fn put_weapon(out: &mut Vec<u8>, w: &WeaponKind) {
         projectile_id,
         target_layers,
         manual_fire,
+        enabled_by_enhancement,
     } = w;
     put_opt(out, label.as_deref(), put_str);
+    put_str(out, category);
     put_q(out, *damage);
     put_opt(out, *damage_radius, put_f64);
     put_str(out, damage_type);
@@ -110,6 +113,7 @@ fn put_weapon(out: &mut Vec<u8>, w: &WeaponKind) {
     put_opt(out, projectile_id.as_deref(), put_str);
     out.push(target_layers.bits());
     out.push(u8::from(*manual_fire));
+    out.push(u8::from(*enabled_by_enhancement));
 }
 
 fn put_unit(out: &mut Vec<u8>, u: &UnitKind) {
@@ -184,17 +188,29 @@ fn put_unit(out: &mut Vec<u8>, u: &UnitKind) {
 }
 
 fn expected_catalog_digest(world: &World) -> [u8; 32] {
+    // No `..`: a field added to the world fails to compile here until this
+    // independent encoder takes it into account or names it as skipped.
+    let World {
+        units,
+        projectiles,
+        armour,
+        map: _,
+        markers: _,
+        map_name: _,
+        catalog_digest: _,
+        map_digest: _,
+    } = world;
     let mut out = Vec::new();
     put_str(&mut out, "catalog-v1");
-    put_u32(&mut out, u32::try_from(world.units.len()).expect("units"));
-    for unit in world.units.values() {
+    put_u32(&mut out, u32::try_from(units.len()).expect("units"));
+    for unit in units.values() {
         put_unit(&mut out, unit);
     }
     put_u32(
         &mut out,
-        u32::try_from(world.projectiles.len()).expect("projectiles"),
+        u32::try_from(projectiles.len()).expect("projectiles"),
     );
-    for shot in world.projectiles.values() {
+    for shot in projectiles.values() {
         let ProjectileKind {
             id,
             categories,
@@ -213,6 +229,21 @@ fn expected_catalog_digest(world: &World) -> [u8; 32] {
             put_opt(&mut out, v, put_f64);
         }
         out.extend([track_target, use_gravity, destroy_on_water].map(u8::from));
+    }
+    put_u32(
+        &mut out,
+        u32::try_from(armour.len()).expect("armour entries"),
+    );
+    for (name, multipliers) in armour {
+        put_str(&mut out, name);
+        put_u32(
+            &mut out,
+            u32::try_from(multipliers.len()).expect("damage types"),
+        );
+        for (damage_type, multiplier) in multipliers {
+            put_str(&mut out, damage_type);
+            put_q(&mut out, *multiplier);
+        }
     }
     Sha256::digest(&out).into()
 }
@@ -263,7 +294,7 @@ fn conformance_ingest_world_from_the_installed_catalog() {
     assert_eq!(world.catalog_digest, expected_catalog_digest(&world));
     assert_eq!(
         world.catalog_digest,
-        supercom_sim::catalog_digest(&world.units, &world.projectiles)
+        supercom_sim::catalog_digest(&world.units, &world.projectiles, &world.armour)
     );
 }
 

@@ -1,5 +1,6 @@
 use sha2::{Digest as _, Sha256};
 
+use crate::combat::{Projectile, WeaponState};
 use crate::economy::Ledger;
 use crate::ids::{EntityId, Q, Tick};
 use crate::state::{ArmyState, Counters, Entity, State};
@@ -38,7 +39,8 @@ fn put_len(out: &mut Vec<u8>, len: usize) {
 ///
 /// Field order: tick (LE64), seed (LE64), the generator state (LE64), next
 /// entity id (LE32), commands applied (LE64), commands ignored (LE64), builds
-/// completed (LE64), stall ticks (LE64), moves completed (LE64); the armies, a LE32 count then each in
+/// completed (LE64), stall ticks (LE64), moves completed (LE64), projectile impacts (LE64), deaths (LE64); the
+/// armies, a LE32 count then each in
 /// ascending slot order as slot (u8), mass, energy, mass storage, energy
 /// storage (each the raw `i64` bits of its [`crate::Q`], LE64), defeated (u8,
 /// 0 or 1), then the ledger's eight values (income, requested, and granted for
@@ -50,9 +52,18 @@ fn put_len(out: &mut Vec<u8>, len: usize) {
 /// heading and speed ([`canonical_f64_bits`], LE64 each), layer (u8, its
 /// declaration index), the route (LE32 count, then each cell as two LE32, x
 /// then z), goal (u8 0, or u8 1 then x, y, z as [`canonical_f64_bits`]),
-/// maintenance fraction (raw bits), then the queued orders (LE32 count, each in
-/// [`crate::Order::encode_into`]'s encoding, front to back). The chain head is
-/// not part of S.
+/// maintenance fraction (raw bits), the weapons (LE32 count, each as target, u8 0
+/// or u8 1 then the id LE32, and cooldown LE32), then the queued orders (LE32
+/// count, each in [`crate::Order::encode_into`]'s encoding, front to back);
+/// after the entities, the next projectile id (LE32) and the projectiles, a
+/// LE32 count then each in ascending id order as id (LE32), army (u8), source
+/// (LE32), kind (u8 0, or u8 1 then a string), position and velocity (each three
+/// [`canonical_f64_bits`], LE64), target (u8 0, or u8 1 then the id LE32), aim
+/// (three [`canonical_f64_bits`]), damage (raw `i64` bits), damage radius
+/// ([`canonical_f64_bits`]), damage type (string), and lifetime (u8 0, or u8 1
+/// then [`canonical_f64_bits`]); a string is a LE32 byte length then its bytes.
+/// The chain head is not part of S. The impacts and marks the combat phases
+/// hand each other live in the step, not in the state, and never enter S.
 ///
 /// A step serializes after advancing the tick, so the bytes of the tick
 /// that just ran (`t`) carry the tick field `t+1` (the state after the
@@ -71,6 +82,8 @@ pub fn serialize(state: &State, out: &mut Vec<u8>) {
         builds_completed,
         stall_ticks,
         moves_completed,
+        projectile_impacts,
+        deaths,
     } = &state.counters;
     for n in [
         commands_applied,
@@ -78,6 +91,8 @@ pub fn serialize(state: &State, out: &mut Vec<u8>) {
         builds_completed,
         stall_ticks,
         moves_completed,
+        projectile_impacts,
+        deaths,
     ] {
         out.extend_from_slice(&n.to_le_bytes());
     }
@@ -127,6 +142,74 @@ pub fn serialize(state: &State, out: &mut Vec<u8>) {
     for (key, entity) in &state.entities {
         put_entity(out, *key, entity);
     }
+    out.extend_from_slice(&state.next_projectile_id.0.to_le_bytes());
+    put_len(out, state.projectiles.len());
+    for projectile in state.projectiles.values() {
+        put_projectile(out, projectile);
+    }
+}
+
+fn put_f64s(out: &mut Vec<u8>, values: &[f64]) {
+    for v in values {
+        out.extend_from_slice(&canonical_f64_bits(*v).to_le_bytes());
+    }
+}
+
+fn put_string(out: &mut Vec<u8>, s: &str) {
+    put_len(out, s.len());
+    out.extend_from_slice(s.as_bytes());
+}
+
+fn put_target(out: &mut Vec<u8>, target: Option<EntityId>) {
+    match target {
+        None => out.push(0),
+        Some(id) => {
+            out.push(1);
+            out.extend_from_slice(&id.0.to_le_bytes());
+        }
+    }
+}
+
+/// One projectile's bytes, in the order `serialize` documents.
+fn put_projectile(out: &mut Vec<u8>, projectile: &Projectile) {
+    let Projectile {
+        id,
+        army,
+        source,
+        kind,
+        pos,
+        vel,
+        target,
+        aim,
+        damage,
+        damage_radius,
+        damage_type,
+        lifetime,
+    } = projectile;
+    out.extend_from_slice(&id.0.to_le_bytes());
+    out.push(army.0);
+    out.extend_from_slice(&source.0.to_le_bytes());
+    match kind {
+        None => out.push(0),
+        Some(k) => {
+            out.push(1);
+            put_string(out, k);
+        }
+    }
+    put_f64s(out, &[pos.x, pos.y, pos.z]);
+    put_f64s(out, vel);
+    put_target(out, *target);
+    put_f64s(out, &[aim.x, aim.y, aim.z]);
+    put_q(out, *damage);
+    put_f64s(out, &[*damage_radius]);
+    put_string(out, damage_type);
+    match lifetime {
+        None => out.push(0),
+        Some(t) => {
+            out.push(1);
+            put_f64s(out, &[*t]);
+        }
+    }
 }
 
 /// One entity's bytes, in the order `serialize` documents; `key` is the map key,
@@ -149,6 +232,7 @@ fn put_entity(out: &mut Vec<u8>, key: EntityId, entity: &Entity) {
         route,
         goal,
         maintenance_fraction,
+        weapons,
         orders,
     } = entity;
     out.extend_from_slice(&key.0.to_le_bytes());
@@ -189,6 +273,11 @@ fn put_entity(out: &mut Vec<u8>, key: EntityId, entity: &Entity) {
         }
     }
     put_q(out, *maintenance_fraction);
+    put_len(out, weapons.len());
+    for WeaponState { target, cooldown } in weapons {
+        put_target(out, *target);
+        out.extend_from_slice(&cooldown.to_le_bytes());
+    }
     put_len(out, orders.len());
     for order in orders {
         order.encode_into(out);

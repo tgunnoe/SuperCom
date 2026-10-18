@@ -11,7 +11,8 @@
 use std::collections::VecDeque;
 
 use supercom_sim::{
-    Army, ArmyState, Entity, EntityId, Layer, Ledger, Pos, Q, State, Tick, serialize,
+    Army, ArmyState, Entity, EntityId, Layer, Ledger, Pos, Projectile, ProjectileId, Q, State,
+    Tick, WeaponState, serialize,
 };
 
 fn le64(out: &mut Vec<u8>, v: u64) {
@@ -46,6 +47,34 @@ fn serialization_pins_every_field_in_the_documented_order() {
     s.counters.builds_completed = 0x33;
     s.counters.stall_ticks = 0x34;
     s.counters.moves_completed = 0x35;
+    s.counters.projectile_impacts = 0x36;
+    s.counters.deaths = 0x37;
+    s.next_projectile_id = ProjectileId(0x4455);
+    s.projectiles.insert(
+        ProjectileId(0x66),
+        Projectile {
+            id: ProjectileId(0x66),
+            army: Army(3),
+            source: EntityId(0x77),
+            kind: Some("shell".to_owned()),
+            pos: Pos {
+                x: 1.5,
+                y: 2.5,
+                z: 3.5,
+            },
+            vel: [0.5, -0.25, 4.0],
+            target: Some(EntityId(0x88)),
+            aim: Pos {
+                x: 6.5,
+                y: 7.5,
+                z: 8.5,
+            },
+            damage: q(0x99),
+            damage_radius: 2.0,
+            damage_type: "Normal".to_owned(),
+            lifetime: Some(1.5),
+        },
+    );
     s.armies.insert(
         Army(7),
         ArmyState {
@@ -95,18 +124,28 @@ fn serialization_pins_every_field_in_the_documented_order() {
                 z: 6.5,
             }),
             maintenance_fraction: q(0x65),
+            weapons: vec![
+                WeaponState {
+                    target: Some(EntityId(0x99)),
+                    cooldown: 0x1122,
+                },
+                WeaponState {
+                    target: None,
+                    cooldown: 0x33,
+                },
+            ],
             orders: VecDeque::new(),
         },
     );
 
     let mut want = Vec::new();
     // Tick, seed, generator state (a fresh generator holds the seed), next
-    // entity id, then the five counters.
+    // entity id, then the seven counters.
     le64(&mut want, 0x11);
     le64(&mut want, 0x0102_0304_0506_0708);
     le64(&mut want, 0x0102_0304_0506_0708);
     le32(&mut want, 0x2233);
-    for c in [0x31, 0x32, 0x33, 0x34, 0x35] {
+    for c in [0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37] {
         le64(&mut want, c);
     }
     // One army: slot, four amounts, defeated, the ledger's eight values in
@@ -124,8 +163,8 @@ fn serialization_pins_every_field_in_the_documented_order() {
     // bits, health, max health, built, complete, fraction, work present and
     // its id, heading and speed as f64 bits, the layer's declaration index
     // (Water is 5), the route as a count and two LE32 per cell, the goal
-    // present and its x, y, z as f64 bits, the maintenance fraction, and an
-    // empty queue.
+    // present and its x, y, z as f64 bits, the maintenance fraction, the
+    // weapons, and the queue.
     le32(&mut want, 1);
     le32(&mut want, 5);
     want.push(7);
@@ -157,7 +196,51 @@ fn serialization_pins_every_field_in_the_documented_order() {
         le64(&mut want, bits);
     }
     raw(&mut want, 0x65);
+    // Two weapons: the first holds a target, the second none.
+    le32(&mut want, 2);
+    want.push(1);
+    le32(&mut want, 0x99);
+    le32(&mut want, 0x1122);
+    want.push(0);
+    le32(&mut want, 0x33);
+    // An empty queue, then the next projectile id and one projectile: id,
+    // army, source, kind present and its length-prefixed string, position,
+    // velocity, target present and its id, aim, damage, damage radius,
+    // damage type, and lifetime present and its f64 bits.
     le32(&mut want, 0);
+    le32(&mut want, 0x4455);
+    le32(&mut want, 1);
+    le32(&mut want, 0x66);
+    want.push(3);
+    le32(&mut want, 0x77);
+    want.push(1);
+    le32(&mut want, 5);
+    want.extend_from_slice(b"shell");
+    for bits in [
+        0x3FF8_0000_0000_0000,
+        0x4004_0000_0000_0000,
+        0x400C_0000_0000_0000,
+        0x3FE0_0000_0000_0000,
+        0xBFD0_0000_0000_0000,
+        0x4010_0000_0000_0000,
+    ] {
+        le64(&mut want, bits);
+    }
+    want.push(1);
+    le32(&mut want, 0x88);
+    for bits in [
+        0x401A_0000_0000_0000,
+        0x401E_0000_0000_0000,
+        0x4021_0000_0000_0000,
+    ] {
+        le64(&mut want, bits);
+    }
+    raw(&mut want, 0x99);
+    le64(&mut want, 0x4000_0000_0000_0000);
+    le32(&mut want, 6);
+    want.extend_from_slice(b"Normal");
+    want.push(1);
+    le64(&mut want, 0x3FF8_0000_0000_0000);
 
     let mut got = Vec::new();
     serialize(&s, &mut got);

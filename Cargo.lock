@@ -1838,6 +1838,7 @@ dependencies = [
  "supercom-bp",
  "supercom-bp-import",
  "supercom-data",
+ "supercom-scd",
  "supercom-scmap",
  "supercom-sim",
  "supercom-testkit",
