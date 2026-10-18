@@ -11,8 +11,8 @@
 use std::collections::VecDeque;
 
 use supercom_sim::{
-    Army, ArmyState, Entity, EntityId, Layer, Ledger, Pos, Projectile, ProjectileId, Q, State,
-    Tick, WeaponState, serialize,
+    Army, ArmyState, Entity, EntityId, Layer, Ledger, Outcome, Pos, Projectile, ProjectileId, Q,
+    State, Tick, WeaponState, serialize,
 };
 
 fn le64(out: &mut Vec<u8>, v: u64) {
@@ -49,6 +49,9 @@ fn serialization_pins_every_field_in_the_documented_order() {
     s.counters.moves_completed = 0x35;
     s.counters.projectile_impacts = 0x36;
     s.counters.deaths = 0x37;
+    s.counters.defeats = 0x38;
+    s.counters.victories = 0x39;
+    s.outcome = Some(Outcome::Winner(Army(7)));
     s.next_projectile_id = ProjectileId(0x4455);
     s.projectiles.insert(
         ProjectileId(0x66),
@@ -140,12 +143,12 @@ fn serialization_pins_every_field_in_the_documented_order() {
 
     let mut want = Vec::new();
     // Tick, seed, generator state (a fresh generator holds the seed), next
-    // entity id, then the seven counters.
+    // entity id, then the nine counters.
     le64(&mut want, 0x11);
     le64(&mut want, 0x0102_0304_0506_0708);
     le64(&mut want, 0x0102_0304_0506_0708);
     le32(&mut want, 0x2233);
-    for c in [0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37] {
+    for c in [0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39] {
         le64(&mut want, c);
     }
     // One army: slot, four amounts, defeated, the ledger's eight values in
@@ -241,6 +244,8 @@ fn serialization_pins_every_field_in_the_documented_order() {
     want.extend_from_slice(b"Normal");
     want.push(1);
     le64(&mut want, 0x3FF8_0000_0000_0000);
+    // The outcome: present, the winner tag, and the army.
+    want.extend_from_slice(&[1, 0, 7]);
 
     let mut got = Vec::new();
     serialize(&s, &mut got);

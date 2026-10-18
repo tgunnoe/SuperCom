@@ -25,8 +25,8 @@ use support::{kind, order_cmd, pos, q, state, step, world};
 /// The final digest of the scenario, computed once on `x86_64` from a run of
 /// the scenario below and written here.
 const GOLDEN: Digest = [
-    137, 7, 218, 144, 200, 108, 49, 222, 33, 156, 118, 81, 78, 10, 153, 225, 213, 140, 254, 127,
-    110, 111, 195, 227, 153, 91, 233, 17, 91, 234, 157, 238,
+    109, 149, 169, 186, 50, 249, 141, 234, 99, 75, 41, 72, 132, 171, 101, 32, 168, 229, 99, 230,
+    187, 106, 34, 58, 161, 193, 129, 102, 10, 55, 104, 228,
 ];
 
 fn mover(id: &str, motion: MotionType, speed: f64, dynamics: Option<(f64, f64, f64)>) -> UnitKind {
