@@ -381,7 +381,7 @@ impl State {
     }
 
     /// The commands, economy, build, movement, and combat phases run their
-    /// rules; the intel and victory phases are no-ops until theirs land. Each that visits entities does so in
+    /// rules; the intel phase runs its rule; the victory phase is a no-op until its rule lands. Each that visits entities does so in
     /// ascending id (SIM-036).
     fn run_phase(&mut self, phase: Phase, commands: &[Command], scratch: &mut Scratch) {
         match phase {
@@ -393,7 +393,8 @@ impl State {
             Phase::Projectiles => self.run_projectiles(scratch),
             Phase::Damage => self.run_damage(scratch),
             Phase::Death => self.run_death(scratch),
-            Phase::Intel | Phase::Victory => {}
+            Phase::Intel => self.run_intel(),
+            Phase::Victory => {}
         }
     }
 

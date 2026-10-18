@@ -13,6 +13,7 @@ mod economy;
 mod error;
 mod hash;
 mod ids;
+mod intel;
 mod movement;
 mod planner;
 mod projectiles;
