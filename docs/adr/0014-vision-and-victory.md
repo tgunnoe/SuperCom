@@ -51,7 +51,11 @@ clause so the design clauses have a ratifiable source (AGENTS.md R2, R7).
   would defeat every army with a zero count; this project's synthetic worlds
   for the economy, build, movement, and combat families contain no commander
   kind and several armies, and a real world always has them. The condition is
-  a precondition, not a rule about armies.
+  a precondition, not a rule about armies. The script under demoralization
+  would draw such a world at its first check (its line 16 is the branch for
+  any other option, which sets no condition). The precondition retires when a
+  second victory option lands: the option becomes an explicit match setting
+  and the catalog check is cut.
 - **The outcome is decided once (SIM-085).** The first victory phase after
   which at most one army stands names Winner of that army (counted in
   `victories`) or Draw (not counted). Afterwards the phase does nothing and
@@ -85,6 +89,10 @@ clause so the design clauses have a ratifiable source (AGENTS.md R2, R7).
 - The engine's vision arithmetic and grid resolution.
 - Whether the engine's acquisition requires the target to be visible.
 - The other two victory options and the allied-victory and draw-offer paths.
+- The intel cost: armies x entities x seers per tick (`run_intel`),
+  unmeasured. Signpost: a tick-time measurement at the unit cap. The table
+  is derived and outside the serialized state, so a spatial index or
+  per-army seer lists would change no digest.
 
 ## Alternatives Considered
 
@@ -94,3 +102,8 @@ clause so the design clauses have a ratifiable source (AGENTS.md R2, R7).
   eradication option, not the skirmish default.
 - Removing a defeated army's entities: rejected, since the script marks the
   army out of the game and removes nothing.
+- Re-pinning the synthetic multi-army test worlds with a commander kind:
+  rejected, since it would put a commander into every later multi-army test
+  for no rule the test checks; the precondition above stays instead.
+- Victory option as an explicit match setting now: deferred to the arrival
+  of a second option, when the setting has something to select between.
