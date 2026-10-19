@@ -192,6 +192,19 @@ fn sim_army_defeated_without_a_commander() {
     );
     assert!(s.entities[&grunt].orders.is_empty());
     assert_eq!(s.entities[&ids[0]].orders.len(), 1);
+    assert_eq!(
+        s.counters.defeats, 1,
+        "a defeated army's later tick is not counted again"
+    );
+
+    // A defeat clears no order: a Move stamped in the tick of the loss is
+    // applied before the phase that defeats the army, and stays held.
+    let (mut s, ids) = commanded(3);
+    let grunt = s.spawn(Army(3), "grunt", pos(100.0, 0.0, 100.0), q(100));
+    kill(&mut s, ids[2]);
+    step(&mut s, &[move_cmd(0, 0, 3, grunt)]);
+    assert!(s.armies[&Army(3)].defeated);
+    assert_eq!(s.entities[&grunt].orders.len(), 1, "the order is held");
 
     // A commander that is still a site does not keep its army in the match.
     let mut site = structure("csite", 1, 1, 10);
