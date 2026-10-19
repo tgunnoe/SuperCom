@@ -4,7 +4,26 @@
 
 use std::process::ExitCode;
 
+use supercom_replay_harness::{HarnessError, report};
+
 fn main() -> ExitCode {
-    eprintln!("replay-digests: not implemented");
-    ExitCode::FAILURE
+    let Some(install) = supercom_testkit::game_dir() else {
+        eprintln!("replay-digests: {}", HarnessError::NoInstall);
+        return ExitCode::FAILURE;
+    };
+    match report(&install) {
+        Ok(out) => {
+            for line in &out.stderr {
+                eprintln!("{line}");
+            }
+            for line in &out.stdout {
+                println!("{line}");
+            }
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("replay-digests: {err}");
+            ExitCode::FAILURE
+        }
+    }
 }
