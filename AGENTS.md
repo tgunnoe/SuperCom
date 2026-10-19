@@ -100,9 +100,11 @@ Each item: statement · grounding (why unresolved) · signpost (what resolves it
 
 - **U1 Cross-architecture float determinism.** ADR-0006 chose binary64 with
   the exactly specified operations, `libm` transcendentals, and NaN
-  canonicalization at the serialization boundary; every measurement behind it
-  is x86_64. Grounding: docs/adr/0006-float-strategy.md, the aarch64 gap.
-  Signpost: the DET-024 replay comparison passing on x86_64 and aarch64 in CI.
+  canonicalization at the serialization boundary; the DET-024 replay
+  comparison has passed once by hand on x86_64 and aarch64 (the recorded run
+  in docs/adr/0006-float-strategy.md), not yet in CI, and aarch64-darwin is
+  unmeasured. Grounding: the same record's aarch64 section. Signpost: the
+  comparison running on both architectures in CI.
 - **U6 Audio codecs.** Which codecs the 89 installed XACT wave banks use
   (docs/specs/formats.md inventories the banks only). Signpost: a codec
   inventory across `sounds/**/*.xwb` (issue 28).
@@ -115,8 +117,10 @@ Each item: statement · grounding (why unresolved) · signpost (what resolves it
   reads the `lua.scd` copy (docs/specs/formats.md, the mount-order clause),
   which the sim specification's citations match, but which copy the original
   engine reads is unestablished and the sim campaign's citations rest on it.
-  Signpost: a pinned engine citation of the mount precedence, or an
-  observation of the running original reading one of the four.
+  The `lua.scd` copies are the substantive ones (the unit script is 142,533
+  bytes against a 3,757-byte stub in `mohodata.scd`), consistent with the
+  mount order. Signpost: a pinned engine citation of the mount precedence, or
+  an observation of the running original reading one of the four.
 - **U8 Built-in versus plugin.** Which v0 behaviours (AI in particular) ship
   as first-party Wasm plugins rather than built-in Rust. Signpost: an ADR
   after the spec campaign.
@@ -144,8 +148,8 @@ Each item: statement · grounding (why unresolved) · signpost (what resolves it
 
 Core (planned; `crates/supercom`, `crates/scd`, `crates/testkit`,
 `crates/plugin` with `wit/`, `crates/detbench`, `crates/scm`, `crates/dds`,
-`crates/scmap`, `crates/bp`, `crates/data`, and `crates/bp-import` exist today
-— WIP):
+`crates/scmap`, `crates/bp`, `crates/data`, `crates/bp-import`, `crates/sim`,
+`crates/sim-ingest`, and `crates/replay-harness` exist today — WIP):
 
 - `crates/supercom` — binary: configuration, wiring, launches a skirmish.
 - `crates/scd` — `.scd` archive virtual filesystem and mount order.
@@ -154,8 +158,12 @@ Core (planned; `crates/supercom`, `crates/scd`, `crates/testkit`,
   `crates/bp-import` — the importer and its cache.
 - `crates/scm`, `crates/dds`, `crates/scmap`, `crates/xact` — mesh/animation,
   texture-header, map, and sound-bank loaders.
-- `crates/sim` — deterministic simulation (economy, units, orders, weapons,
-  projectiles, pathfinding, damage); `crates/ai` — built-in skirmish AI.
+- `crates/sim` — deterministic simulation (economy, build, movement and
+  planning, weapons, projectiles, damage, vision, victory; the replay format
+  and the digest chain); `crates/sim-ingest` — the installed catalog and a map
+  loaded into the sim's world; `crates/replay-harness` — the committed
+  skirmish log, the digest program, and the cross-architecture comparison,
+  never shipped; `crates/ai` — built-in skirmish AI.
 - `crates/plugin` — wasmtime host and plugin SDK; `wit/` — the engine API.
 - `crates/detbench` — determinism evidence: golden vectors for the float
   strategy and the on-demand benchmark; never shipped.
@@ -170,7 +178,7 @@ specification domain, `survey/` census scripts over the installed game).
 ## Spec Pointers
 
 - docs/specs/README.md — the reverse-engineering spec index.
-- docs/adr/ — decisions 0001–0005.
+- docs/adr/ — decisions 0001–0015.
 - Graphics pipeline study:
   https://www.adriancourreges.com/blog/2015/06/23/supreme-commander-graphics-study/
 - Engine Lua API surface (read for understanding only, see I1):
