@@ -121,6 +121,65 @@ fn sim_replay_start_refuses_a_wrong_header() {
     both.map_digest[0] ^= 1;
     both.players[0].1 = "nobody".to_owned();
     assert_eq!(refused(&world, &both), mismatch);
+
+    // The strings name the factions: four commanders, started from a header
+    // that lists the factions in the reverse of their declaration order.
+    let ids = ["uel0001", "ual0001", "url0001", "xsl0001"];
+    let mut four = World::empty();
+    four.units = ids
+        .iter()
+        .map(|id| {
+            let k = kind(id, &["MOBILE", "COMMAND"]);
+            (k.id.clone(), k)
+        })
+        .collect();
+    four.markers = (1..=4_u8)
+        .map(|n| Marker {
+            name: format!("ARMY_{n}"),
+            kind: MarkerKind::Army(n),
+            pos: pos(f64::from(n) * 4.5, 0.0, 4.5),
+        })
+        .collect();
+    four.map = flat_map(32);
+    four.map_digest = MAP_DIGEST;
+    four.catalog_digest = CATALOG_DIGEST;
+    let mut h = header();
+    h.players = [(1_u8, "Seraphim"), (2, "Cybran"), (3, "Aeon"), (4, "UEF")]
+        .into_iter()
+        .map(|(n, name)| (Army(n), name.to_owned()))
+        .collect();
+    let started = Arc::new(four)
+        .replay_start(&h)
+        .expect("four named factions start");
+    let spawned: Vec<_> = started
+        .entities
+        .values()
+        .map(|e| (e.army, e.blueprint.as_str()))
+        .collect();
+    assert_eq!(
+        spawned,
+        vec![
+            (Army(1), "xsl0001"),
+            (Army(2), "url0001"),
+            (Army(3), "ual0001"),
+            (Army(4), "uel0001"),
+        ],
+        "each string spawns its own faction's commander in its slot"
+    );
+
+    // The runner checks the header too: a catalog digest one byte off is
+    // refused before any tick.
+    let mut off = Replay {
+        header: header(),
+        commands: Vec::new(),
+        checkpoints: Vec::new(),
+    };
+    off.header.catalog_digest[17] ^= 1;
+    assert_eq!(
+        run_replay(skirmish_world(), &off, 1).err(),
+        Some(mismatch),
+        "run_replay refuses a header whose catalog digest differs"
+    );
 }
 
 /// DET-027: the runner applies each command at its stamped tick.
