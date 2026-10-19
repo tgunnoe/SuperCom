@@ -1,0 +1,20 @@
+[package]
+description  = "Evidence for the determinism specification: one committed skirmish log replayed on an installed map, the digest program, and the payload-NaN and recursion cases of the cross-architecture comparison; never shipped"
+edition      = { workspace = true }
+license      = { workspace = true }
+name         = "supercom-replay-harness"
+publish      = false
+repository   = { workspace = true }
+rust-version = "1.96"
+version      = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+supercom-plugin     = { path = "../plugin", version = "0.0.1" }
+supercom-sim        = { path = "../sim", version = "0.0.1" }
+supercom-sim-ingest = { path = "../sim-ingest", version = "0.0.1" }
+supercom-testkit    = { path = "../testkit", version = "0.0.1" }
+tempfile            = "3"
+wat                 = "1"
