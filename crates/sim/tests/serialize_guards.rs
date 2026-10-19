@@ -251,3 +251,21 @@ fn serialization_pins_every_field_in_the_documented_order() {
     serialize(&s, &mut got);
     assert_eq!(got, want);
 }
+
+/// A draw ends the stream with the empty projectile count, then the
+/// present flag and the draw tag.
+#[test]
+fn draw_outcome_encodes_as_present_then_the_draw_tag() {
+    let mut s = State::new(1);
+    s.outcome = Some(Outcome::Draw);
+    let mut got = Vec::new();
+    serialize(&s, &mut got);
+    let mut tail = Vec::new();
+    le32(&mut tail, 0);
+    tail.extend_from_slice(&[1, 1]);
+    assert!(
+        got.ends_with(&tail),
+        "the tail is {:?}",
+        &got[got.len().saturating_sub(tail.len())..]
+    );
+}
