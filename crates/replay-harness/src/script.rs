@@ -1,7 +1,7 @@
 //! The skirmish the committed log records (DET-029).
 //!
 //! The UEF commander walks to the mass marker beside its start, builds an
-//! extractor and two point defences there until the economy stalls, then
+//! extractor and three point defences there until the economy stalls, then
 //! walks to a flat run of land beside the Cybran start, where the Cybran
 //! commander has been waiting since the first tick. Both are told to attack
 //! once the UEF commander has arrived; the Cybran commander dies first, which
@@ -10,8 +10,8 @@
 
 use std::sync::Arc;
 use supercom_sim::{
-    Army, Command, EntityId, Faction, Layer, MarkerKind, Order, Pos, QueueMode,
-    REPLAY_FORMAT_VERSION, Replay, ReplayHeader, Tick, World,
+    Army, Command, EntityId, Layer, MarkerKind, Order, Pos, QueueMode, REPLAY_FORMAT_VERSION,
+    Replay, ReplayHeader, Tick, World,
 };
 
 use crate::HarnessError;
@@ -155,8 +155,7 @@ fn header(world: &World) -> ReplayHeader {
 
 /// The log without checkpoints: the header of `world` and the commands.
 pub fn replay(world: &Arc<World>) -> Result<Replay, HarnessError> {
-    let factions = [Faction::UEF, Faction::Cybran];
-    let probe = Arc::clone(world).skirmish(SEED, &factions)?;
+    let probe = Arc::clone(world).replay_start(&header(world))?;
     let commander = |army: Army| {
         probe
             .entities

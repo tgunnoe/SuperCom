@@ -61,7 +61,9 @@ have a ratifiable source (AGENTS.md R2, R7).
   from DET-024's earlier wording that the trap falls on the same tick on
   both; it is stated here for the head to ratify at the pull request. A
   plugin entering the tick loop would need a deterministic depth bound below
-  the smaller measured depth. This version runs no plugin inside the tick
+  the smallest measured depth over every host and build profile the tick loop
+  ships on: the depth also moves with the profile, 5448 unoptimized and 5454
+  optimized on x86_64 at this commit. This version runs no plugin inside the tick
   loop: the harness drives the host from outside the sim.
 - **Two processes must agree (DET-027).** The digest program of the harness
   crate prints one line per tick and the two cases; its test runs it twice as
