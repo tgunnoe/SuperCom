@@ -14,8 +14,9 @@ use std::process::Command as Process;
 use std::sync::Arc;
 
 use supercom_replay_harness::{
-    fixture_path, hex, load, nan_case, read_log, recursion_case, report, run, write_log,
+    fixture_path, load, nan_case, read_log, recursion_case, run, write_log,
 };
+use supercom_replay_harness::{hex, report};
 use supercom_sim::{Replay, Tick, World, first_divergence};
 
 fn world(fa: &Path) -> (tempfile::TempDir, Arc<World>) {
