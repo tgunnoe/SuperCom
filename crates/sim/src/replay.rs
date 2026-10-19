@@ -479,6 +479,10 @@ pub fn run_replay(
     replay: &Replay,
     ticks: u64,
 ) -> Result<(Vec<Digest>, State), Error> {
-    let _ = (world, replay, ticks);
-    Err(ReplayError::ContentMismatch.into())
+    let mut state = world.replay_start(&replay.header)?;
+    let mut digests = Vec::new();
+    for tick in 0..ticks {
+        digests.push(state.step(commands_at(replay, Tick(tick)))?);
+    }
+    Ok((digests, state))
 }

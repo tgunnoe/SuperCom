@@ -617,6 +617,18 @@ pub enum Faction {
 }
 
 impl Faction {
+    /// The faction a replay header's player string names (DET-030): exactly
+    /// `UEF`, `Aeon`, `Cybran`, or `Seraphim`.
+    fn from_name(name: &str) -> Option<Faction> {
+        match name {
+            "UEF" => Some(Faction::UEF),
+            "Aeon" => Some(Faction::Aeon),
+            "Cybran" => Some(Faction::Cybran),
+            "Seraphim" => Some(Faction::Seraphim),
+            _ => None,
+        }
+    }
+
     /// The lower-case blueprint id of the faction's commander.
     #[must_use]
     pub fn commander(self) -> &'static str {
@@ -777,8 +789,16 @@ impl World {
     /// whose slot is not its index plus one or whose string is not exactly
     /// one faction's name; then as [`World::skirmish`].
     pub fn replay_start(self: Arc<Self>, header: &ReplayHeader) -> Result<State, Error> {
-        let _ = header;
-        Err(ReplayError::ContentMismatch.into())
+        self.check_replay(header)?;
+        let mut factions = Vec::with_capacity(header.players.len());
+        for (index, (army, name)) in header.players.iter().enumerate() {
+            let in_slot = usize::from(army.0) == index + 1;
+            match Faction::from_name(name) {
+                Some(faction) if in_slot => factions.push(faction),
+                _ => return Err(ReplayError::BadPlayer { index }.into()),
+            }
+        }
+        self.skirmish(header.seed, &factions)
     }
 
     /// Start a skirmish: one army per faction, faction `i` in slot `n = i + 1`
