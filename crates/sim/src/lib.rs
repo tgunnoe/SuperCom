@@ -13,6 +13,7 @@ mod economy;
 mod error;
 mod hash;
 mod ids;
+mod intel;
 mod movement;
 mod planner;
 mod projectiles;
@@ -20,6 +21,7 @@ mod replay;
 mod rng;
 mod schedule;
 mod state;
+mod victory;
 mod weapons;
 mod world;
 
@@ -44,6 +46,7 @@ pub use state::{
     ArmySnapshot, ArmyState, Counters, Entity, EntitySnapshot, PHASES, Phase, ProjectileSnapshot,
     Snapshot, State, run,
 };
+pub use victory::Outcome;
 pub use world::{
     BuildRestriction, Faction, Layer, LayerSet, MapGrid, Marker, MarkerKind, MotionType, OrderCaps,
     OrderKind, ProjectileKind, UnitKind, WeaponKind, World, catalog_digest, map_digest,

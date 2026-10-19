@@ -4,6 +4,7 @@ use crate::combat::{Projectile, WeaponState};
 use crate::economy::Ledger;
 use crate::ids::{EntityId, Q, Tick};
 use crate::state::{ArmyState, Counters, Entity, State};
+use crate::victory::Outcome;
 
 /// A SHA-256 digest.
 pub type Digest = [u8; 32];
@@ -39,7 +40,7 @@ fn put_len(out: &mut Vec<u8>, len: usize) {
 ///
 /// Field order: tick (LE64), seed (LE64), the generator state (LE64), next
 /// entity id (LE32), commands applied (LE64), commands ignored (LE64), builds
-/// completed (LE64), stall ticks (LE64), moves completed (LE64), projectile impacts (LE64), deaths (LE64); the
+/// completed (LE64), stall ticks (LE64), moves completed (LE64), projectile impacts (LE64), deaths (LE64), defeats (LE64), victories (LE64); the
 /// armies, a LE32 count then each in
 /// ascending slot order as slot (u8), mass, energy, mass storage, energy
 /// storage (each the raw `i64` bits of its [`crate::Q`], LE64), defeated (u8,
@@ -61,8 +62,10 @@ fn put_len(out: &mut Vec<u8>, len: usize) {
 /// [`canonical_f64_bits`], LE64), target (u8 0, or u8 1 then the id LE32), aim
 /// (three [`canonical_f64_bits`]), damage (raw `i64` bits), damage radius
 /// ([`canonical_f64_bits`]), damage type (string), and lifetime (u8 0, or u8 1
-/// then [`canonical_f64_bits`]); a string is a LE32 byte length then its bytes.
-/// The chain head is not part of S. The impacts and marks the combat phases
+/// then [`canonical_f64_bits`]); after the projectiles, the outcome (u8 0, or
+/// u8 1 then a u8 tag: 0 and the winning army's slot u8, or 1 for a draw); a string is a LE32 byte length then its bytes.
+/// The chain head and the per-army visible sets (SIM-083) are not part of
+/// S. The impacts and marks the combat phases
 /// hand each other live in the step, not in the state, and never enter S.
 ///
 /// A step serializes after advancing the tick, so the bytes of the tick
@@ -84,6 +87,8 @@ pub fn serialize(state: &State, out: &mut Vec<u8>) {
         moves_completed,
         projectile_impacts,
         deaths,
+        defeats,
+        victories,
     } = &state.counters;
     for n in [
         commands_applied,
@@ -93,6 +98,8 @@ pub fn serialize(state: &State, out: &mut Vec<u8>) {
         moves_completed,
         projectile_impacts,
         deaths,
+        defeats,
+        victories,
     ] {
         out.extend_from_slice(&n.to_le_bytes());
     }
@@ -146,6 +153,11 @@ pub fn serialize(state: &State, out: &mut Vec<u8>) {
     put_len(out, state.projectiles.len());
     for projectile in state.projectiles.values() {
         put_projectile(out, projectile);
+    }
+    match state.outcome {
+        None => out.push(0),
+        Some(Outcome::Winner(army)) => out.extend_from_slice(&[1, 0, army.0]),
+        Some(Outcome::Draw) => out.extend_from_slice(&[1, 1]),
     }
 }
 

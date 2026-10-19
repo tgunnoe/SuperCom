@@ -10,6 +10,7 @@ use crate::hash::{Digest, GENESIS, chain, serialize};
 use crate::ids::{Army, EntityId, Pos, Q, Tick};
 use crate::rng::Rng;
 use crate::schedule::{Schedule, ScheduleError};
+use crate::victory::Outcome;
 use crate::world::{Layer, UnitKind, World};
 
 /// One phase of a tick (SIM-044).
@@ -118,6 +119,11 @@ pub struct Counters {
     pub projectile_impacts: u64,
     /// Entities removed by the death phase (SIM-080).
     pub deaths: u64,
+    /// Armies defeated by the victory phase (SIM-084).
+    pub defeats: u64,
+    /// Matches won: 1 once the victory phase names a winner, 0 for a draw
+    /// or an undecided match (SIM-085).
+    pub victories: u64,
 }
 
 /// The full simulation state.
@@ -134,10 +140,17 @@ pub struct State {
     pub projectiles: BTreeMap<ProjectileId, Projectile>,
     /// The id the next launched projectile takes; starts at 1.
     pub next_projectile_id: ProjectileId,
+    /// How the match ended; `None` until the victory phase decides, and
+    /// never changed afterwards (SIM-085).
+    pub outcome: Option<Outcome>,
     /// How many times the route planner has been called; a diagnostic
     /// outside S, derived like the head and never serialized or hashed
     /// (SIM-068).
     pub plans: u64,
+    /// The entities each army sees, rebuilt by every intel phase from the
+    /// state's positions (SIM-083); outside S, derived like `plans` and
+    /// never serialized or hashed (DET-009).
+    pub(crate) visible: BTreeMap<Army, BTreeSet<EntityId>>,
     /// The chain value after the last completed tick; not part of the
     /// serialized state, which the chain hashes after it (DET-010).
     head: Digest,
@@ -168,7 +181,9 @@ impl State {
             counters: Counters::default(),
             projectiles: BTreeMap::new(),
             next_projectile_id: ProjectileId(1),
+            outcome: None,
             plans: 0,
+            visible: BTreeMap::new(),
             head: GENESIS,
             world,
         }
@@ -178,6 +193,20 @@ impl State {
     #[must_use]
     pub fn world(&self) -> &Arc<World> {
         &self.world
+    }
+
+    /// The entities `army` sees as of the last intel phase, ascending by id;
+    /// empty for an unknown army (SIM-083).
+    #[must_use]
+    pub fn visible(&self, army: Army) -> &BTreeSet<EntityId> {
+        static NONE: BTreeSet<EntityId> = BTreeSet::new();
+        self.visible.get(&army).unwrap_or(&NONE)
+    }
+
+    /// Whether `army` sees entity `id` as of the last intel phase (SIM-083).
+    #[must_use]
+    pub fn is_visible(&self, army: Army, id: EntityId) -> bool {
+        self.visible(army).contains(&id)
     }
 
     /// Add an army (not defeated), replacing any army with the same slot.
@@ -351,8 +380,7 @@ impl State {
         Ok(())
     }
 
-    /// The commands, economy, build, movement, and combat phases run their
-    /// rules; the intel and victory phases are no-ops until theirs land. Each that visits entities does so in
+    /// Every phase runs its rule; each that visits entities does so in
     /// ascending id (SIM-036).
     fn run_phase(&mut self, phase: Phase, commands: &[Command], scratch: &mut Scratch) {
         match phase {
@@ -364,16 +392,18 @@ impl State {
             Phase::Projectiles => self.run_projectiles(scratch),
             Phase::Damage => self.run_damage(scratch),
             Phase::Death => self.run_death(scratch),
-            Phase::Intel | Phase::Victory => {}
+            Phase::Intel => self.run_intel(),
+            Phase::Victory => self.run_victory(),
         }
     }
 
     /// Apply a command only if every unit it names exists and belongs to its
-    /// army; otherwise ignore it whole, so a foreign command cannot clear or
-    /// extend a queue (SIM-045).
+    /// army and the army is not defeated; otherwise ignore it whole, so a
+    /// foreign command cannot clear or extend a queue (SIM-045, SIM-084).
     fn apply_commands(&mut self, commands: &[Command]) {
         for c in commands {
             let owned = !c.units.is_empty()
+                && !self.armies.get(&c.army).is_some_and(|a| a.defeated)
                 && c.units
                     .iter()
                     .all(|id| self.entities.get(id).is_some_and(|e| e.army == c.army));
@@ -442,6 +472,12 @@ impl State {
                     speed: e.speed,
                     layer: e.layer,
                     targets: e.weapons.iter().map(|w| w.target).collect(),
+                    seen_by: self
+                        .visible
+                        .iter()
+                        .filter(|(_, set)| set.contains(&e.id))
+                        .map(|(army, _)| *army)
+                        .collect(),
                 })
                 .collect(),
             projectiles: self
@@ -453,6 +489,7 @@ impl State {
                     pos: p.pos,
                 })
                 .collect(),
+            outcome: self.outcome,
         }
     }
 }
@@ -480,6 +517,8 @@ pub struct Snapshot {
     pub entities: Vec<EntitySnapshot>,
     /// The projectiles in flight, ascending by id.
     pub projectiles: Vec<ProjectileSnapshot>,
+    /// How the match ended, if it has (SIM-085).
+    pub outcome: Option<Outcome>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -496,6 +535,9 @@ pub struct EntitySnapshot {
     pub layer: Layer,
     /// The weapons' targets, in the kind's order.
     pub targets: Vec<Option<EntityId>>,
+    /// The armies that see the entity, ascending; empty when none does
+    /// (SIM-083).
+    pub seen_by: Vec<Army>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

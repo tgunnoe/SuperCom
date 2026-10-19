@@ -466,6 +466,8 @@ fn sim_serialization_is_canonical() {
     want.extend_from_slice(&0u64.to_le_bytes()); // moves completed
     want.extend_from_slice(&0u64.to_le_bytes()); // projectile impacts
     want.extend_from_slice(&0u64.to_le_bytes()); // deaths
+    want.extend_from_slice(&0u64.to_le_bytes()); // defeats
+    want.extend_from_slice(&0u64.to_le_bytes()); // victories
     want.extend_from_slice(&1u32.to_le_bytes()); // one army
     want.push(1);
     for v in [3i64, 4, 5, 6] {
@@ -500,6 +502,7 @@ fn sim_serialization_is_canonical() {
     want.push(1); // Stop
     want.extend_from_slice(&1u32.to_le_bytes()); // next projectile id
     want.extend_from_slice(&0u32.to_le_bytes()); // no projectiles
+    want.push(0); // no outcome
     assert_eq!(bytes_of(&s), want);
 }
 
