@@ -1796,6 +1796,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "supercom-replay-harness"
+version = "0.0.1"
+dependencies = [
+ "supercom-plugin",
+ "supercom-sim",
+ "supercom-sim-ingest",
+ "supercom-testkit",
+ "tempfile",
+ "wat",
+]
+
+[[package]]
 name = "supercom-scd"
 version = "0.0.1"
 dependencies = [

@@ -19,11 +19,14 @@
 use core::fmt;
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use crate::command::{Command, Order, QueueMode};
 use crate::error::Error;
 use crate::hash::{Digest, canonical_f64_bits};
 use crate::ids::{Army, EntityId, Pos, Tick};
+use crate::state::State;
+use crate::world::World;
 
 /// The format version this crate writes and reads.
 pub const REPLAY_FORMAT_VERSION: u32 = 1;
@@ -57,18 +60,39 @@ pub enum ReplayError {
     Truncated,
     BadMagic,
     UnsupportedVersion(u32),
-    RecordsOutOfOrder { index: usize },
-    DuplicateRecord { index: usize },
-    ArmyNotInSlot { index: usize },
-    CheckpointsNotAscending { index: usize },
+    RecordsOutOfOrder {
+        index: usize,
+    },
+    DuplicateRecord {
+        index: usize,
+    },
+    ArmyNotInSlot {
+        index: usize,
+    },
+    CheckpointsNotAscending {
+        index: usize,
+    },
     ContentMismatch,
+    /// Player `index` of a replay header is out of slot order or names no
+    /// faction (DET-030).
+    BadPlayer {
+        index: usize,
+    },
     BadOrderTag(u8),
     BadMode(u8),
     BadString,
-    LengthExceedsInput { at: usize },
-    TrailingBytes { at: usize },
-    NonCanonicalFloat { at: usize },
-    PluginsUnsupported { count: usize },
+    LengthExceedsInput {
+        at: usize,
+    },
+    TrailingBytes {
+        at: usize,
+    },
+    NonCanonicalFloat {
+        at: usize,
+    },
+    PluginsUnsupported {
+        count: usize,
+    },
 }
 
 impl fmt::Display for ReplayError {
@@ -92,6 +116,9 @@ impl fmt::Display for ReplayError {
             }
             Self::ContentMismatch => {
                 f.write_str("the installed data does not match the replay's content digests")
+            }
+            Self::BadPlayer { index } => {
+                write!(f, "player {index} is out of slot order or names no faction")
             }
             Self::BadOrderTag(t) => write!(f, "unknown order tag {t}"),
             Self::BadMode(m) => write!(f, "unknown queue mode {m}"),
@@ -437,4 +464,25 @@ pub fn commands_at(replay: &Replay, tick: Tick) -> &[Command] {
     let start = replay.commands.partition_point(|c| c.tick < tick);
     let end = replay.commands.partition_point(|c| c.tick <= tick);
     replay.commands.get(start..end).unwrap_or_default()
+}
+
+/// Replay `replay` for `ticks` ticks from the world's skirmish start
+/// (DET-027): one step per tick with the commands stamped for it, every
+/// digest collected in order. The checkpoints are not consulted; callers
+/// compare the digests with [`crate::first_divergence`].
+///
+/// # Errors
+///
+/// As [`World::replay_start`], then as [`State::step`].
+pub fn run_replay(
+    world: Arc<World>,
+    replay: &Replay,
+    ticks: u64,
+) -> Result<(Vec<Digest>, State), Error> {
+    let mut state = world.replay_start(&replay.header)?;
+    let mut digests = Vec::new();
+    for tick in 0..ticks {
+        digests.push(state.step(commands_at(replay, Tick(tick)))?);
+    }
+    Ok((digests, state))
 }

@@ -18,7 +18,7 @@ use crate::command::Order;
 use crate::error::{Error, IngestError};
 use crate::hash::{Digest, GENESIS, canonical_f64_bits};
 use crate::ids::{Army, Pos, Q};
-use crate::replay::{ReplayHeader, check_content};
+use crate::replay::{ReplayError, ReplayHeader, check_content};
 use crate::state::State;
 
 /// A movement or placement layer (SIM-030), in the order of `Ord`.
@@ -617,6 +617,18 @@ pub enum Faction {
 }
 
 impl Faction {
+    /// The faction a replay header's player string names (DET-030): exactly
+    /// `UEF`, `Aeon`, `Cybran`, or `Seraphim`.
+    fn from_name(name: &str) -> Option<Faction> {
+        match name {
+            "UEF" => Some(Faction::UEF),
+            "Aeon" => Some(Faction::Aeon),
+            "Cybran" => Some(Faction::Cybran),
+            "Seraphim" => Some(Faction::Seraphim),
+            _ => None,
+        }
+    }
+
     /// The lower-case blueprint id of the faction's commander.
     #[must_use]
     pub fn commander(self) -> &'static str {
@@ -766,6 +778,27 @@ impl World {
     /// As [`check_content`].
     pub fn check_replay(&self, header: &ReplayHeader) -> Result<(), Error> {
         check_content(header, &self.map_digest, &self.catalog_digest)
+    }
+
+    /// Start the skirmish a replay header names (DET-030): the content
+    /// check first, then each player read as a slot and a faction.
+    ///
+    /// # Errors
+    ///
+    /// As [`World::check_replay`]; [`ReplayError::BadPlayer`] for a player
+    /// whose slot is not its index plus one or whose string is not exactly
+    /// one faction's name; then as [`World::skirmish`].
+    pub fn replay_start(self: Arc<Self>, header: &ReplayHeader) -> Result<State, Error> {
+        self.check_replay(header)?;
+        let mut factions = Vec::with_capacity(header.players.len());
+        for (index, (army, name)) in header.players.iter().enumerate() {
+            let in_slot = usize::from(army.0) == index + 1;
+            match Faction::from_name(name) {
+                Some(faction) if in_slot => factions.push(faction),
+                _ => return Err(ReplayError::BadPlayer { index }.into()),
+            }
+        }
+        self.skirmish(header.seed, &factions)
     }
 
     /// Start a skirmish: one army per faction, faction `i` in slot `n = i + 1`
