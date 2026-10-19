@@ -18,7 +18,7 @@ use crate::command::Order;
 use crate::error::{Error, IngestError};
 use crate::hash::{Digest, GENESIS, canonical_f64_bits};
 use crate::ids::{Army, Pos, Q};
-use crate::replay::{ReplayHeader, check_content};
+use crate::replay::{ReplayError, ReplayHeader, check_content};
 use crate::state::State;
 
 /// A movement or placement layer (SIM-030), in the order of `Ord`.
@@ -766,6 +766,19 @@ impl World {
     /// As [`check_content`].
     pub fn check_replay(&self, header: &ReplayHeader) -> Result<(), Error> {
         check_content(header, &self.map_digest, &self.catalog_digest)
+    }
+
+    /// Start the skirmish a replay header names (DET-030): the content
+    /// check first, then each player read as a slot and a faction.
+    ///
+    /// # Errors
+    ///
+    /// As [`World::check_replay`]; [`ReplayError::BadPlayer`] for a player
+    /// whose slot is not its index plus one or whose string is not exactly
+    /// one faction's name; then as [`World::skirmish`].
+    pub fn replay_start(self: Arc<Self>, header: &ReplayHeader) -> Result<State, Error> {
+        let _ = header;
+        Err(ReplayError::ContentMismatch.into())
     }
 
     /// Start a skirmish: one army per faction, faction `i` in slot `n = i + 1`

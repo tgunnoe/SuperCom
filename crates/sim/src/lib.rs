@@ -38,7 +38,7 @@ pub use movement::{ARRIVAL_RADIUS, FOLLOW_RANGE, TICK_SECONDS, cell_centre, cell
 pub use planner::{plan_route, plan_route_expansions};
 pub use replay::{
     REPLAY_FORMAT_VERSION, Replay, ReplayError, ReplayHeader, check_content, commands_at,
-    read_replay, write_replay,
+    read_replay, run_replay, write_replay,
 };
 pub use rng::Rng;
 pub use schedule::{Schedule, ScheduleError, schedule};
