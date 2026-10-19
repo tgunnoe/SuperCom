@@ -14,7 +14,7 @@ use std::process::Command as Process;
 use std::sync::Arc;
 
 use supercom_replay_harness::{
-    fixture_path, load, nan_case, read_log, recursion_case, run, write_log,
+    fixture_path, hex, load, nan_case, read_log, recursion_case, report, run, write_log,
 };
 use supercom_sim::{Replay, Tick, World, first_divergence};
 
@@ -144,6 +144,66 @@ fn conformance_sim_replay_cases_are_repeatable() {
     assert!(a.line.contains("call-stack-exhausted"), "{}", a.line);
     assert!(a.depth > 0, "a measured depth");
     eprintln!("depth {}", a.depth);
+}
+
+/// DET-024: what the digest program compares is exactly the digest of every
+/// tick through the log's last checkpoint, the ten NaN-case lines, and the
+/// recursion line, in that order; the NaN bits it prints on stderr are the
+/// ones the case placed in the position.
+#[test]
+fn conformance_sim_replay_report_shape() {
+    let Some(fa) = supercom_testkit::require_game() else {
+        return;
+    };
+    let out = report(&fa).expect("the report");
+    let replay = read_log().expect("the committed log reads");
+    let last = replay.checkpoints.last().expect("a last checkpoint").0;
+    let ticks = usize::try_from(last.0).expect("a tick fits an index") + 1;
+    assert_eq!(out.stdout.len(), ticks + 10 + 1, "one line per output");
+    let (cache, w) = world(&fa);
+    let (digests, _) = run(Arc::clone(&w), &replay).expect("the run");
+    for (t, line) in out.stdout[..ticks].iter().enumerate() {
+        assert_eq!(*line, format!("tick {t} {}", hex(&digests[t])));
+        assert_eq!(line.len(), format!("tick {t} ").len() + 64);
+    }
+    for (i, line) in out.stdout[ticks..ticks + 10].iter().enumerate() {
+        assert!(
+            line.starts_with(&format!("case nan tick {} ", 50 + i)),
+            "{line}"
+        );
+    }
+    assert_eq!(
+        out.stdout[ticks + 10],
+        "case recursion unbounded trap call-stack-exhausted"
+    );
+
+    let nan = nan_case(&w).expect("the NaN case");
+    assert_eq!(nan.final_position_bits[0], nan.host_nan_bits);
+    assert_eq!(nan.final_position_bits[1], nan.plugin_nan_bits);
+    if cfg!(target_arch = "x86_64") {
+        assert_ne!(
+            nan.host_nan_bits, 0x7ff8_0000_0000_0000,
+            "x86_64's own 0/0 is the negative quiet NaN, so the case tests the canonicalizer"
+        );
+    }
+    drop(cache);
+}
+
+/// The generator reproduces the committed log byte for byte.
+#[test]
+fn conformance_sim_replay_generator_reproduces_log() {
+    let Some(fa) = supercom_testkit::require_game() else {
+        return;
+    };
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let path = dir.path().join("regenerated.replay");
+    write_log(&fa, &path).expect("the log is written");
+    let written = std::fs::read(&path).expect("the written log reads");
+    let committed = std::fs::read(fixture_path()).expect("the committed log reads");
+    assert!(
+        written == committed,
+        "the regenerated log differs from the fixture"
+    );
 }
 
 /// DET-027: the digest program, run as two processes, prints equal bytes.

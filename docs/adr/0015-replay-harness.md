@@ -100,5 +100,7 @@ have a ratifiable source (AGENTS.md R2, R7).
   check `conformance_sim_replay_two_processes_agree`.
 - DET-028: `conformance_sim_replay_diverges_at_altered_tick`.
 - DET-029: `conformance_sim_replay_covers_manifest`.
-- DET-024: `conformance_sim_replay_cases_are_repeatable` and
-  `tools/replay_compare.sh`.
+- DET-024: `conformance_sim_replay_cases_are_repeatable`,
+  `conformance_sim_replay_report_shape` (the compared lines and the NaN
+  placement), and `tools/replay_compare.sh`.
+- The generator: `conformance_sim_replay_generator_reproduces_log`.
