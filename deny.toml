@@ -32,3 +32,13 @@ wildcards         = "deny"
 [sources]
 unknown-git      = "deny"
 unknown-registry = "deny"
+
+# Two advisories are reached only through nickel-lang-core 0.19.0 (the newest
+# release) via nickel-lang-vector 0.2.0, which has no published version off
+# the affected lines; `cargo update` moves nothing. Each entry carries its
+# reason and revisit triggers; issue 24 tracks their removal.
+[advisories]
+ignore = [
+  { id = "RUSTSEC-2026-0292", reason = "imbl-sized-chunks 0.1.3 is transitive through nickel-lang-core 0.19.0 via nickel-lang-vector 0.2.0, with no fixed nickel-lang-vector published; the advisory's path needs a stored element's Drop to panic; since 561b574 the Nickel evaluator receives only the contract-declared fields of each installed blueprint, which narrows the exposure without making it unreachable. Revisit when nickel-lang-core moves past 0.19.0, and before any overlay or mod Nickel source is evaluated (issue 24)." },
+  { id = "RUSTSEC-2026-0247", reason = "bitmaps 3.2.1 is unmaintained with no safe upgrade and is transitive through the same nickel-lang-vector 0.2.0 chain. Revisit when nickel-lang-core moves past 0.19.0, and before any overlay or mod Nickel source is evaluated (issue 24)." },
+]
