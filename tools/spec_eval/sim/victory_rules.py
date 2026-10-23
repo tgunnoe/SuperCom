@@ -15,6 +15,7 @@ import simlib as S
 
 # (line, identifier or token the line names) of lua/victory.lua of lua.scd.
 VICTORY_LINES = (
+    (28, "ArmyIsCivilian"),
     (2, "CheckVictory"),
     (5, "demoralization"),
     (7, "COMMAND"),
@@ -33,7 +34,15 @@ VICTORY_LINES = (
     (40, "CallEndGame"),
     (89, "CallEndGame"),
 )
-BRAIN_LINES = ((782, "OnDefeat"), (783, "SetArmyOutOfGame"))
+BRAIN_LINES = (
+    (782, "OnDefeat"),
+    (783, "SetArmyOutOfGame"),
+    (787, "KillArmy"),
+    (788, "WaitSeconds"),
+    (789, "WALL"),
+    (791, "Kill"),
+    (794, "ForkThread"),
+)
 # lua/sim/Unit.lua of lua.scd: a shadowed member (AGENTS.md U9), lua.scd's copy.
 VISION_LINES = ((183, "VisionRadius"), (185, "SetIntelRadius"))
 # Blueprints with an Intel block and no VisionRadius.

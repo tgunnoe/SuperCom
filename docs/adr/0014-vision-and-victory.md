@@ -43,10 +43,16 @@ clause so the design clauses have a ratifiable source (AGENTS.md R2, R7).
   allied victory, draw offers, civilian armies, and an end-of-game timer are
   recorded debts.
 - **A defeated army's entities persist and its commands are ignored
-  (SIM-084).** The script's defeat only marks the army out of the game; it
-  removes no unit. The commands phase therefore ignores and counts, as a
-  foreign command, every command of a defeated army from the tick after the
-  defeat.
+  (SIM-084).** The script's defeat marks the army out of the game and, 20
+  seconds later, kills every unit of the army outside the WALL category
+  (lua/aibrain.lua of lua.scd, lines 787 to 794). This version carries the
+  out-of-game mark but not the delayed kill, a departure: in a two-army match
+  the outcome is decided at the defeat tick either way, and with three or
+  more armies a defeated army's units keep fighting and keep their mass
+  markers where the original removes them after 200 ticks. The commands phase
+  ignores and counts, as a foreign command, every command of a defeated army
+  from the tick after the defeat. The kill rule and the civilian exemption
+  are tracked as a debt.
 - **A world with no COMMAND kind defeats nobody (SIM-084).** The original
   would defeat every army with a zero count; this project's synthetic worlds
   for the economy, build, movement, and combat families contain no commander
@@ -89,6 +95,9 @@ clause so the design clauses have a ratifiable source (AGENTS.md R2, R7).
 - The engine's vision arithmetic and grid resolution.
 - Whether the engine's acquisition requires the target to be visible.
 - The other two victory options and the allied-victory and draw-offer paths.
+- The script's civilian exemption (lua/victory.lua of lua.scd, line 28):
+  this version has no civilian armies and SIM-084 carries no exemption, so a
+  civilian army would be defeated at its first victory phase.
 - The intel cost: armies x entities x seers per tick (`run_intel`),
   unmeasured. Signpost: a tick-time measurement at the unit cap. The table
   is derived and outside the serialized state, so a spatial index or
@@ -100,8 +109,11 @@ clause so the design clauses have a ratifiable source (AGENTS.md R2, R7).
   from S and would only enlarge every digest.
 - Defeating an army only when it has lost every unit: rejected as the
   eradication option, not the skirmish default.
-- Removing a defeated army's entities: rejected, since the script marks the
-  army out of the game and removes nothing.
+- Removing a defeated army's entities after the script's 20-second delay,
+  walls excepted: deferred, since it re-pins every whole-state golden and the
+  committed replay log and must re-run the cross-architecture comparison; it
+  is the original's rule and the persistence above is this version's
+  departure.
 - Re-pinning the synthetic multi-army test worlds with a commander kind:
   rejected, since it would put a commander into every later multi-army test
   for no rule the test checks; the precondition above stays instead.
