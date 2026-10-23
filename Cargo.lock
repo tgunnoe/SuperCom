@@ -1785,7 +1785,6 @@ version = "0.0.1"
 dependencies = [
  "fixed",
  "libm",
- "sha2 0.10.9",
 ]
 
 [[package]]
@@ -1793,6 +1792,18 @@ name = "supercom-plugin"
 version = "0.0.1"
 dependencies = [
  "wasmtime",
+ "wat",
+]
+
+[[package]]
+name = "supercom-replay-harness"
+version = "0.0.1"
+dependencies = [
+ "supercom-plugin",
+ "supercom-sim",
+ "supercom-sim-ingest",
+ "supercom-testkit",
+ "tempfile",
  "wat",
 ]
 
@@ -1819,6 +1830,31 @@ dependencies = [
  "supercom-dds",
  "supercom-scd",
  "supercom-testkit",
+]
+
+[[package]]
+name = "supercom-sim"
+version = "0.0.1"
+dependencies = [
+ "fixed",
+ "libm",
+ "sha2 0.10.9",
+ "supercom-data",
+]
+
+[[package]]
+name = "supercom-sim-ingest"
+version = "0.0.1"
+dependencies = [
+ "sha2 0.10.9",
+ "supercom-bp",
+ "supercom-bp-import",
+ "supercom-data",
+ "supercom-scd",
+ "supercom-scmap",
+ "supercom-sim",
+ "supercom-testkit",
+ "tempfile",
 ]
 
 [[package]]

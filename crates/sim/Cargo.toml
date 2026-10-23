@@ -1,0 +1,18 @@
+[package]
+description  = "The deterministic simulation core: command schedule, tick loop, state, canonical serialization, and the per-tick hash chain"
+edition      = { workspace = true }
+license      = { workspace = true }
+name         = "supercom-sim"
+publish      = false
+repository   = { workspace = true }
+rust-version = { workspace = true }
+version      = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+fixed         = "1"
+libm          = { default-features = false, version = "0.2" }
+sha2          = "0.10"
+supercom-data = { path = "../data", version = "0.0.1" }

@@ -245,3 +245,50 @@ fn conformance_scmap_strata_resolve() {
     assert_eq!(empty, 170, "unused slots");
     assert_eq!(named, 430, "named slots");
 }
+
+/// Pins the water census: 43 of the 60 maps carry water, with the surface
+/// elevation from 0 to 30, the deep elevation at or below it and the abyss
+/// at or below the deep; the other 17, named below by folder, carry none.
+#[test]
+fn conformance_scmap_water_census() {
+    let Some(fa) = supercom_testkit::require_game() else {
+        return;
+    };
+
+    let dry_folders = [
+        "scmp_003", "scmp_004", "scmp_006", "scmp_007", "scmp_012", "scmp_013", "scmp_015",
+        "scmp_017", "scmp_018", "scmp_022", "scmp_023", "scmp_026", "scmp_031", "scmp_036",
+        "scmp_038", "x1mp_001", "x1mp_002",
+    ];
+    let mut wet = 0_usize;
+    let mut dry = Vec::new();
+    let mut violations = Vec::new();
+    each_map(&fa, |path, map| {
+        let folder = path
+            .parent()
+            .and_then(Path::file_name)
+            .map(|name| name.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        match map.water {
+            Some(water) => {
+                wet += 1;
+                let ok = (0.0..=30.0).contains(&water.elevation)
+                    && water.deep <= water.elevation
+                    && water.abyss <= water.deep;
+                if !ok {
+                    violations.push(format!("{folder}: {water:?}"));
+                }
+            }
+            None => dry.push(folder),
+        }
+    });
+    dry.sort();
+    assert_eq!(wet, 43, "maps with water");
+    assert_eq!(dry, dry_folders, "maps without water");
+    assert!(
+        violations.is_empty(),
+        "{} water blocks out of range, first: {:?}",
+        violations.len(),
+        violations.iter().take(3).collect::<Vec<_>>()
+    );
+}

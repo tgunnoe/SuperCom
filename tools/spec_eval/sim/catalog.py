@@ -50,7 +50,7 @@ def derived_premises(_game) -> None:
         elif current:
             clauses[current][1] += " " + line
     derived = {i: v for i, v in clauses.items() if v[0] == "derived"}
-    S.expect("clauses", len(clauses), 39)
+    S.expect("clauses", len(clauses), 85)
     S.expect("derived_clauses_present", bool(derived), True)
     for ident, (_, text) in derived.items():
         cited = set(re.findall(r"SIM-\d{3}", text)) - {ident}

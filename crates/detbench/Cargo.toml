@@ -1,5 +1,5 @@
 [package]
-description  = "Evidence for the determinism specification: golden-vector tests and a throughput micro-benchmark"
+description  = "Evidence for the determinism specification: float and fixed-point golden-vector tests and a throughput micro-benchmark"
 edition      = { workspace = true }
 license      = { workspace = true }
 name         = "supercom-detbench"
@@ -18,4 +18,3 @@ fixed = "1"
 # depends on libm with default features), so the golden vectors must, and do,
 # hold with it on and off.
 libm = { default-features = false, version = "0.2" }
-sha2 = "0.10"

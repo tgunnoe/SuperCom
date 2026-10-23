@@ -1,0 +1,25 @@
+[package]
+description  = "Builds the simulation's static world from the installed catalog and a map folder; the one place the sim's inputs are read from files"
+edition      = { workspace = true }
+license      = { workspace = true }
+name         = "supercom-sim-ingest"
+publish      = false
+repository   = { workspace = true }
+rust-version = "1.89"
+version      = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+supercom-bp        = { path = "../bp", version = "0.0.1" }
+supercom-bp-import = { path = "../bp-import", version = "0.0.1" }
+supercom-data      = { path = "../data", version = "0.0.1" }
+supercom-scd       = { path = "../scd", version = "0.0.1" }
+supercom-scmap     = { path = "../scmap", version = "0.0.1" }
+supercom-sim       = { path = "../sim", version = "0.0.1" }
+
+[dev-dependencies]
+sha2             = "0.10"
+supercom-testkit = { path = "../testkit", version = "0.0.1" }
+tempfile         = "3"

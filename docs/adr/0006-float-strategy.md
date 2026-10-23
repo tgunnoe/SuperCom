@@ -37,7 +37,7 @@ Four hazards decide the question:
 
 ## Decision
 
-Ratified by the head on 2026-10-10 after the architect seat's review; nothing
+Ratified by the head on 2026-10-10 after the design review; nothing
 here changes ADR-0001 through ADR-0005.
 
 - The v0 sim computes in binary64 IEEE arithmetic with a restricted
@@ -78,9 +78,10 @@ repository root (`nix-shell --run '<command>'`).
 
 ### Golden vectors
 
-`cargo nextest run -p supercom-detbench` runs 12 tests, all passing: the
-golden vectors and properties behind DET-002, DET-003, DET-010, DET-011,
-DET-013, DET-018 through DET-022, plus two sanity tests (the SHA-256
+`cargo nextest run -p supercom-detbench` runs 6 tests, all passing: the
+golden vectors and properties behind DET-002, DET-003, and DET-018 through
+DET-022 (the schedule and tick-hash models behind DET-010, DET-011, and
+DET-013 were retired once the sim's own tests existed), plus two sanity tests (the SHA-256
 known-answer vector, and `libm` within four ulps of the platform's `sin` and
 `exp`). The constants were printed by
 `cargo run -p supercom-detbench --example golden`, which calls the code the
@@ -167,7 +168,9 @@ canonicalized plugin result hash differently unless the sim canonicalizes
 
 ## The aarch64 gap
 
-No aarch64 executor was available, so this ADR makes no claim about aarch64.
+When this ADR was first written no aarch64 executor was available, so it made
+no claim about aarch64. Two of the points below were later measured; see
+"The replay comparison" at the end of this section.
 `rust-toolchain.toml` lists `aarch64-unknown-linux-gnu` and
 `aarch64-apple-darwin` as targets, which covers `cargo check` only.
 
@@ -189,12 +192,14 @@ What is unknown, and why it matters:
 
 - NaN payload and sign: the sign of the default NaN is set by the architecture
   and is believed to differ between aarch64 and x86_64 (uncited, not measured
-  here), so the payload-NaN case of DET-024 must run.
+  here), so the payload-NaN case of DET-024 must run. Measured later: the
+  sign does differ on the host's native arithmetic (see below).
 - Recursion depth: wasmtime documents `max_wasm_stack` as "not super-precise"
   (DET-023), and the plugin host sets a byte budget. A guest that recurses to
   the budget may trap at different call depths, hence on different ticks, on the
   two architectures if the code generators size stack frames differently. That
-  is reasoning, not measurement.
+  was reasoning, not measurement; the depth was later measured on both hosts
+  (see below).
 - SHA-256 speed on aarch64 without the SHA2 extension.
 
 What would close the gap:
@@ -209,6 +214,43 @@ What would close the gap:
 3. Emulation (qemu-user) would run step 1 early but is not hardware evidence for
    NaN behaviour, and the ADR will say so if it is used.
 
+### The replay comparison
+
+On 2026-10-18 the project ran the cross-architecture replay comparison of
+DET-024 on commit `30c6874911bc07156c2ce4893e88409257e04b1b`, from a clean
+checkout on each of two machines, using the comparison script's remote mode and
+the harness described in `docs/adr/0015-replay-harness.md`. Both hosts use
+Rust 1.99.1, and the digest program ran in release mode on each. The hosts
+reported `x86_64` and `aarch64` from `uname -m`, and the result line was:
+
+```text
+local : x86_64 30c6874911bc07156c2ce4893e88409257e04b1b
+remote: aarch64 30c6874911bc07156c2ce4893e88409257e04b1b
+EQUAL 4611 lines
+```
+
+`EQUAL 4611 lines` means the per-tick digests of the committed skirmish log are
+identical on both machines for every one of the 4611 lines. The run also covers
+the payload-NaN case under the canonicalization of DET-022 and the
+unbounded-recursion trap kind. Each host printed, to stderr, the raw bit
+patterns of the payload-NaN case and the measured recursion depth:
+
+| Quantity                | x86_64                                                     | aarch64                                                    |
+| ----------------------- | ---------------------------------------------------------- | ---------------------------------------------------------- |
+| nan host bits           | `0xfff8000000000000`                                       | `0x7ff8000000000000`                                       |
+| nan plugin bits         | `0x7ff8000000000000`                                       | `0x7ff8000000000000`                                       |
+| nan final position bits | `0xfff8000000000000 0x7ff8000000000000 0x406e300000000000` | `0x7ff8000000000000 0x7ff8000000000000 0x406e300000000000` |
+| recursion depth         | 5454                                                       | 5452                                                       |
+
+The two hosts' raw NaN bits differ in sign, as the argument above expected, yet
+the digests are equal, which is what DET-022's canonicalization is for. The
+recursion depth differs by two calls between the hosts. It is measured on each
+host and recorded, not compared: DET-023 says the depth differs across
+architectures, and no plugin runs in the tick loop, so the depth cannot reach a
+digest. This closes the NaN and recursion points above for this one log and
+these two machines; it does not cover aarch64-darwin, other compiler versions,
+or logs other than the committed skirmish.
+
 ## Consequences
 
 ### Positive
@@ -220,7 +262,7 @@ What would close the gap:
 - The strategy matches a precedent already shipped: rapier's
   `enhanced-determinism` feature selects a pure-Rust `libm` (DET-017).
 - Plugin results and sim arithmetic hash alike.
-- The evidence is a crate of 12 tests and two examples that run in seconds.
+- The evidence is a crate of 6 tests and two examples that run in seconds.
 
 ### Negative
 
@@ -228,8 +270,9 @@ What would close the gap:
   operations. That is Rust's documented behaviour but not a checked invariant on
   aarch64 until step 1 above runs there.
 - Every transcendental call costs a function the sim crate must route
-  deliberately; a stray `.sin()` is a latent desync. A lint can forbid it, and
-  the lint does not exist yet.
+  deliberately; a stray `.sin()` is a latent desync. The sim crate's
+  `clippy.toml` forbids the standard library's transcendentals
+  (`disallowed-methods`), with a fixture proving the lint fires.
 - `libm`'s `sin` and `exp` are 6% and 34% slower than the platform's on this
   machine.
 - U1 is not closed. The ADR may need revising to fixed-point if the replay

@@ -10,9 +10,18 @@ on:
 jobs:
   gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
+      - name: Free runner disk
+        # The cold debug build of the workspace plus the Nix store exceeds the
+        # runner's root volume; drop the preinstalled toolchains the gate never uses.
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force > /dev/null 2>&1 || true
+          df -h / | tail -1
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -20,4 +29,13 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@v12
 
       - name: Run gate
+        # Line tables only: the same checks and tests, with several times less
+        # debug information in the 30-odd test binaries.
+        env:
+          CARGO_PROFILE_DEV_DEBUG: line-tables-only
+          CARGO_INCREMENTAL: "0"
         run: nix-shell --run 'just gate'
+
+      - name: Report disk use
+        if: always()
+        run: df -h / | tail -1
