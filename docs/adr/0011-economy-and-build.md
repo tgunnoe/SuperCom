@@ -1,6 +1,6 @@
 # ADR-0011: The economy and build rules
 
-**Status:** ACCEPTED (ratified by the head on 2026-10-19 at the pull request that landed it)
+**Status:** ACCEPTED (ratified by the head on 2026-10-18 at the pull request that landed it)
 
 **Date:** 2026-10-13
 
@@ -59,7 +59,8 @@ the choices by clause so the design clauses have a ratifiable source
   are a deviation, and MaxGroundVariation (15 blueprints, all 50) is not
   applied.
 - **No water placement (SIM-061).** A kind whose build layers lack land is
-  refused until the water layers exist.
+  refused in this version although the water layers exist (SIM-070);
+  placement on water is a recorded debt.
 - **Refusals count as ignored commands (SIM-061).** An order that fails a
   kind or site check is dropped when it reaches the head of the queue and
   counted in the commands-ignored counter; an order out of range waits.
@@ -80,8 +81,9 @@ the choices by clause so the design clauses have a ratifiable source
   (SIM-053) shows the engine scales a consuming producer, and the ten
   commanders carry Economy.NaturalProducer (SIM-055): a producer scaled by its
   own build request would fall to zero income at empty stores and freeze its
-  build, which an army that starts with nothing stored (SIM-051's recorded
-  departure) would meet on its first build. A mass fabricator still keeps
+  build, which an army starting from the installed save files' zeros would meet
+  on its first build (SIM-051 instead starts each army at its commander's
+  storage, the recorded departure). A mass fabricator still keeps
   requesting its maintenance energy under a shortage. The economy phase
   records each entity's maintenance fraction from that request's resources
   alone, and the granted fraction keeps its meaning for the build phase.

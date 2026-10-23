@@ -1,6 +1,6 @@
 # ADR-0014: Vision and victory: the intel and victory phases
 
-**Status:** ACCEPTED (ratified by the head on 2026-10-19 at the pull request that landed it)
+**Status:** ACCEPTED (ratified by the head on 2026-10-22, explicitly, after the review that landed it)
 
 **Date:** 2026-10-18
 

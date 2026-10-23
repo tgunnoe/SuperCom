@@ -1,6 +1,6 @@
 # ADR-0013: Combat: weapons, projectiles, damage, and death
 
-**Status:** ACCEPTED (ratified by the head on 2026-10-19 at the pull request that landed it)
+**Status:** ACCEPTED (ratified by the head on 2026-10-18 at the pull request that landed it)
 
 **Date:** 2026-10-14
 

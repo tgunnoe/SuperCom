@@ -37,7 +37,7 @@ Four hazards decide the question:
 
 ## Decision
 
-Ratified by the head on 2026-10-10 after the architect seat's review; nothing
+Ratified by the head on 2026-10-10 after the design review; nothing
 here changes ADR-0001 through ADR-0005.
 
 - The v0 sim computes in binary64 IEEE arithmetic with a restricted
@@ -78,9 +78,10 @@ repository root (`nix-shell --run '<command>'`).
 
 ### Golden vectors
 
-`cargo nextest run -p supercom-detbench` runs 12 tests, all passing: the
-golden vectors and properties behind DET-002, DET-003, DET-010, DET-011,
-DET-013, DET-018 through DET-022, plus two sanity tests (the SHA-256
+`cargo nextest run -p supercom-detbench` runs 6 tests, all passing: the
+golden vectors and properties behind DET-002, DET-003, and DET-018 through
+DET-022 (the schedule and tick-hash models behind DET-010, DET-011, and
+DET-013 were retired once the sim's own tests existed), plus two sanity tests (the SHA-256
 known-answer vector, and `libm` within four ulps of the platform's `sin` and
 `exp`). The constants were printed by
 `cargo run -p supercom-detbench --example golden`, which calls the code the
@@ -261,7 +262,7 @@ or logs other than the committed skirmish.
 - The strategy matches a precedent already shipped: rapier's
   `enhanced-determinism` feature selects a pure-Rust `libm` (DET-017).
 - Plugin results and sim arithmetic hash alike.
-- The evidence is a crate of 12 tests and two examples that run in seconds.
+- The evidence is a crate of 6 tests and two examples that run in seconds.
 
 ### Negative
 
@@ -269,8 +270,9 @@ or logs other than the committed skirmish.
   operations. That is Rust's documented behaviour but not a checked invariant on
   aarch64 until step 1 above runs there.
 - Every transcendental call costs a function the sim crate must route
-  deliberately; a stray `.sin()` is a latent desync. A lint can forbid it, and
-  the lint does not exist yet.
+  deliberately; a stray `.sin()` is a latent desync. The sim crate's
+  `clippy.toml` forbids the standard library's transcendentals
+  (`disallowed-methods`), with a fixture proving the lint fires.
 - `libm`'s `sin` and `exp` are 6% and 34% slower than the platform's on this
   machine.
 - U1 is not closed. The ADR may need revising to fixed-point if the replay

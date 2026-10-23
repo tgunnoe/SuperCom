@@ -42,7 +42,10 @@ Commander Forged Alliance/` (`gamedata/*.scd` store-only zips: 568 unit
 - **R4 Canonical data in Nickel.** Blueprints, balance, and mod overlays are
   Nickel records validated by contracts; an importer converts installed `.bp`
   files into that model and caches it in the user cache directory. Grounding:
-  docs/adr/0002-data-model-nickel.md. Signpost: full-set evaluation exceeds
+  docs/adr/0002-data-model-nickel.md. The installed armour table is read
+  from its Lua by the ingest crate in this version, outside the Nickel model
+  (the head's ruling of 2026-10-18); its overlay reopens when mod overlays
+  land. Signpost: full-set evaluation exceeds
   the load budget even with the cache, or imports fail through
   `nickel-lang-core`.
 - **R5 Rendering on wgpu.** Terrain splatting, decals, LiSPSM shadows, water
@@ -104,23 +107,30 @@ Each item: statement · grounding (why unresolved) · signpost (what resolves it
   comparison has passed once by hand on x86_64 and aarch64 (the recorded run
   in docs/adr/0006-float-strategy.md), not yet in CI, and aarch64-darwin is
   unmeasured. Grounding: the same record's aarch64 section. Signpost: the
-  comparison running on both architectures in CI.
+  comparison running in CI on both architectures and once on aarch64-darwin
+  (the head's ruling of 2026-10-22).
 - **U6 Audio codecs.** Which codecs the 89 installed XACT wave banks use
   (docs/specs/formats.md inventories the banks only). Signpost: a codec
   inventory across `sounds/**/*.xwb` (issue 28).
 - **U7 macOS.** wgpu (Metal) and wasmtime are known good on aarch64-darwin;
   the rest of the dependency set is untested (issue 27). Signpost: a green
   macOS build.
-- **U9 Shadowed Lua paths.** Four `lua/` files (`lua/sim/unit.lua`,
-  `lua/sim/projectile.lua`, `lua/sim/prop.lua`, `lua/simutils.lua`) exist in
+- **U9 Shadowed Lua paths.** Four `lua/` files (`lua/sim/Unit.lua`,
+  `lua/sim/Projectile.lua`, `lua/sim/Prop.lua`, `lua/SimUtils.lua`) exist in
   both `lua.scd` and `mohodata.scd` with different contents; the archive layer
   reads the `lua.scd` copy (docs/specs/formats.md, the mount-order clause),
   which the sim specification's citations match, but which copy the original
   engine reads is unestablished and the sim campaign's citations rest on it.
-  The `lua.scd` copies are the substantive ones (the unit script is 142,533
-  bytes against a 3,757-byte stub in `mohodata.scd`), consistent with the
-  mount order. Signpost: a pinned engine citation of the mount precedence, or
+  The `lua.scd` copies are the larger ones (the unit script is 142,533 bytes
+  against 3,757 in `mohodata.scd`, the projectile script 17,416 against 614,
+  and `SimUtils.lua` 7,301 against 4,396, which is no stub), consistent with
+  the mount order. Signpost: a pinned engine citation of the mount precedence, or
   an observation of the running original reading one of the four.
+- **U10 Observing the original.** No tick-level observation of the running
+  original exists, so the specification lint's `observed` evidence class has
+  no record yet and every behavioural rule rests on readable Lua or on a
+  recorded choice. Signpost: the first record under
+  `tools/spec_eval/sim/observed/`.
 - **U8 Built-in versus plugin.** Which v0 behaviours (AI in particular) ship
   as first-party Wasm plugins rather than built-in Rust. Signpost: an ADR
   after the spec campaign.

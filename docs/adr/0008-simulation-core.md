@@ -1,6 +1,6 @@
 # ADR-0008: The simulation core's design choices
 
-**Status:** ACCEPTED (ratified by the head on 2026-10-19 at the pull request that landed it)
+**Status:** ACCEPTED (ratified by the head on 2026-10-18 at the pull request that landed it)
 
 **Date:** 2026-10-12
 
@@ -61,8 +61,9 @@ ratifiable source.
   all-or-nothing: a command whose unit list is empty, or names a unit that
   does not exist or belongs to another army, is ignored whole and counted,
   and the counters are part of the state. A unit that died between issue
-  and application is the missing-unit case; whether it voids the command or
-  is skipped is the combat node's to settle. Checked by
+  and application is the missing-unit case: the command naming it is voided
+  whole and counted (SIM-045), and what that costs a group order is a debt
+  for the HUD and AI families. Checked by
   `sim_command_application_and_ownership`,
   `sim_mixed_ownership_command_is_ignored_whole`, and the two
   `step_refuses_` tests.

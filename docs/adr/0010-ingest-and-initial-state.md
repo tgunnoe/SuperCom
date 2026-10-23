@@ -1,6 +1,6 @@
 # ADR-0010: Ingesting the static world and the initial state
 
-**Status:** ACCEPTED (ratified by the head on 2026-10-19 at the pull request that landed it)
+**Status:** ACCEPTED (ratified by the head on 2026-10-18 at the pull request that landed it)
 
 **Date:** 2026-10-12
 
@@ -54,8 +54,8 @@ have a ratifiable source (AGENTS.md R2, R7).
   without a pathing structure. The slope condition is necessary, never
   sufficient: later clauses may add conditions (water depth, blocking
   entities), and none may remove it. Air is passable everywhere. The water,
-  seabed, and sub grids are absent until a clause derives them from water
-  elevation, which the map loader does not yet decode.
+  seabed, and sub grids are derived from the decoded water surface by
+  SIM-070 (ADR-0012), and the surface enters the map digest.
 - **Starting resources (SIM-051).** A skirmish starts each army with stored
   mass and energy equal to its commander's storage values, 650 and 4000 for
   the four installed commanders. This is a design choice. The original's
@@ -110,8 +110,7 @@ have a ratifiable source (AGENTS.md R2, R7).
 
 ## Open
 
-The water, seabed, and sub passability grids wait on water-elevation
-decoding in the map loader. The original's starting stores, which the readable
+The original's starting stores, which the readable
 zeros do not settle, and its slope function remain unobserved.
 
 ## Alternatives Considered

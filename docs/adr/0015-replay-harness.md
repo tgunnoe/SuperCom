@@ -1,6 +1,6 @@
 # ADR-0015: The replay harness: one log, two runs, two machines
 
-**Status:** ACCEPTED (ratified by the head on 2026-10-19 at the pull request that landed it)
+**Status:** ACCEPTED (ratified by the head on 2026-10-22, explicitly, after the review that landed it)
 
 **Date:** 2026-10-18
 
