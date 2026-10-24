@@ -287,3 +287,72 @@ fn sim_back_off_into_an_impassable_cell_holds() {
     a.run(20);
     assert!(a.shots() >= 1, "it fires once the target leaves the floor");
 }
+
+/// SIM-086: a diagonal back-off, from planar distance 1.9 along x = z
+/// toward the origin, whose goal cell's centre lies close enough to the
+/// floor that the mover reaches the arrival radius of its goal while its
+/// distance is still below the floor. Green at the tip. It pins that only
+/// arrival clears the goal and route and zeroes the speed (so the arrival
+/// branch is reached below the floor, which keeps the test from passing
+/// vacuously), that the Attack survives that arrival, that an entity
+/// standing in its enterable goal cell walks to the cell's centre rather
+/// than holding, and that it ends 5 to 30 away, at rest, having fired.
+/// Red against a mutant that pops the Attack at arrival and against one
+/// that holds inside the goal cell.
+#[test]
+fn sim_diagonal_back_off_arrives_below_the_floor_and_keeps_the_attack() {
+    let w = world(
+        vec![
+            attacker_kind(vec![band_weapon()], true),
+            kind("dummy", &["STRUCTURE"]),
+        ],
+        Vec::new(),
+        flat_map(64),
+    );
+    let mut s = state(&w, Q::ZERO, Q::ZERO);
+    s.add_army(Army(2), Q::ZERO, Q::ZERO, Q::ZERO, Q::ZERO);
+    let t = 24.2427_f64;
+    let off = 1.9 / core::f64::consts::SQRT_2;
+    let attacker = s.spawn(Army(1), "attacker", pos(t - off, 0.0, t - off), q(100));
+    let target = s.spawn(Army(2), "dummy", pos(t, 0.0, t), q(100));
+    step(
+        &mut s,
+        &[order_cmd(
+            0,
+            0,
+            attacker,
+            Order::Attack { target },
+            QueueMode::Replace,
+        )],
+    );
+    let gap = |s: &State| {
+        let a = s.entities.get(&attacker).expect("attacker");
+        let t = s.entities.get(&target).expect("target");
+        distance_xz(&a.pos, &t.pos)
+    };
+    let mut arrived_below_floor = false;
+    for _ in 0..60 {
+        let before = gap(&s);
+        step(&mut s, &[]);
+        let a = s.entities.get(&attacker).expect("attacker");
+        if before < 4.95 && a.goal.is_none() && a.route.is_empty() && a.speed == 0.0 {
+            arrived_below_floor = true;
+        }
+    }
+    assert!(
+        arrived_below_floor,
+        "the arrival branch was reached below the floor"
+    );
+    let a = s.entities.get(&attacker).expect("attacker");
+    assert!(
+        matches!(a.orders.front(), Some(Order::Attack { target: x }) if *x == target),
+        "the Attack is still at the head"
+    );
+    let d = gap(&s);
+    assert!(
+        (5.0..=30.0).contains(&d),
+        "backed off to a firing distance: {d}"
+    );
+    assert_eq!(a.speed.to_bits(), 0.0_f64.to_bits(), "at rest");
+    assert!(s.counters.projectile_impacts >= 1, "it fired");
+}
