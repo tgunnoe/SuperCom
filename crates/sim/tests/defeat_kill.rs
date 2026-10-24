@@ -258,6 +258,8 @@ fn sim_civilian_army_is_never_defeated_or_counted() {
         assert_eq!(Some(s.counters.commands_ignored), ignored);
     }
     assert_eq!(ignored, Some(0));
+    let civilian = &s.snapshot().armies[2];
+    assert!(civilian.civilian && civilian.defeated_at.is_none());
     assert_eq!(s.counters.commands_applied, 1, "its Move applies");
     assert!(!s.entities[&grunt3].orders.is_empty());
     assert_eq!(standing(&s), (None, 0, 0));
@@ -288,4 +290,37 @@ fn sim_civilian_army_is_never_defeated_or_counted() {
     assert_eq!(standing(&s), (None, 0, 0));
     assert!(s.armies.values().all(|a| a.defeated.is_none()));
     assert!(s.entities.contains_key(&grunt2));
+}
+
+/// SIM-087: the kill counts from the tick that defeated the army, not from
+/// tick 0, and the snapshot reports that tick and the army's civilian mark.
+#[test]
+fn sim_kill_counts_from_the_stored_defeat_tick() {
+    let (mut s, cmds) = scenario(2);
+    let grunt = s.spawn(Army(2), "grunt", pos(40.0, 0.0, 40.0), q(100));
+    let turret = s.spawn(Army(2), "turret", pos(45.0, 0.0, 45.0), q(100));
+    let wall = s.spawn(Army(2), "wall", pos(50.0, 0.0, 50.0), q(100));
+    run_to(&mut s, 37);
+    kill(&mut s, cmds[1]);
+    step(&mut s, &[]);
+    let t = 37;
+    assert_eq!(s.armies[&Army(2)].defeated, Some(Tick(t)));
+    let entry = s
+        .snapshot()
+        .armies
+        .into_iter()
+        .find(|a| a.id == Army(2))
+        .expect("army 2 in the snapshot");
+    assert!(entry.defeated && !entry.civilian);
+    assert_eq!(entry.defeated_at, Some(Tick(t)));
+
+    run_to(&mut s, t + DELAY);
+    for id in [grunt, turret, wall] {
+        assert!(s.entities.contains_key(&id), "{id:?} exists at T + 199");
+    }
+    let kills = s.counters.kills;
+    step(&mut s, &[]);
+    assert!(!s.entities.contains_key(&grunt) && !s.entities.contains_key(&turret));
+    assert!(s.entities.contains_key(&wall), "the wall is spared");
+    assert_eq!(s.counters.kills, kills + 2);
 }
