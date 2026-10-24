@@ -18,14 +18,14 @@ pub enum Outcome {
 }
 
 impl State {
-    /// Defeat every army without a complete commander, then name the outcome
-    /// (SIM-084, SIM-085), while the match is undecided and at least two
-    /// armies exist. Once an outcome exists the phase does nothing, so
+    /// Defeat every non-civilian army without a complete commander, then name
+    /// the outcome (SIM-084, SIM-085), while the match is undecided and at
+    /// least two non-civilian armies exist. Once an outcome exists the phase does nothing, so
     /// the outcome and the counters never change again.
     pub(crate) fn run_victory(&mut self) {
         // A lone army is not defeated either: a match needs an opponent
         // before it can be lost (SIM-085).
-        if self.outcome.is_some() || self.armies.len() < 2 {
+        if self.outcome.is_some() || self.armies.values().filter(|a| !a.civilian).count() < 2 {
             return;
         }
         // No commander can exist in a world without a COMMAND kind, so the
@@ -53,12 +53,15 @@ impl State {
             .collect();
         let tick = self.tick;
         for (slot, army) in &mut self.armies {
-            if army.defeated.is_none() && !commanded.contains(slot) {
+            if !army.civilian && army.defeated.is_none() && !commanded.contains(slot) {
                 army.defeated = Some(tick);
                 self.counters.defeats = self.counters.defeats.saturating_add(1);
             }
         }
-        let mut standing = self.armies.values().filter(|a| a.defeated.is_none());
+        let mut standing = self
+            .armies
+            .values()
+            .filter(|a| !a.civilian && a.defeated.is_none());
         self.outcome = match (standing.next(), standing.next()) {
             (None, _) => Some(Outcome::Draw),
             (Some(only), None) => {
