@@ -1,6 +1,6 @@
 # ADR-0013: Combat: weapons, projectiles, damage, and death
 
-**Status:** ACCEPTED (ratified by the head on 2026-10-18, in one ruling over the six simulation records)
+**Status:** ACCEPTED (ratified by the head on 2026-10-18, in one ruling over the six simulation records, amended on 2026-10-24 for the minimum-radius back-off, the amendment awaiting the head's ratification at its pull request)
 
 **Date:** 2026-10-14
 
@@ -64,7 +64,27 @@ source (AGENTS.md R2, R7).
   (SIM-027 is a debt), no death weapon, no overkill ratio (the cited path
   computes one), and no army defeat, which belongs to the victory family.
 - **The Attack order is the guard rule to the longest weapon range, then fire
-  (SIM-081).**
+  (SIM-081), and a mobile attacker inside its minimum radius backs off
+  first (SIM-086).** The band floor is the smallest positive minimum radius
+  among the active weapons that carry a maximum radius, defined only when
+  every such weapon has a positive minimum and that minimum is below the
+  longest range. Below the floor the attacker's goal is the point on the line
+  from the target through it at the floor plus a margin of one world unit
+  (in +x when the two coincide); the margin only places the goal's cell
+  beyond the floor. The decision is made afresh every tick, so the attacker
+  stops at the first tick its distance reaches the floor, where the approach
+  holds it, not at the goal, and the Attack is never popped. When the goal
+  has no cell on the map, is impassable, or has no route, the attacker holds
+  with speed 0 and keeps the Attack; no neighbouring cell is substituted,
+  since one can lie inside the floor. An attacker the movement phase skips
+  never moves and fires once the target leaves its minimum, and a kind with
+  an active weapon that has no minimum has no floor and never backs off.
+  The installed data has 40 kinds whose every ranged weapon carries a
+  minimum: artillery and structure artillery (minimum 5 to 175), missile and
+  torpedo kinds (3 to 20), the commanders and sub-commanders (1 or 2 against
+  a maximum of 22 to 30), and one Aeon experimental (2 against 40). The
+  original engine's handling is unreadable, so the rule is this project's
+  design.
 - **Two per-tick values live outside the state.** The impacts the projectiles
   phase hands to the damage phase and the set of unfinished entities marked for
   death are created by the step and passed to the phases; nothing survives a
@@ -105,6 +125,9 @@ source (AGENTS.md R2, R7).
 
 ## Alternatives Considered
 
+- Recording the limitation and naming the classes instead of moving: rejected,
+  since the commanders at minimum radius 1 and the artillery the built-in AI
+  will order to attack would stand inside their minimum and never fire.
 - Modelling salvos and reloads from the installed cycle: rejected, since the
   composition with the engine's clock is unreadable.
 - Applying the multiplier as the unit loses health on read: rejected, because

@@ -30,6 +30,24 @@ pub(crate) fn attack_range(kind: &UnitKind) -> Option<f64> {
         .max_by(f64::total_cmp)
 }
 
+/// The distance below which a mobile attacker cannot fire and backs off
+/// (SIM-086): the smallest positive minimum radius among the active weapons
+/// that carry a maximum radius. `None` when one of those weapons has no
+/// positive minimum (it can fire from anywhere), when none has a maximum
+/// radius, or when the smallest minimum is not below [`attack_range`] (such
+/// a kind could never fire, so no floor is honoured).
+pub(crate) fn band_floor(kind: &UnitKind) -> Option<f64> {
+    let mut floor: Option<f64> = None;
+    for w in kind.weapons.iter().filter(|w| is_active(w)) {
+        if w.max_radius.is_none() {
+            continue;
+        }
+        let min = w.min_radius.filter(|m| *m > 0.0)?;
+        floor = Some(floor.map_or(min, |f| f.min(min)));
+    }
+    floor.filter(|f| attack_range(kind).is_some_and(|range| *f < range))
+}
+
 /// Whether `weapon` fired from `from` may take `target`: inside the radii by
 /// planar distance and on a layer the weapon allows (SIM-075).
 fn can_hit(weapon: &WeaponKind, from: &Pos, target: &Entity) -> bool {
