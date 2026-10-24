@@ -119,6 +119,7 @@ fn conformance_sim_replay_covers_manifest() {
     assert!(c.stall_ticks >= 1, "stall ticks: {}", c.stall_ticks);
     assert_eq!(c.defeats, 1, "defeats");
     assert_eq!(c.victories, 1, "victories");
+    assert_eq!(c.kills, 1, "kills");
 }
 
 /// DET-024: the two cases are repeatable in one process, the NaN case

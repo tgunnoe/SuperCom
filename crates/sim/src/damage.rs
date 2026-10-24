@@ -7,9 +7,16 @@ use crate::build::{kind_of, total_work};
 use crate::combat::{Impact, Scratch, distance_xz};
 use crate::command::Order;
 use crate::economy::per_tick;
-use crate::ids::{EntityId, Q};
+use crate::ids::{Army, EntityId, Q};
 use crate::state::State;
 use crate::world::World;
+
+/// Ticks from an army's defeat to the kill of its entities: the script's 20
+/// seconds at 10 ticks a second (SIM-087).
+const KILL_DELAY: u64 = 200;
+
+/// The category the kill spares (SIM-087).
+const WALL: &str = "WALL";
 
 impl State {
     /// The damage phase: each impact in projectile-id order hurts the entity
@@ -112,12 +119,51 @@ impl State {
             .map(|(id, _)| *id)
             .collect();
         for id in dead {
-            self.entities.remove(&id);
+            self.remove_entity(id);
             self.counters.deaths = self.counters.deaths.saturating_add(1);
-            for e in self.entities.values_mut() {
-                if matches!(e.orders.front(), Some(Order::Attack { target }) if *target == id) {
-                    e.orders.pop_front();
-                }
+        }
+        self.kill_defeated_armies();
+    }
+
+    /// Remove an entity and pop every Attack at the head of another queue
+    /// that names it; the death phase's one remover (SIM-080, SIM-087).
+    fn remove_entity(&mut self, id: EntityId) {
+        self.entities.remove(&id);
+        for e in self.entities.values_mut() {
+            if matches!(e.orders.front(), Some(Order::Attack { target }) if *target == id) {
+                e.orders.pop_front();
+            }
+        }
+    }
+
+    /// The kill rule (SIM-087): in the tick exactly [`KILL_DELAY`] ticks
+    /// after an army's defeat, every entity of the army outside the WALL
+    /// category, finished or not, is removed, armies in slot order and
+    /// entities in ascending id, counted in `kills`.
+    fn kill_defeated_armies(&mut self) {
+        let due: Vec<Army> = self
+            .armies
+            .values()
+            .filter(|a| {
+                a.defeated
+                    .is_some_and(|t| t.0.checked_add(KILL_DELAY) == Some(self.tick.0))
+            })
+            .map(|a| a.id)
+            .collect();
+        for army in due {
+            let doomed: Vec<EntityId> = self
+                .entities
+                .values()
+                .filter(|e| {
+                    e.army == army
+                        && !kind_of(self.world(), &e.blueprint)
+                            .is_some_and(|k| k.categories.contains(WALL))
+                })
+                .map(|e| e.id)
+                .collect();
+            for id in doomed {
+                self.remove_entity(id);
+                self.counters.kills = self.counters.kills.saturating_add(1);
             }
         }
     }

@@ -51,6 +51,7 @@ fn serialization_pins_every_field_in_the_documented_order() {
     s.counters.deaths = 0x37;
     s.counters.defeats = 0x38;
     s.counters.victories = 0x39;
+    s.counters.kills = 0x3A;
     s.outcome = Some(Outcome::Winner(Army(7)));
     s.next_projectile_id = ProjectileId(0x4455);
     s.projectiles.insert(
@@ -86,7 +87,8 @@ fn serialization_pins_every_field_in_the_documented_order() {
             energy: q(0x42),
             mass_storage: q(0x43),
             energy_storage: q(0x44),
-            defeated: true,
+            defeated: Some(Tick(7)),
+            civilian: true,
             ledger: Ledger {
                 income_mass: q(0x51),
                 income_energy: q(0x52),
@@ -143,21 +145,24 @@ fn serialization_pins_every_field_in_the_documented_order() {
 
     let mut want = Vec::new();
     // Tick, seed, generator state (a fresh generator holds the seed), next
-    // entity id, then the nine counters.
+    // entity id, then the ten counters.
     le64(&mut want, 0x11);
     le64(&mut want, 0x0102_0304_0506_0708);
     le64(&mut want, 0x0102_0304_0506_0708);
     le32(&mut want, 0x2233);
-    for c in [0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39] {
+    for c in [0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A] {
         le64(&mut want, c);
     }
-    // One army: slot, four amounts, defeated, the ledger's eight values in
-    // income, requested, granted order for mass then energy, then fractions.
+    // One army: slot, four amounts, defeated (present, then its tick),
+    // civilian, the ledger's eight values in income, requested, granted
+    // order for mass then energy, then fractions.
     le32(&mut want, 1);
     want.push(7);
     for bits in [0x41, 0x42, 0x43, 0x44] {
         raw(&mut want, bits);
     }
+    want.push(1);
+    le64(&mut want, 7);
     want.push(1);
     for bits in [0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58] {
         raw(&mut want, bits);

@@ -155,10 +155,10 @@ fn sim_army_defeated_without_a_commander() {
     step(&mut s, &[]);
     assert_eq!(s.counters.deaths, 1);
     assert!(
-        s.armies[&Army(2)].defeated,
+        s.armies[&Army(2)].defeated.is_some(),
         "defeated in the tick of the kill"
     );
-    assert!(!s.armies[&Army(1)].defeated);
+    assert!(s.armies[&Army(1)].defeated.is_none());
     assert_eq!(s.counters.defeats, 1);
     assert_eq!(s.outcome, Some(Outcome::Winner(Army(1))));
     assert_eq!(s.counters.victories, 1);
@@ -177,7 +177,7 @@ fn sim_army_defeated_without_a_commander() {
     let grunt = s.spawn(Army(3), "grunt", pos(100.0, 0.0, 100.0), q(100));
     kill(&mut s, ids[2]);
     step(&mut s, &[]);
-    assert!(s.armies[&Army(3)].defeated);
+    assert!(s.armies[&Army(3)].defeated.is_some());
     assert_eq!(s.counters.defeats, 1);
     assert_eq!(s.outcome, None, "two armies still stand");
     assert!(s.entities.contains_key(&grunt), "a defeat removes nothing");
@@ -203,7 +203,7 @@ fn sim_army_defeated_without_a_commander() {
     let grunt = s.spawn(Army(3), "grunt", pos(100.0, 0.0, 100.0), q(100));
     kill(&mut s, ids[2]);
     step(&mut s, &[move_cmd(0, 0, 3, grunt)]);
-    assert!(s.armies[&Army(3)].defeated);
+    assert!(s.armies[&Army(3)].defeated.is_some());
     assert_eq!(s.entities[&grunt].orders.len(), 1, "the order is held");
 
     // A commander that is still a site does not keep its army in the match.
@@ -216,7 +216,7 @@ fn sim_army_defeated_without_a_commander() {
     s.spawn_under_construction(Army(2), "csite", pos(9.0, 0.0, 9.0))
         .expect("a buildable kind");
     step(&mut s, &[]);
-    assert!(s.armies[&Army(2)].defeated);
+    assert!(s.armies[&Army(2)].defeated.is_some());
     assert_eq!(s.outcome, Some(Outcome::Winner(Army(1))));
 
     // A world with no COMMAND kind has no commanders to lose, so it defeats
@@ -227,7 +227,7 @@ fn sim_army_defeated_without_a_commander() {
     s.add_army(Army(2), Q::ZERO, Q::ZERO, Q::ZERO, Q::ZERO);
     s.spawn(Army(1), "grunt", pos(5.0, 0.0, 5.0), q(100));
     step(&mut s, &[]);
-    assert!(s.armies.values().all(|a| !a.defeated));
+    assert!(s.armies.values().all(|a| a.defeated.is_none()));
     assert_eq!(
         (s.outcome, s.counters.defeats, s.counters.victories),
         (None, 0, 0)
@@ -257,7 +257,7 @@ fn sim_last_army_standing_wins_once() {
         frozen
     );
     assert!(
-        !s.armies[&Army(3)].defeated,
+        s.armies[&Army(3)].defeated.is_none(),
         "the decided match stops judging"
     );
 
@@ -293,7 +293,7 @@ fn sim_last_army_standing_wins_once() {
     let mut lone = state(&w, Q::ZERO, Q::ZERO);
     step(&mut lone, &[]);
     assert!(
-        !lone.armies[&Army(1)].defeated,
+        lone.armies[&Army(1)].defeated.is_none(),
         "a lone army is not defeated"
     );
     assert_eq!((lone.outcome, lone.counters.defeats), (None, 0));

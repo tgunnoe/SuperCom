@@ -28,8 +28,8 @@ use support::{flat_map, kind, order_cmd, pos, q, step};
 /// The final digest of the scenario, computed once on `x86_64` from a run of
 /// the scenario below and written here.
 const GOLDEN: Digest = [
-    79, 249, 193, 132, 157, 214, 59, 13, 19, 185, 250, 104, 87, 0, 95, 200, 160, 162, 160, 209,
-    222, 250, 111, 16, 219, 254, 110, 3, 135, 252, 119, 231,
+    101, 174, 100, 65, 153, 69, 57, 248, 209, 98, 51, 174, 227, 116, 77, 104, 97, 51, 48, 48, 120,
+    237, 208, 197, 207, 96, 214, 250, 140, 221, 231, 221,
 ];
 
 const TICKS: u64 = 150;
