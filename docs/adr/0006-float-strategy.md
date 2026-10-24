@@ -1,7 +1,8 @@
 # ADR-0006: Float strategy for the deterministic sim
 
 **Status:** ACCEPTED (ratified by the head on 2026-10-10; U1 stays open as
-verification until the DET-024 replay comparison passes on aarch64)
+verification until the DET-024 replay comparison runs in CI on both
+architectures and once on aarch64-darwin)
 
 **Date:** 2026-10-09
 
@@ -66,7 +67,8 @@ here changes ADR-0001 through ADR-0005.
 - Algebraic float operators, which license reassociation, and any build flag
   that relaxes IEEE semantics are forbidden in the sim crate.
 - U1 stays open as verification: it closes when the replay comparison of
-  DET-024 passes on x86_64 and aarch64. This ADR was ACCEPTED on 2026-10-10, and a
+  DET-024 runs in CI on x86_64 and aarch64 and once on aarch64-darwin; it has
+  passed once by hand on two Linux hosts. This ADR was ACCEPTED on 2026-10-10, and a
   DET-024 failure reopens it; the claims below are x86_64 claims.
 
 ## Evidence
@@ -209,8 +211,9 @@ What would close the gap:
    values; a failing test names the operation that differs. This closes the
    `libm`, fixed-point, hash, and basic-operation claims for that machine.
 2. Build the replay comparison of DET-024 when the sim crate exists: one command
-   log, replayed in CI on x86_64 and aarch64, with equal digests at every tick,
-   covering the payload-NaN and recursion-depth cases. This closes U1.
+   log, replayed in CI on both x86_64 and aarch64, and once on aarch64-darwin, with
+   equal digests at every tick, covering the payload-NaN and recursion-depth
+   cases. This closes U1.
 3. Emulation (qemu-user) would run step 1 early but is not hardware evidence for
    NaN behaviour, and the ADR will say so if it is used.
 
@@ -275,7 +278,9 @@ or logs other than the committed skirmish.
   (`disallowed-methods`), with a fixture proving the lint fires.
 - `libm`'s `sin` and `exp` are 6% and 34% slower than the platform's on this
   machine.
-- U1 is not closed. The ADR may need revising to fixed-point if the replay
+- U1 is not closed. The replay comparison has passed once, by hand, on two
+  Linux hosts; U1 closes when it runs in CI on both architectures and once on
+  aarch64-darwin. The ADR may need revising to fixed-point if the replay
   comparison fails.
 
 ---
