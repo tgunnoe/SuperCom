@@ -324,3 +324,25 @@ fn sim_kill_counts_from_the_stored_defeat_tick() {
     assert!(s.entities.contains_key(&wall), "the wall is spared");
     assert_eq!(s.counters.kills, kills + 2);
 }
+
+/// SIM-087 with SIM-080: the kill runs after the death phase's own removals,
+/// so an entity of the defeated army that dies by damage in the kill's tick
+/// is a death, not a kill, and is counted once.
+#[test]
+fn sim_kill_follows_the_death_phase_removals() {
+    let (mut s, cmds) = scenario(2);
+    let dying = s.spawn(Army(2), "grunt", pos(40.0, 0.0, 40.0), q(100));
+    let doomed = s.spawn(Army(2), "grunt", pos(50.0, 0.0, 50.0), q(100));
+    kill(&mut s, cmds[1]);
+    let t = s.tick.0;
+    step(&mut s, &[]);
+    assert_eq!(s.armies[&Army(2)].defeated, Some(Tick(t)));
+    run_to(&mut s, t + DELAY);
+    let (deaths, kills) = (s.counters.deaths, s.counters.kills);
+    assert_eq!(kills, 0);
+    kill(&mut s, dying);
+    step(&mut s, &[]);
+    assert!(!s.entities.contains_key(&dying) && !s.entities.contains_key(&doomed));
+    assert_eq!(s.counters.deaths, deaths + 1, "the dying unit is a death");
+    assert_eq!(s.counters.kills, 1, "the kill takes only the other unit");
+}
