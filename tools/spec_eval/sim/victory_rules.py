@@ -15,7 +15,6 @@ import simlib as S
 
 # (line, identifier or token the line names) of lua/victory.lua of lua.scd.
 VICTORY_LINES = (
-    (28, "ArmyIsCivilian"),
     (2, "CheckVictory"),
     (5, "demoralization"),
     (7, "COMMAND"),

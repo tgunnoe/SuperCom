@@ -1,6 +1,6 @@
 # ADR-0010: Ingesting the static world and the initial state
 
-**Status:** ACCEPTED (ratified by the head on 2026-10-18 at the pull request that landed it)
+**Status:** ACCEPTED (ratified by the head on 2026-10-18, in one ruling over the six simulation records)
 
 **Date:** 2026-10-12
 
