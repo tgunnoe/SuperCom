@@ -301,7 +301,7 @@ fn sim_back_off_into_an_impassable_cell_holds() {
 /// that holds inside the goal cell.
 #[test]
 fn sim_diagonal_back_off_arrives_below_the_floor_and_keeps_the_attack() {
-    let w = world(
+    let arena_world = world(
         vec![
             attacker_kind(vec![band_weapon()], true),
             kind("dummy", &["STRUCTURE"]),
@@ -309,14 +309,19 @@ fn sim_diagonal_back_off_arrives_below_the_floor_and_keeps_the_attack() {
         Vec::new(),
         flat_map(64),
     );
-    let mut s = state(&w, Q::ZERO, Q::ZERO);
-    s.add_army(Army(2), Q::ZERO, Q::ZERO, Q::ZERO, Q::ZERO);
-    let t = 24.2427_f64;
+    let mut sim = state(&arena_world, Q::ZERO, Q::ZERO);
+    sim.add_army(Army(2), Q::ZERO, Q::ZERO, Q::ZERO, Q::ZERO);
+    let corner = 24.2427_f64;
     let off = 1.9 / core::f64::consts::SQRT_2;
-    let attacker = s.spawn(Army(1), "attacker", pos(t - off, 0.0, t - off), q(100));
-    let target = s.spawn(Army(2), "dummy", pos(t, 0.0, t), q(100));
+    let attacker = sim.spawn(
+        Army(1),
+        "attacker",
+        pos(corner - off, 0.0, corner - off),
+        q(100),
+    );
+    let target = sim.spawn(Army(2), "dummy", pos(corner, 0.0, corner), q(100));
     step(
-        &mut s,
+        &mut sim,
         &[order_cmd(
             0,
             0,
@@ -325,17 +330,17 @@ fn sim_diagonal_back_off_arrives_below_the_floor_and_keeps_the_attack() {
             QueueMode::Replace,
         )],
     );
-    let gap = |s: &State| {
-        let a = s.entities.get(&attacker).expect("attacker");
-        let t = s.entities.get(&target).expect("target");
-        distance_xz(&a.pos, &t.pos)
+    let gap = |sim: &State| {
+        let att = sim.entities.get(&attacker).expect("attacker");
+        let goal_mark = sim.entities.get(&target).expect("target");
+        distance_xz(&att.pos, &goal_mark.pos)
     };
     let mut arrived_below_floor = false;
     for _ in 0..60 {
-        let before = gap(&s);
-        step(&mut s, &[]);
-        let a = s.entities.get(&attacker).expect("attacker");
-        if before < 4.95 && a.goal.is_none() && a.route.is_empty() && a.speed == 0.0 {
+        let before = gap(&sim);
+        step(&mut sim, &[]);
+        let att = sim.entities.get(&attacker).expect("attacker");
+        if before < 4.95 && att.goal.is_none() && att.route.is_empty() && att.speed == 0.0 {
             arrived_below_floor = true;
         }
     }
@@ -343,16 +348,16 @@ fn sim_diagonal_back_off_arrives_below_the_floor_and_keeps_the_attack() {
         arrived_below_floor,
         "the arrival branch was reached below the floor"
     );
-    let a = s.entities.get(&attacker).expect("attacker");
+    let att = sim.entities.get(&attacker).expect("attacker");
     assert!(
-        matches!(a.orders.front(), Some(Order::Attack { target: x }) if *x == target),
+        matches!(att.orders.front(), Some(Order::Attack { target: head }) if *head == target),
         "the Attack is still at the head"
     );
-    let d = gap(&s);
+    let dist = gap(&sim);
     assert!(
-        (5.0..=30.0).contains(&d),
-        "backed off to a firing distance: {d}"
+        (5.0..=30.0).contains(&dist),
+        "backed off to att firing distance: {dist}"
     );
-    assert_eq!(a.speed.to_bits(), 0.0_f64.to_bits(), "at rest");
-    assert!(s.counters.projectile_impacts >= 1, "it fired");
+    assert_eq!(att.speed.to_bits(), 0.0_f64.to_bits(), "at rest");
+    assert!(sim.counters.projectile_impacts >= 1, "it fired");
 }
