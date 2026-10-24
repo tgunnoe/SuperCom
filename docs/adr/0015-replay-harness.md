@@ -33,12 +33,18 @@ have a ratifiable source (AGENTS.md R2, R7).
   completed, builds have completed, projectiles have hit, entities have died,
   the economy has stalled, one army has been defeated, one victory has
   been declared, and the kill rule has removed an entity (SIM-087). For the
-  kill the Cybran commander builds a structure before the attack, from its
-  start marker and out of reach of every UEF weapon, so that the structure
-  still stands at the defeat and is removed by the kill 200 ticks later, not
-  by combat. The Cybran army is defeated at tick 4235 and the log
-  runs 4,600 ticks, past the kill at tick 4435 to a checkpoint. A log that exercised only some rules would leave the rest to
-  the cross-host comparison unobserved.
+  kill the Cybran commander walks to a stand at least 40 units clear of the
+  UEF commander's stand and of the line from its start marker to that stand,
+  50 units north of the Cybran start (the start marker lies 4.1 units from
+  the UEF stand and cannot serve), builds a generator 3 units beyond it, and
+  walks back to the flat run before the attack. The site is finished at tick
+  550, the commander is at the flat run by tick 990, and the nearest UEF
+  entity is 47.68 units from the site on every tick, beyond the 22 units any
+  UEF weapon reaches, so the structure still stands at the defeat and is
+  removed by the kill 200 ticks later, not by combat. The Cybran army is
+  defeated at tick 4235 and the log runs 4,600 ticks, past the kill at tick
+  4435 to a checkpoint. A log that exercised only some rules would leave the
+  rest to the cross-host comparison unobserved.
 - **A player's header string names its faction (DET-030).** Playback needs
   nothing beyond the file and the installed data (DET-007), so the string the
   format already carries is read as `UEF`, `Aeon`, `Cybran`, or `Seraphim`,
