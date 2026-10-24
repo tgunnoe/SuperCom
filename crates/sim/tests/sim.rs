@@ -432,7 +432,7 @@ fn sim_serialization_is_canonical() {
     // A minimal state against the documented field order: tick, seed, the
     // generator state, the next id, the two counters, the armies (count, then
     // id, mass, energy, mass storage, energy storage as raw i64 bits, the
-    // defeated flag), then the entities (count, then id, army, blueprint
+    // defeat, then the civilian flag), then the entities (count, then id, army, blueprint
     // length and bytes, x, y, z, health, max health, built, complete,
     // fraction, work, heading, speed, layer, the route, the goal, the
     // maintenance fraction, the weapons, counted, and the queued orders,
@@ -467,13 +467,13 @@ fn sim_serialization_is_canonical() {
     want.extend_from_slice(&0u64.to_le_bytes()); // projectile impacts
     want.extend_from_slice(&0u64.to_le_bytes()); // deaths
     want.extend_from_slice(&0u64.to_le_bytes()); // defeats
-    want.extend_from_slice(&0u64.to_le_bytes()); // victories
+    want.extend_from_slice(&[0; 16]); // victories, kills
     want.extend_from_slice(&1u32.to_le_bytes()); // one army
     want.push(1);
     for v in [3i64, 4, 5, 6] {
         want.extend_from_slice(&(v << 32).to_le_bytes());
     }
-    want.push(0); // not defeated
+    want.extend_from_slice(&[0, 0]); // not defeated, not civilian
     for v in [0i64, 0, 0, 0, 0, 0, 1, 1] {
         want.extend_from_slice(&(v << 32).to_le_bytes()); // the ledger
     }
@@ -607,7 +607,7 @@ fn sim_snapshot_lists_entities_in_id_order() {
         .armies
         .get_mut(&Army(1))
         .expect("army 1 exists")
-        .defeated = true;
+        .defeated = Some(Tick(7));
     for (army, x) in [(2, 5.0), (0, 1.0), (1, 3.0)] {
         state.spawn(Army(army), "u", pos(x, 0.25, -x), Q::from_num(30));
     }
@@ -631,6 +631,6 @@ fn sim_snapshot_lists_entities_in_id_order() {
         assert_eq!(snap_a.id, a.id);
         assert_eq!(snap_a.mass, a.mass);
         assert_eq!(snap_a.energy, a.energy);
-        assert_eq!(snap_a.defeated, a.defeated);
+        assert_eq!(snap_a.defeated, a.defeated.is_some());
     }
 }

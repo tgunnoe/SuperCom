@@ -51,13 +51,14 @@ impl State {
             })
             .map(|e| e.army)
             .collect();
+        let tick = self.tick;
         for (slot, army) in &mut self.armies {
-            if !army.defeated && !commanded.contains(slot) {
-                army.defeated = true;
+            if army.defeated.is_none() && !commanded.contains(slot) {
+                army.defeated = Some(tick);
                 self.counters.defeats = self.counters.defeats.saturating_add(1);
             }
         }
-        let mut standing = self.armies.values().filter(|a| !a.defeated);
+        let mut standing = self.armies.values().filter(|a| a.defeated.is_none());
         self.outcome = match (standing.next(), standing.next()) {
             (None, _) => Some(Outcome::Draw),
             (Some(only), None) => {

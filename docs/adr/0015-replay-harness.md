@@ -31,8 +31,12 @@ have a ratifiable source (AGENTS.md R2, R7).
   divergence to exactly that tick, which shows the comparison can fail.
 - **The log covers the manifest (DET-029).** At its end moves have
   completed, builds have completed, projectiles have hit, entities have died,
-  the economy has stalled, one army has been defeated, and one victory has
-  been declared. A log that exercised only some rules would leave the rest to
+  the economy has stalled, one army has been defeated, one victory has
+  been declared, and the kill rule has removed an entity (SIM-087). For the
+  kill the Cybran commander builds a structure before the attack, from its
+  start marker and out of reach of every UEF weapon, so that the structure
+  still stands at the defeat and is removed by the kill 200 ticks later, not
+  by combat. A log that exercised only some rules would leave the rest to
   the cross-host comparison unobserved.
 - **A player's header string names its faction (DET-030).** Playback needs
   nothing beyond the file and the installed data (DET-007), so the string the

@@ -196,8 +196,8 @@ fn conformance_vision_and_victory_on_scmp_012() {
         first.death_tick, first.first_impact_tick,
         "the first impact kills"
     );
-    assert!(s.armies[&Army(2)].defeated);
-    assert!(!s.armies[&Army(1)].defeated);
+    assert!(s.armies[&Army(2)].defeated.is_some());
+    assert!(s.armies[&Army(1)].defeated.is_none());
     assert_eq!(s.outcome, Some(Outcome::Winner(Army(1))));
     assert_eq!((s.counters.victories, s.counters.defeats), (1, 1));
     let second = run(&world);

@@ -3,11 +3,15 @@
 //! loudly, without the install and fails if `SUPERCOM_REQUIRE_GAME=1`.
 //! Counts and numbers only; no game content is kept in the tree.
 //!
-//! Test construction: both skirmish commanders are removed after the
-//! skirmish starts, so that only the tank's weapon is in play (the UEF
-//! commander's guns reach the generator from its start marker); and the tank
-//! and the generator stand on a flat run of one row of the heightmap, eight
-//! cells apart, so that a straight shot never meets a corner above its path.
+//! Test construction: both skirmish commanders are kept, because an army
+//! without its commander is defeated and a defeat is not under test, but each
+//! is written to a land cell at least 30 world units from every cell of the
+//! flat run and from the other, which is beyond the 22 units either
+//! commander's weapons reach and beyond the tank's 18, so that only the
+//! tank's weapon is in play (the UEF commander's guns would otherwise reach
+//! the generator from its start marker); and the tank and the generator stand
+//! on a flat run of one row of the heightmap, eight cells apart, so that a
+//! straight shot never meets a corner above its path.
 
 #![allow(
     clippy::expect_used,
@@ -60,6 +64,48 @@ fn flat_run(world: &World) -> (u32, u32, Q) {
     (x, z, h)
 }
 
+/// Distance at which a commander's cell lies from the flat run and from the
+/// other commander: beyond every weapon of the run (22 for a commander, 18
+/// for the tank) with a margin.
+const CLEAR: f64 = 30.0;
+
+/// Two passable land cells, the first and the second in row then column
+/// order that lie at least [`CLEAR`] from every cell centre of the flat run
+/// `x..=x+8` of row `z` and, for the second, from the first.
+fn commander_cells(world: &World, at: (u32, u32, Q)) -> [(u32, u32); 2] {
+    let (x, z, _) = at;
+    let map = &world.map;
+    let far_from_run = |cx: u32, cz: u32| {
+        (0..9).all(|d| {
+            let (dx, dz) = (
+                f64::from(cx) - f64::from(x + d),
+                f64::from(cz) - f64::from(z),
+            );
+            dx.hypot(dz) >= CLEAR
+        })
+    };
+    let mut found: Vec<(u32, u32)> = Vec::new();
+    'cells: for cz in 0..map.height {
+        for cx in 0..map.width {
+            if !map.passable(Layer::Land, cx, cz) || !far_from_run(cx, cz) {
+                continue;
+            }
+            if found.iter().any(|&(fx, fz)| {
+                (f64::from(cx) - f64::from(fx)).hypot(f64::from(cz) - f64::from(fz)) < CLEAR
+            }) {
+                continue;
+            }
+            found.push((cx, cz));
+            if found.len() == 2 {
+                break 'cells;
+            }
+        }
+    }
+    let first = *found.first().expect("a land cell clear of the flat run");
+    let second = *found.get(1).expect("a second land cell clear of both");
+    [first, second]
+}
+
 struct Outcome {
     digests: Vec<Digest>,
     shots: Vec<u64>,
@@ -75,7 +121,19 @@ fn run(world: &Arc<World>, at: (u32, u32, Q)) -> Outcome {
     let mut state = Arc::clone(world)
         .skirmish(1, &[Faction::UEF, Faction::Cybran])
         .expect("a UEF and Cybran skirmish");
-    state.entities.clear();
+    let [uef_cell, cybran_cell] = commander_cells(world, at);
+    for (army, (cx, cz)) in [(Army(1), uef_cell), (Army(2), cybran_cell)] {
+        let commander = state
+            .entities
+            .values_mut()
+            .find(|e| e.army == army)
+            .expect("the skirmish commander");
+        commander.pos = Pos {
+            x: f64::from(cx) + 0.5,
+            y: world.map.height_at(cx, cz).to_num::<f64>(),
+            z: f64::from(cz) + 0.5,
+        };
+    }
     let y = h.to_num::<f64>();
     let tank = state.spawn(
         Army(1),
@@ -213,6 +271,7 @@ fn conformance_combat_tank_kills_structure_on_scmp_012() {
     );
     assert!(state.counters.projectile_impacts >= k);
     assert_eq!(state.counters.deaths, 1);
+    assert_eq!(state.counters.defeats, 0, "both commanders stand");
     assert!(
         state
             .entities

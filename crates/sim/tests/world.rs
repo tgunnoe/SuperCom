@@ -464,7 +464,7 @@ fn sim_skirmish_places_commanders_and_starts_full() {
         assert_eq!(army.energy, Q::from_num(energy), "army {slot} energy");
         assert_eq!(army.mass_storage, Q::from_num(mass), "army {slot} storage");
         assert_eq!(army.energy_storage, Q::from_num(energy));
-        assert!(!army.defeated);
+        assert!(army.defeated.is_none());
         let own: Vec<_> = state
             .entities
             .values()
