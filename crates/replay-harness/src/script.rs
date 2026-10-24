@@ -168,7 +168,8 @@ fn segment_distance(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
 /// cell centre nearest the Cybran start marker (Manhattan, then row, then
 /// column) that lies at least [`CLEAR`] from the UEF commander's stand and
 /// from the line between its start marker and that stand, then the site
-/// [`STRUCTURE_OFFSET`] units from it away from the UEF stand.
+/// [`STRUCTURE_OFFSET`] units from it away from the UEF stand; the first such
+/// cell whose site is on the map, on land, and at the stand's height.
 fn build_stand(
     world: &World,
     uef_start: Pos,
@@ -176,7 +177,7 @@ fn build_stand(
     cybran_start: Pos,
 ) -> Result<(Pos, Pos), HarnessError> {
     let map = &world.map;
-    let mut best: Option<((u64, u32, u32), f64)> = None;
+    let mut candidates: Vec<(u64, u32, u32)> = Vec::new();
     for z in 0..map.height {
         for x in 0..map.width {
             if !map.passable(Layer::Land, x, z) {
@@ -186,30 +187,48 @@ fn build_stand(
             let far = (p.0 - uef_stand.x).hypot(p.1 - uef_stand.z) >= CLEAR
                 && segment_distance(p, (uef_start.x, uef_start.z), (uef_stand.x, uef_stand.z))
                     >= CLEAR;
-            if !far {
-                continue;
-            }
-            let near = (p.0 - cybran_start.x).abs() + (p.1 - cybran_start.z).abs();
-            let key = (near.round().to_bits(), z, x);
-            if best.as_ref().is_none_or(|(k, _)| key < *k) {
-                best = Some((key, map.height_at(x, z).to_num::<f64>()));
+            if far {
+                let near = (p.0 - cybran_start.x).abs() + (p.1 - cybran_start.z).abs();
+                // Rounded to whole units, so equal keys fall to row then column.
+                candidates.push((near.round().to_bits(), z, x));
             }
         }
     }
-    let ((_, z, x), y) = best.ok_or_else(|| missing("land cell clear of the UEF commander"))?;
-    let stand = Pos {
-        x: f64::from(x) + 0.5,
-        y,
-        z: f64::from(z) + 0.5,
-    };
-    let (dx, dz) = (stand.x - uef_stand.x, stand.z - uef_stand.z);
-    let scale = STRUCTURE_OFFSET / dx.hypot(dz).max(1.0);
-    let site = Pos {
-        x: stand.x + dx * scale,
-        y,
-        z: stand.z + dz * scale,
-    };
-    Ok((stand, site))
+    candidates.sort_unstable();
+    for (_, z, x) in candidates {
+        let y = map.height_at(x, z).to_num::<f64>();
+        let stand = Pos {
+            x: f64::from(x) + 0.5,
+            y,
+            z: f64::from(z) + 0.5,
+        };
+        let (dx, dz) = (stand.x - uef_stand.x, stand.z - uef_stand.z);
+        let scale = STRUCTURE_OFFSET / dx.hypot(dz).max(1.0);
+        let site = Pos {
+            x: stand.x + dx * scale,
+            y,
+            z: stand.z + dz * scale,
+        };
+        // The site's cell must exist on the map and be land, flat with the
+        // stand's, so that the build is accepted.
+        let cell = (site.x.floor(), site.z.floor());
+        let on_map = cell.0 >= 0.0
+            && cell.1 >= 0.0
+            && cell.0 < f64::from(map.width)
+            && cell.1 < f64::from(map.height);
+        if on_map {
+            #[allow(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "bounds checked above"
+            )]
+            let (sx, sz) = (cell.0 as u32, cell.1 as u32);
+            if map.passable(Layer::Land, sx, sz) && map.height_at(sx, sz) == map.height_at(x, z) {
+                return Ok((stand, site));
+            }
+        }
+    }
+    Err(missing("land cell clear of the UEF commander"))
 }
 
 /// The header of a log played on `world`: its digests, no plugins, and one
