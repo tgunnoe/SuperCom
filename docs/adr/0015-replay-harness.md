@@ -36,7 +36,8 @@ have a ratifiable source (AGENTS.md R2, R7).
   kill the Cybran commander builds a structure before the attack, from its
   start marker and out of reach of every UEF weapon, so that the structure
   still stands at the defeat and is removed by the kill 200 ticks later, not
-  by combat. A log that exercised only some rules would leave the rest to
+  by combat. The Cybran army is defeated at tick 4235 and the log
+  runs 4,600 ticks, past the kill at tick 4435 to a checkpoint. A log that exercised only some rules would leave the rest to
   the cross-host comparison unobserved.
 - **A player's header string names its faction (DET-030).** Playback needs
   nothing beyond the file and the installed data (DET-007), so the string the
