@@ -40,7 +40,8 @@ fn put_len(out: &mut Vec<u8>, len: usize) {
 ///
 /// Field order: tick (LE64), seed (LE64), the generator state (LE64), next
 /// entity id (LE32), commands applied (LE64), commands ignored (LE64), builds
-/// completed (LE64), stall ticks (LE64), moves completed (LE64), projectile impacts (LE64), deaths (LE64), defeats (LE64), victories (LE64); the
+/// completed (LE64), stall ticks (LE64), moves completed (LE64), projectile
+/// impacts (LE64), deaths (LE64), defeats (LE64), victories (LE64); the
 /// armies, a LE32 count then each in
 /// ascending slot order as slot (u8), mass, energy, mass storage, energy
 /// storage (each the raw `i64` bits of its [`crate::Q`], LE64), defeated (u8,
@@ -63,7 +64,8 @@ fn put_len(out: &mut Vec<u8>, len: usize) {
 /// (three [`canonical_f64_bits`]), damage (raw `i64` bits), damage radius
 /// ([`canonical_f64_bits`]), damage type (string), and lifetime (u8 0, or u8 1
 /// then [`canonical_f64_bits`]); after the projectiles, the outcome (u8 0, or
-/// u8 1 then a u8 tag: 0 and the winning army's slot u8, or 1 for a draw); a string is a LE32 byte length then its bytes.
+/// u8 1 then a u8 tag: 0 and the winning army's slot u8, or 1 for a draw); a
+/// string is a LE32 byte length then its bytes.
 /// The chain head and the per-army visible sets (SIM-083) are not part of
 /// S. The impacts and marks the combat phases
 /// hand each other live in the step, not in the state, and never enter S.
