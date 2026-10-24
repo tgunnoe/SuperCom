@@ -1,6 +1,6 @@
 # ADR-0013: Combat: weapons, projectiles, damage, and death
 
-**Status:** ACCEPTED (ratified by the head on 2026-10-18, in one ruling over the six simulation records, amended on 2026-10-24 for the minimum-radius back-off, the amendment awaiting the head's ratification at its pull request)
+**Status:** ACCEPTED (ratified by the head on 2026-10-18, in one ruling over the six simulation records, amended on 2026-10-24 for the minimum-radius back-off, the amendment proposed for the head's ratification at pull request 58)
 
 **Date:** 2026-10-14
 
@@ -72,8 +72,7 @@ source (AGENTS.md R2, R7).
   from the target through it at the floor plus a margin of one world unit
   (in +x when the two coincide); the margin only places the goal's cell
   beyond the floor. The decision is made afresh every tick, so the attacker
-  stops at the first tick its distance reaches the floor, where the approach
-  holds it, not at the goal, and the Attack is never popped. When the goal
+  stops at the first tick its distance reaches the floor, where the approach holds it; that is in general short of the goal, and at the goal when a step reaches it. The Attack is never popped. When the goal
   has no cell on the map, is impassable, or has no route, the attacker holds
   with speed 0 and keeps the Attack; no neighbouring cell is substituted,
   since one can lie inside the floor. An attacker the movement phase skips
