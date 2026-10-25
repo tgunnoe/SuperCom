@@ -431,11 +431,14 @@ fn sim_band_floor_is_the_smallest_minimum() {
 
 /// SIM-086: a floor not below the attack range is not honoured. One weapon
 /// with minimum 40 and maximum 30 can never fire, so the attacker, from
-/// distance 2, neither backs off nor re-plans. Red against a mutant that
-/// drops the floor-below-range filter.
+/// distance 2, neither backs off nor re-plans. The attacker stands 2 east
+/// of the target, so a floor of 40 would put the back-off goal at x 51.5,
+/// on the map; west of the target the goal would lie off the map and the
+/// attacker would hold anyway. Red against a mutant that drops the
+/// floor-below-range filter.
 #[test]
 fn sim_floor_at_or_above_the_range_is_not_honoured() {
-    let mut a = arena(vec![weapon(Some(40.0), 30.0)], true, 2.0);
+    let mut a = arena_between(vec![weapon(Some(40.0), 30.0)], 12.5, 10.5);
     let start = a.at();
     let plans = a.s.plans;
     a.run(30);
