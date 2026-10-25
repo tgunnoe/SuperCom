@@ -20,8 +20,10 @@ pub enum Outcome {
 impl State {
     /// Defeat every non-civilian army without a complete commander, then name
     /// the outcome (SIM-084, SIM-085), while the match is undecided and at
-    /// least two non-civilian armies exist. Once an outcome exists the phase does nothing, so
-    /// the outcome and the counters never change again.
+    /// least two non-civilian armies exist. Once an outcome exists the phase
+    /// does nothing, so the outcome, the defeat marks, and the `defeats` and
+    /// `victories` counters never change again; `kills` and `deaths` are not
+    /// among them (SIM-087).
     pub(crate) fn run_victory(&mut self) {
         // A lone army is not defeated either: a match needs an opponent
         // before it can be lost (SIM-085).

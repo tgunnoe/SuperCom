@@ -1,6 +1,6 @@
 # ADR-0014: Vision and victory: the intel and victory phases
 
-**Status:** ACCEPTED (ratified by the head on 2026-10-22, explicitly, after the review that landed it, amended on 2026-10-24 for the defeat kill rule and the civilian exemption, the amendment awaiting the head's ratification at its pull request)
+**Status:** ACCEPTED (ratified by the head on 2026-10-22, explicitly, after the review that landed it, amended on 2026-10-24 for the defeat kill rule and the civilian exemption, the amendment proposed for the head's ratification at pull request 58)
 
 **Date:** 2026-10-18
 
@@ -50,7 +50,8 @@ clause so the design clauses have a ratifiable source (AGENTS.md R2, R7).
   T + 200, after its own removals, removes every entity of that army whose
   kind is not WALL (a kind absent from the world counts as not WALL), in
   slot order and ascending id, through the helper the death phase uses for
-  its own removals, so an Attack naming a killed entity is popped. The kill
+  its own removals, so an Attack at the head of another entity's queue that
+  names a killed entity is popped. The kill
   sits in the death phase because the visible sets are rebuilt by the intel
   phase after it and so stay consistent, the victory phase's freeze after an
   outcome stands (in a two-army match the kill follows the outcome), and the
@@ -127,12 +128,10 @@ clause so the design clauses have a ratifiable source (AGENTS.md R2, R7).
 - Removing a defeated army's entities in the victory phase: rejected, since
   the victory phase would then remove entities after the intel phase has
   built the visible sets, leaving them naming removed entities until the
-  next tick, and would make a second remover beside the death phase.
+  next tick, would make a second remover beside the death phase, and in a two-army match it would act after the outcome, which SIM-085's freeze forbids.
 - Writing a defeated army's units' health to zero at the defeat's expiry and
   letting the death phase find them: rejected, since an unfinished entity
-  is removed by the death phase only when the damage phase marks it, and the
-  kill would need a second marking path through a phase that has already
-  run.
+  is removed by the death phase only when the damage phase marks it, and the kill would need a second marking path through a phase that has already run; it would also leave a complete entity at zero health across a tick boundary, count the kill as a death, and land one tick late.
 - Re-pinning the synthetic multi-army test worlds with a commander kind:
   rejected, since it would put a commander into every later multi-army test
   for no rule the test checks; the precondition above stays instead.

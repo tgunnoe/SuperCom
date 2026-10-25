@@ -432,14 +432,14 @@ fn sim_serialization_is_canonical() {
     // A minimal state against the documented field order: tick, seed, the
     // generator state, the next id, the two counters, the armies (count, then
     // id, mass, energy, mass storage, energy storage as raw i64 bits, the
-    // defeat, then the civilian flag), then the entities (count, then id, army, blueprint
-    // length and bytes, x, y, z, health, max health, built, complete,
+    // defeat, then the civilian flag), then the entities (count, then id, army,
+    // blueprint length and bytes, x, y, z, health, max health, built, complete,
     // fraction, work, heading, speed, layer, the route, the goal, the
     // maintenance fraction, the weapons, counted, and the queued orders,
     // counted, in the order encoding), then the next projectile id and the
     // projectiles, counted. The counters carry builds completed, stall ticks,
-    // moves completed, projectile impacts, and deaths, and each army its
-    // ledger of eight values.
+    // moves completed, projectile impacts, and deaths, and each army its ledger
+    // of eight values.
     let mut s = State::new(5);
     s.add_army(
         Army(1),

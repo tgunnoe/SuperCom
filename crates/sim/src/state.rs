@@ -106,7 +106,8 @@ pub struct ArmyState {
     /// kill rule counts 200 ticks from (SIM-087).
     pub defeated: Option<Tick>,
     /// A civilian army is never defeated and never counted in the standing
-    /// count (SIM-084, SIM-085); only [`State::add_civilian_army`] sets it.
+    /// count (SIM-084, SIM-085); [`State::add_civilian_army`] sets the mark at
+    /// creation and the simulation never changes it.
     pub civilian: bool,
     /// The last economy phase's settlement (SIM-058).
     pub ledger: Ledger,

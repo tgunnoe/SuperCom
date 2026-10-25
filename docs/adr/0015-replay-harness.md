@@ -35,16 +35,9 @@ have a ratifiable source (AGENTS.md R2, R7).
   been declared, and the kill rule has removed an entity (SIM-087). For the
   kill the Cybran commander walks to a stand at least 40 units clear of the
   UEF commander's stand and of the line from its start marker to that stand,
-  50 units north of the Cybran start (the start marker lies 4.1 units from
-  the UEF stand and cannot serve), builds a generator 3 units beyond it, and
-  walks back to the flat run before the attack. The site is finished at tick
-  550, the commander is at the flat run by tick 990, and the nearest UEF
-  entity is 47.68 units from the site on every tick, beyond the 22 units any
-  UEF weapon reaches, so the structure still stands at the defeat and is
-  removed by the kill 200 ticks later, not by combat. The Cybran army is
+  49 units north and 4 east of the Cybran start marker (the stand at (245.5, 63.5) against the marker at (241.5, 14.5); the marker itself lies 4.1 units from the UEF stand and cannot serve), builds a generator 3 units beyond it, and walks back to the flat run before the attack. An independent run of the committed log through the simulation's public interface gives the figures: the generator's site is placed at tick 425 and finished at tick 550, the commander is within the arrival radius of its stand on the flat run at tick 993, and the nearest UEF entity to the site over the whole run is 47.68 units away (at tick 2963), beyond the 22 units any UEF weapon reaches, so the structure still stands at the defeat and is removed by the kill 200 ticks later, not by combat. The Cybran army is
   defeated at tick 4235 and the log runs 4,600 ticks, past the kill at tick
-  4435 to a checkpoint. A log that exercised only some rules would leave the
-  rest to the cross-host comparison unobserved.
+  4435 to a checkpoint. The script computes the build stand and the site with the platform's `f64::hypot`, so the test that regenerates the log and compares it with the committed file checks the committed bytes only on a platform whose `hypot` agrees (on 2026-10-24 it did on aarch64-linux), while the committed bytes replay identically everywhere; the move to the `libm` square root is issue 60. A log that exercised only some rules would leave the rest to the cross-host comparison unobserved.
 - **A player's header string names its faction (DET-030).** Playback needs
   nothing beyond the file and the installed data (DET-007), so the string the
   format already carries is read as `UEF`, `Aeon`, `Cybran`, or `Seraphim`,

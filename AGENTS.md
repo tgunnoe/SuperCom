@@ -104,9 +104,9 @@ Each item: statement · grounding (why unresolved) · signpost (what resolves it
 - **U1 Cross-architecture float determinism.** ADR-0006 chose binary64 with
   the exactly specified operations, `libm` transcendentals, and NaN
   canonicalization at the serialization boundary; the DET-024 replay
-  comparison has passed once by hand on x86_64 and aarch64 (the recorded run
-  in docs/adr/0006-float-strategy.md), not yet in CI, and aarch64-darwin is
-  unmeasured. Grounding: the same record's aarch64 section. Signpost: the
+  comparison has passed twice by hand on x86_64 and aarch64 (the recorded
+  runs in docs/adr/0006-float-strategy.md), not yet in CI, and aarch64-darwin
+  is unmeasured. Grounding: the same record's aarch64 section. Signpost: the
   comparison running in CI on both architectures and once on aarch64-darwin
   (the head's ruling of 2026-10-22).
 - **U6 Audio codecs.** Which codecs the 89 installed XACT wave banks use
