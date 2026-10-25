@@ -12,11 +12,13 @@
 mod support;
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use supercom_sim::{
     Army, Command, EntityId, MotionType, Order, Outcome, Q, QueueMode, State, Tick, UnitKind,
     WeaponKind,
 };
+use supercom_sim::{LayerSet, ProjectileKind, World};
 use support::{flat_map, kind, pos, q, state, step, structure, world};
 
 /// The ticks between a defeat and the kill (SIM-087).
@@ -345,4 +347,109 @@ fn sim_kill_follows_the_death_phase_removals() {
     assert!(!s.entities.contains_key(&dying) && !s.entities.contains_key(&doomed));
     assert_eq!(s.counters.deaths, deaths + 1, "the dying unit is a death");
     assert_eq!(s.counters.kills, 1, "the kill takes only the other unit");
+}
+
+/// SIM-087: the kill removes every entity of the defeated army outside the
+/// WALL category, and the exemption is read from the entity's own kind: a
+/// kind the world does not hold has no WALL mark, so the entity is present
+/// after the step of tick T + 199, removed after the step of T + 200, and
+/// counted as one kill (the defeated commander is a death, not a kill).
+#[test]
+fn sim_kill_takes_an_entity_whose_kind_is_absent() {
+    let (mut s, cmds) = scenario(2);
+    let ghost = s.spawn(Army(2), "absent-kind", pos(40.0, 0.0, 40.0), q(100));
+    kill(&mut s, cmds[1]);
+    let t = s.tick.0;
+    step(&mut s, &[]);
+    assert_eq!(s.armies[&Army(2)].defeated, Some(Tick(t)));
+    run_to(&mut s, t + DELAY);
+    assert!(s.entities.contains_key(&ghost), "present at T + 199");
+    assert_eq!(s.counters.kills, 0);
+    step(&mut s, &[]);
+    assert!(!s.entities.contains_key(&ghost), "gone after T + 200");
+    assert_eq!(s.counters.kills, 1, "the one entity is the one kill");
+}
+
+/// SIM-087: the kill removes entities only; a projectile aimed at one is
+/// left in flight. A gun of the surviving army 1 holds the nearest enemy in
+/// range, a unit of army 3 (defeated at tick T = 0) 30 units away, and fires
+/// at ticks 0 and 195 (a cooldown of ceil(10 / 0.0514) = 195 ticks) with a
+/// shot of speed 10, one unit a tick. The first shot lands near tick 30. The
+/// second, launched at 195, is in the air across the step of T + 200, which
+/// removes its target; it stays under the same id with its aim unchanged,
+/// lands at that aim near tick 225 counting a second impact, and is gone.
+#[test]
+fn sim_kill_leaves_a_projectile_in_flight() {
+    let mut w = World::empty();
+    let mut gun = kind("gun", &["STRUCTURE"]);
+    gun.vision_radius = Some(500.0);
+    gun.weapons = vec![WeaponKind {
+        category: "Direct Fire".to_owned(),
+        damage: q(1),
+        damage_type: "Normal".to_owned(),
+        rate_of_fire: Some(0.0514),
+        max_radius: Some(100.0),
+        muzzle_velocity: Some(10.0),
+        projectile_id: Some("slug".to_owned()),
+        target_layers: LayerSet::from_caps("Land").expect("caps"),
+        ..WeaponKind::default()
+    }];
+    w.units = [seer("cmd", &["MOBILE", "COMMAND"]), mover(), gun]
+        .into_iter()
+        .map(|k| (k.id.clone(), k))
+        .collect();
+    w.projectiles.insert(
+        "slug".to_owned(),
+        ProjectileKind {
+            id: "slug".to_owned(),
+            ..ProjectileKind::default()
+        },
+    );
+    w.map = flat_map(128);
+    let w = Arc::new(w);
+    let mut s = state(&w, Q::ZERO, Q::ZERO);
+    for n in 2..=3 {
+        s.add_army(Army(n), Q::ZERO, Q::ZERO, Q::ZERO, Q::ZERO);
+    }
+    let cmds: Vec<EntityId> = (1..=3_u8)
+        .map(|n| s.spawn(Army(n), "cmd", pos(f64::from(n) * 10.0, 0.0, 5.0), q(100)))
+        .collect();
+    s.spawn(Army(1), "gun", pos(20.0, 0.0, 50.0), q(100));
+    let victim = s.spawn(Army(3), "grunt", pos(50.0, 0.0, 50.0), q(100));
+    kill(&mut s, cmds[2]);
+    let t = s.tick.0;
+    step(&mut s, &[]);
+    assert_eq!(s.armies[&Army(3)].defeated, Some(Tick(t)));
+
+    run_to(&mut s, t + DELAY);
+    assert!(s.entities.contains_key(&victim), "present at T + 199");
+    let (id, before) = {
+        let mut in_air = s.projectiles.iter();
+        let first = in_air.next().expect("a shot in the air at T + 199");
+        assert!(in_air.next().is_none(), "exactly one shot");
+        assert_eq!(first.1.target, Some(victim));
+        (*first.0, first.1.clone())
+    };
+    let landed = s.counters.projectile_impacts;
+    assert_eq!(landed, 1, "the first shot has landed");
+
+    step(&mut s, &[]);
+    assert!(
+        !s.entities.contains_key(&victim),
+        "the kill took the target"
+    );
+    let after = s
+        .projectiles
+        .get(&id)
+        .expect("the shot survives its target's removal");
+    assert_eq!(
+        [after.aim.x, after.aim.y, after.aim.z].map(f64::to_bits),
+        [before.aim.x, before.aim.y, before.aim.z].map(f64::to_bits),
+        "the aim is untouched"
+    );
+    assert_eq!(s.counters.projectile_impacts, landed, "still in the air");
+
+    run_to(&mut s, t + DELAY + 40);
+    assert!(s.projectiles.is_empty(), "the shot is gone");
+    assert_eq!(s.counters.projectile_impacts, landed + 1, "it landed once");
 }

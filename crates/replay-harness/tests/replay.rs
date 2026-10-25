@@ -105,10 +105,9 @@ fn conformance_sim_replay_covers_manifest() {
         "moves completed: {}",
         c.moves_completed
     );
-    assert!(
-        c.builds_completed > 0,
-        "builds completed: {}",
-        c.builds_completed
+    assert_eq!(
+        c.builds_completed, 5,
+        "builds completed: the UEF commander's mass extractor and three point defences, and the Cybran commander's generator"
     );
     assert!(
         c.projectile_impacts > 0,
