@@ -15,9 +15,10 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use supercom_sim::{
-    Army, Command, EntityId, LayerSet, MotionType, Order, Outcome, ProjectileKind, Q, QueueMode,
-    State, Tick, UnitKind, WeaponKind, World,
+    Army, Command, EntityId, MotionType, Order, Outcome, Q, QueueMode, State, Tick, UnitKind,
+    WeaponKind,
 };
+use supercom_sim::{LayerSet, ProjectileKind, World};
 use support::{flat_map, kind, pos, q, state, step, structure, world};
 
 /// The ticks between a defeat and the kill (SIM-087).
