@@ -254,6 +254,31 @@ digest. This closes the NaN and recursion points above for this one log and
 these two machines; it does not cover aarch64-darwin, other compiler versions,
 or logs other than the committed skirmish.
 
+On 2026-10-24 the project ran the comparison a second time, on commit
+`4f388eeca76ba6ca367d460c5feaee42191101b8`, on both hosts, checked out detached
+on the aarch64 host, using the comparison script's remote mode and the harness
+described in `docs/adr/0015-replay-harness.md`. The run followed a change to
+the serialized army state, which now carries each army's defeat tick, its
+civilian byte, and a kills counter (`docs/adr/0014-vision-and-victory.md`), and
+the regeneration of the committed log to exercise it. In the regenerated log
+the Cybran army is defeated at tick 4235 and the kill removes its structure at
+tick 4435, within 4,600 ticks. The result line was:
+
+```text
+local : x86_64 4f388eeca76ba6ca367d460c5feaee42191101b8
+remote: aarch64 4f388eeca76ba6ca367d460c5feaee42191101b8
+EQUAL 4611 lines
+```
+
+The count is one line per tick of the 4,600-tick log through its last
+checkpoint, plus the ten NaN-case lines and the recursion line. It is the same
+number as in the first run because the log's length is unchanged, while every
+tick's digest changed with the regenerated log. The NaN bit patterns and the
+recursion depths, 5454 on x86_64 and 5452 on aarch64, were those of the first
+run's table, so the table is not repeated. The closing sentence of the first
+run still holds: the record does not cover aarch64-darwin, other compiler
+versions, or logs other than the committed skirmish.
+
 ## Consequences
 
 ### Positive
