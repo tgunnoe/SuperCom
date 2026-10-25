@@ -41,8 +41,8 @@ fn put_len(out: &mut Vec<u8>, len: usize) {
 /// Field order: tick (LE64), seed (LE64), the generator state (LE64), next
 /// entity id (LE32), commands applied (LE64), commands ignored (LE64), builds
 /// completed (LE64), stall ticks (LE64), moves completed (LE64), projectile
-/// impacts (LE64), deaths (LE64), defeats (LE64), victories (LE64), kills (LE64); the
-/// armies, a LE32 count then each in
+/// impacts (LE64), deaths (LE64), defeats (LE64), victories (LE64), kills
+/// (LE64); the armies, a LE32 count then each in
 /// ascending slot order as slot (u8), mass, energy, mass storage, energy
 /// storage (each the raw `i64` bits of its [`crate::Q`], LE64), the defeat (u8
 /// 0, or u8 1 then the tick that defeated it, LE64), civilian (u8, 0 or 1),
@@ -55,13 +55,15 @@ fn put_len(out: &mut Vec<u8>, len: usize) {
 /// heading and speed ([`canonical_f64_bits`], LE64 each), layer (u8, its
 /// declaration index), the route (LE32 count, then each cell as two LE32, x
 /// then z), goal (u8 0, or u8 1 then x, y, z as [`canonical_f64_bits`]),
-/// maintenance fraction (raw bits), the weapons (LE32 count, each as target, u8 0
-/// or u8 1 then the id LE32, and cooldown LE32), then the queued orders (LE32
-/// count, each in [`crate::Order::encode_into`]'s encoding, front to back);
+/// maintenance fraction (raw bits), the weapons (LE32 count, each as target,
+/// u8 0 or u8 1 then the id LE32, and cooldown LE32), then the queued orders
+/// (LE32 count, each in [`crate::Order::encode_into`]'s encoding, front to
+/// back);
 /// after the entities, the next projectile id (LE32) and the projectiles, a
 /// LE32 count then each in ascending id order as id (LE32), army (u8), source
-/// (LE32), kind (u8 0, or u8 1 then a string), position and velocity (each three
-/// [`canonical_f64_bits`], LE64), target (u8 0, or u8 1 then the id LE32), aim
+/// (LE32), kind (u8 0, or u8 1 then a string), position and velocity (each
+/// three [`canonical_f64_bits`], LE64), target (u8 0, or u8 1 then the id
+/// LE32), aim
 /// (three [`canonical_f64_bits`]), damage (raw `i64` bits), damage radius
 /// ([`canonical_f64_bits`]), damage type (string), and lifetime (u8 0, or u8 1
 /// then [`canonical_f64_bits`]); after the projectiles, the outcome (u8 0, or
@@ -237,8 +239,8 @@ fn put_projectile(out: &mut Vec<u8>, projectile: &Projectile) {
     }
 }
 
-/// One entity's bytes, in the order `serialize` documents; `key` is the map key,
-/// written in place of the entity's own id.
+/// One entity's bytes, in the order `serialize` documents; `key` is the map
+/// key, written in place of the entity's own id.
 fn put_entity(out: &mut Vec<u8>, key: EntityId, entity: &Entity) {
     let Entity {
         id: _,

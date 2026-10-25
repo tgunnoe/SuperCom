@@ -104,7 +104,8 @@ impl State {
     /// The death phase: a complete entity at or below zero health and an
     /// unfinished one the damage phase marked are removed in ascending id;
     /// an Attack at the head of another queue naming one is popped
-    /// (SIM-080).
+    /// (SIM-080). After its own removals it runs the kill pass over every
+    /// army defeated exactly 200 ticks earlier (SIM-087).
     pub(crate) fn run_death(&mut self, scratch: &Scratch) {
         let dead: Vec<EntityId> = self
             .entities

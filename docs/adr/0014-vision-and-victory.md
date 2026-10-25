@@ -50,7 +50,8 @@ clause so the design clauses have a ratifiable source (AGENTS.md R2, R7).
   T + 200, after its own removals, removes every entity of that army whose
   kind is not WALL (a kind absent from the world counts as not WALL), in
   slot order and ascending id, through the helper the death phase uses for
-  its own removals, so an Attack naming a killed entity is popped. The kill
+  its own removals, so an Attack at the head of another entity's queue that
+  names a killed entity is popped. The kill
   sits in the death phase because the visible sets are rebuilt by the intel
   phase after it and so stay consistent, the victory phase's freeze after an
   outcome stands (in a two-army match the kill follows the outcome), and the

@@ -8,9 +8,10 @@
 //! defeats its army and declares the UEF one the winner. Flat ground keeps
 //! the shells from missing on relief. Before it walks, the Cybran commander
 //! walks to a stand far from the UEF commander's route and builds a
-//! generator beside it, out of reach of every UEF weapon: the structure stands when
-//! its army is defeated and is removed 200 ticks after the defeat by the kill
-//! rule (SIM-087), not by combat, and the log runs on past that tick.
+//! generator beside it, out of reach of every UEF weapon: the structure
+//! stands when its army is defeated and is removed 200 ticks after the
+//! defeat by the kill rule (SIM-087), not by combat, and the log runs on
+//! past that tick.
 
 use std::sync::Arc;
 use supercom_sim::{
@@ -189,7 +190,8 @@ fn build_stand(
                     >= CLEAR;
             if far {
                 let near = (p.0 - cybran_start.x).abs() + (p.1 - cybran_start.z).abs();
-                // Rounded to whole units, so equal keys fall to row then column.
+                // Rounded to whole units, so equal keys fall to row, then
+                // column.
                 candidates.push((near.round().to_bits(), z, x));
             }
         }
