@@ -1,6 +1,6 @@
 # ADR-0014: Vision and victory: the intel and victory phases
 
-**Status:** ACCEPTED (ratified by the head on 2026-10-22, explicitly, after the review that landed it, amended on 2026-10-24 for the defeat kill rule and the civilian exemption, the amendment proposed for the head's ratification at pull request 58)
+**Status:** ACCEPTED (ratified by the head on 2026-10-22, explicitly, after the review that landed it, amended on 2026-10-24 for the defeat kill rule and the civilian exemption, the amendment ratified by the head on 2026-10-29 at pull request 58)
 
 **Date:** 2026-10-18
 

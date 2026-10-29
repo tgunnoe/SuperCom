@@ -1,6 +1,6 @@
 # ADR-0013: Combat: weapons, projectiles, damage, and death
 
-**Status:** ACCEPTED (ratified by the head on 2026-10-18, in one ruling over the six simulation records, amended on 2026-10-24 for the minimum-radius back-off, the amendment proposed for the head's ratification at pull request 58)
+**Status:** ACCEPTED (ratified by the head on 2026-10-18, in one ruling over the six simulation records, amended on 2026-10-24 for the minimum-radius back-off, the amendment ratified by the head on 2026-10-29 at pull request 58)
 
 **Date:** 2026-10-14
 
