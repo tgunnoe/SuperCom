@@ -8,11 +8,12 @@ use core::f64::consts::PI;
 use std::sync::Arc;
 
 use crate::build::{BUILD_RANGE, kind_of};
+use crate::combat::distance_xz;
 use crate::command::Order;
 use crate::ids::{EntityId, Pos};
 use crate::planner::plan_with;
 use crate::state::{Entity, State};
-use crate::weapons::attack_range;
+use crate::weapons::{attack_range, band_floor};
 use crate::world::{Layer, MapGrid, MotionType, SHALLOW, UnitKind, World};
 
 /// One tick in seconds: a tenth, from SIM-001 and SIM-002 (SIM-069).
@@ -25,6 +26,11 @@ pub const ARRIVAL_RADIUS: f64 = 0.5;
 /// How near a guard stays to its target, equal to the build range
 /// (SIM-068).
 pub const FOLLOW_RANGE: f64 = BUILD_RANGE;
+
+/// How far beyond the band floor a back-off aims, so that the goal cell's
+/// centre, at most half a cell diagonal from the aim, lies beyond the floor
+/// (SIM-086).
+const BACK_OFF_MARGIN: f64 = 1.0;
 
 /// The cell holding a position: the floor of x and z; `None` when either is
 /// negative, not a number, or beyond `u32` (SIM-064).
@@ -327,7 +333,27 @@ impl State {
                         .map(|t| t.pos)
                         .zip(attack_range(kind));
                     if let Some((target_pos, range)) = goal {
-                        self.follow_guard(map, motion, &dynamics, id, Some(target_pos), range);
+                        // Inside the band floor no weapon can fire, so the
+                        // attacker steps back before the approach applies
+                        // (SIM-086).
+                        let floor = band_floor(kind).filter(|f| {
+                            self.entities
+                                .get(&id)
+                                .is_some_and(|e| distance_xz(&e.pos, &target_pos) < *f)
+                        });
+                        match floor {
+                            Some(f) => self.back_off(map, motion, &dynamics, id, target_pos, f),
+                            None => {
+                                self.follow_guard(
+                                    map,
+                                    motion,
+                                    &dynamics,
+                                    id,
+                                    Some(target_pos),
+                                    range,
+                                );
+                            }
+                        }
                     }
                     break;
                 }
@@ -391,6 +417,66 @@ impl State {
             self.counters.moves_completed = self.counters.moves_completed.saturating_add(1);
         }
         true
+    }
+
+    /// Step an Attack's owner back from `target` toward the point `floor`
+    /// plus [`BACK_OFF_MARGIN`] away on the line from the target through it
+    /// (SIM-086). The point is recomputed every tick; the plan is remade only
+    /// when its cell changes, and an impassable or absent cell is a hold, not
+    /// a neighbour, since a neighbour can lie inside the floor. The Attack is
+    /// never popped here: once the distance reaches the floor the caller no
+    /// longer comes this way and the approach holds the entity still.
+    fn back_off(
+        &mut self,
+        map: &MapGrid,
+        motion: MotionType,
+        dynamics: &Dynamics,
+        id: EntityId,
+        target: Pos,
+        floor: f64,
+    ) {
+        let Some(e) = self.entities.get_mut(&id) else {
+            return;
+        };
+        let (dx, dz) = (e.pos.x - target.x, e.pos.z - target.z);
+        let d = libm::sqrt(dx * dx + dz * dz);
+        let (ux, uz) = if d > 0.0 {
+            (dx / d, dz / d)
+        } else {
+            (1.0, 0.0)
+        };
+        let reach = floor + BACK_OFF_MARGIN;
+        let point = Pos {
+            x: target.x + ux * reach,
+            y: 0.0,
+            z: target.z + uz * reach,
+        };
+        let Some(cell) = cell_of(&point).filter(|c| c.0 < map.width && c.1 < map.height) else {
+            e.speed = 0.0;
+            e.route.clear();
+            e.goal = None;
+            return;
+        };
+        let enterable = can_enter(map, motion, cell.0, cell.1);
+        if Some(cell) != e.goal.as_ref().and_then(cell_of) {
+            e.route.clear();
+            let (x, z) = cell_centre(cell);
+            e.goal = Some(Pos { x, y: 0.0, z });
+            if let Some(from) = cell_of(&e.pos).filter(|_| enterable) {
+                self.plans = self.plans.saturating_add(1);
+                e.route = plan_with(map, |x, z| can_enter(map, motion, x, z), from, cell)
+                    .unwrap_or_default();
+            }
+        }
+        // An empty route is a hold unless the entity already stands in an
+        // enterable goal cell, where it walks straight to the cell's centre.
+        if e.route.is_empty() && !(enterable && cell_of(&e.pos) == Some(cell)) {
+            e.speed = 0.0;
+        } else if advance(e, dynamics, map, motion) {
+            e.speed = 0.0;
+            e.route.clear();
+            e.goal = None;
+        }
     }
 
     /// Follow a target to within `range`; false when a Guard was dropped, so

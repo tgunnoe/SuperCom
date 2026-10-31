@@ -102,7 +102,13 @@ pub struct ArmyState {
     pub energy: Q,
     pub mass_storage: Q,
     pub energy_storage: Q,
-    pub defeated: bool,
+    /// The tick whose victory phase defeated the army (SIM-084), which the
+    /// kill rule counts 200 ticks from (SIM-087).
+    pub defeated: Option<Tick>,
+    /// A civilian army is never defeated and never counted in the standing
+    /// count (SIM-084, SIM-085); [`State::add_civilian_army`] sets the mark at
+    /// creation and the simulation never changes it.
+    pub civilian: bool,
     /// The last economy phase's settlement (SIM-058).
     pub ledger: Ledger,
 }
@@ -124,6 +130,9 @@ pub struct Counters {
     /// Matches won: 1 once the victory phase names a winner, 0 for a draw
     /// or an undecided match (SIM-085).
     pub victories: u64,
+    /// Entities removed by the defeat kill rule, counted apart from deaths
+    /// (SIM-087).
+    pub kills: u64,
 }
 
 /// The full simulation state.
@@ -209,8 +218,34 @@ impl State {
         self.visible(army).contains(&id)
     }
 
-    /// Add an army (not defeated), replacing any army with the same slot.
+    /// Add an army (not defeated, not civilian), replacing any army with the
+    /// same slot.
     pub fn add_army(&mut self, army: Army, mass: Q, energy: Q, mass_storage: Q, energy_storage: Q) {
+        self.insert_army(army, mass, energy, mass_storage, energy_storage, false);
+    }
+
+    /// Add a civilian army (SIM-084, SIM-085), replacing any army with the
+    /// same slot. The mark is never set or cleared after creation.
+    pub fn add_civilian_army(
+        &mut self,
+        army: Army,
+        mass: Q,
+        energy: Q,
+        mass_storage: Q,
+        energy_storage: Q,
+    ) {
+        self.insert_army(army, mass, energy, mass_storage, energy_storage, true);
+    }
+
+    fn insert_army(
+        &mut self,
+        army: Army,
+        mass: Q,
+        energy: Q,
+        mass_storage: Q,
+        energy_storage: Q,
+        civilian: bool,
+    ) {
         self.armies.insert(
             army,
             ArmyState {
@@ -219,7 +254,8 @@ impl State {
                 energy,
                 mass_storage,
                 energy_storage,
-                defeated: false,
+                defeated: None,
+                civilian,
                 ledger: Ledger::default(),
             },
         );
@@ -403,7 +439,10 @@ impl State {
     fn apply_commands(&mut self, commands: &[Command]) {
         for c in commands {
             let owned = !c.units.is_empty()
-                && !self.armies.get(&c.army).is_some_and(|a| a.defeated)
+                && self
+                    .armies
+                    .get(&c.army)
+                    .is_none_or(|a| a.defeated.is_none())
                 && c.units
                     .iter()
                     .all(|id| self.entities.get(id).is_some_and(|e| e.army == c.army));
@@ -451,7 +490,9 @@ impl State {
                     id: a.id,
                     mass: a.mass,
                     energy: a.energy,
-                    defeated: a.defeated,
+                    defeated: a.defeated.is_some(),
+                    defeated_at: a.defeated,
+                    civilian: a.civilian,
                     mass_storage: a.mass_storage,
                     energy_storage: a.energy_storage,
                     ledger: a.ledger,
@@ -555,5 +596,8 @@ pub struct ArmySnapshot {
     pub mass_storage: Q,
     pub energy_storage: Q,
     pub defeated: bool,
+    /// The tick whose victory phase defeated the army.
+    pub defeated_at: Option<Tick>,
+    pub civilian: bool,
     pub ledger: Ledger,
 }

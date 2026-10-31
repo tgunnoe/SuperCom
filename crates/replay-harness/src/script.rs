@@ -6,7 +6,12 @@
 //! commander has been waiting since the first tick. Both are told to attack
 //! once the UEF commander has arrived; the Cybran commander dies first, which
 //! defeats its army and declares the UEF one the winner. Flat ground keeps
-//! the shells from missing on relief.
+//! the shells from missing on relief. Before it walks, the Cybran commander
+//! walks to a stand far from the UEF commander's route and builds a
+//! generator beside it, out of reach of every UEF weapon: the structure
+//! stands when its army is defeated and is removed 200 ticks after the
+//! defeat by the kill rule (SIM-087), not by combat, and the log runs on
+//! past that tick.
 
 use std::sync::Arc;
 use supercom_sim::{
@@ -138,6 +143,96 @@ fn build_at_base(at: &mut Issuer, uef: EntityId, mass: Pos) {
     }
 }
 
+/// The structure the Cybran commander builds, and how far from its build
+/// stand (a build reaches five).
+const STRUCTURE: &str = "urb1101";
+const STRUCTURE_OFFSET: f64 = 3.0;
+
+/// The distance from the UEF commander's stand and from its route to the
+/// build stand: UEF weapons reach 22, and the route is measured by a probe
+/// run, so this leaves a wide margin.
+const CLEAR: f64 = 40.0;
+
+/// The planar distance from `p` to the segment `a`..`b`.
+fn segment_distance(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
+    let (dx, dz) = (b.0 - a.0, b.1 - a.1);
+    let len2 = dx * dx + dz * dz;
+    let t = if len2 > 0.0 {
+        (((p.0 - a.0) * dx + (p.1 - a.1) * dz) / len2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (p.0 - (a.0 + t * dx)).hypot(p.1 - (a.1 + t * dz))
+}
+
+/// The build stand of the Cybran commander and the structure's site: the land
+/// cell centre nearest the Cybran start marker (Manhattan, then row, then
+/// column) that lies at least [`CLEAR`] from the UEF commander's stand and
+/// from the line between its start marker and that stand, then the site
+/// [`STRUCTURE_OFFSET`] units from it away from the UEF stand; the first such
+/// cell whose site is on the map, on land, and at the stand's height.
+fn build_stand(
+    world: &World,
+    uef_start: Pos,
+    uef_stand: Pos,
+    cybran_start: Pos,
+) -> Result<(Pos, Pos), HarnessError> {
+    let map = &world.map;
+    let mut candidates: Vec<(u64, u32, u32)> = Vec::new();
+    for z in 0..map.height {
+        for x in 0..map.width {
+            if !map.passable(Layer::Land, x, z) {
+                continue;
+            }
+            let p = (f64::from(x) + 0.5, f64::from(z) + 0.5);
+            let far = (p.0 - uef_stand.x).hypot(p.1 - uef_stand.z) >= CLEAR
+                && segment_distance(p, (uef_start.x, uef_start.z), (uef_stand.x, uef_stand.z))
+                    >= CLEAR;
+            if far {
+                let near = (p.0 - cybran_start.x).abs() + (p.1 - cybran_start.z).abs();
+                // Rounded to whole units, so equal keys fall to row, then
+                // column.
+                candidates.push((near.round().to_bits(), z, x));
+            }
+        }
+    }
+    candidates.sort_unstable();
+    for (_, z, x) in candidates {
+        let y = map.height_at(x, z).to_num::<f64>();
+        let stand = Pos {
+            x: f64::from(x) + 0.5,
+            y,
+            z: f64::from(z) + 0.5,
+        };
+        let (dx, dz) = (stand.x - uef_stand.x, stand.z - uef_stand.z);
+        let scale = STRUCTURE_OFFSET / dx.hypot(dz).max(1.0);
+        let site = Pos {
+            x: stand.x + dx * scale,
+            y,
+            z: stand.z + dz * scale,
+        };
+        // The site's cell must exist on the map and be land, flat with the
+        // stand's, so that the build is accepted.
+        let cell = (site.x.floor(), site.z.floor());
+        let on_map = cell.0 >= 0.0
+            && cell.1 >= 0.0
+            && cell.0 < f64::from(map.width)
+            && cell.1 < f64::from(map.height);
+        if on_map {
+            #[allow(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "bounds checked above"
+            )]
+            let (sx, sz) = (cell.0 as u32, cell.1 as u32);
+            if map.passable(Layer::Land, sx, sz) && map.height_at(sx, sz) == map.height_at(x, z) {
+                return Ok((stand, site));
+            }
+        }
+    }
+    Err(missing("land cell clear of the UEF commander"))
+}
+
 /// The header of a log played on `world`: its digests, no plugins, and one
 /// player per faction named by the string (DET-030).
 fn header(world: &World) -> ReplayHeader {
@@ -182,6 +277,12 @@ pub fn replay(world: &Arc<World>) -> Result<Replay, HarnessError> {
         })
         .ok_or_else(|| missing("mass marker"))?
         .pos;
+    let cybran_start = world
+        .markers
+        .iter()
+        .find(|m| m.kind == MarkerKind::Army(2))
+        .ok_or_else(|| missing("Cybran start marker"))?
+        .pos;
     let (x, z, y) = flat_run(world)?;
     let flat = |dx: f64| Pos {
         x: f64::from(x) + dx,
@@ -193,12 +294,24 @@ pub fn replay(world: &Arc<World>) -> Result<Replay, HarnessError> {
         seq: [0; 2],
     };
     build_at_base(&mut at, uef, mass);
+    let (stand, site) = build_stand(world, start, flat(0.5), cybran_start)?;
+    at.issue(0, 1, cybran, Order::Move { to: stand }, QueueMode::Replace);
+    at.issue(
+        0,
+        1,
+        cybran,
+        Order::BuildMobile {
+            blueprint: STRUCTURE.to_owned(),
+            at: site,
+        },
+        QueueMode::Append,
+    );
     at.issue(
         0,
         1,
         cybran,
         Order::Move { to: flat(8.5) },
-        QueueMode::Replace,
+        QueueMode::Append,
     );
     at.issue(
         LEAVE_AT,

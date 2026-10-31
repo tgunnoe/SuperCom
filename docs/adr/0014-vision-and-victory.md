@@ -1,6 +1,6 @@
 # ADR-0014: Vision and victory: the intel and victory phases
 
-**Status:** ACCEPTED (ratified by the head on 2026-10-22, explicitly, after the review that landed it)
+**Status:** ACCEPTED (ratified by the head on 2026-10-22, explicitly, after the review that landed it, amended on 2026-10-24 for the defeat kill rule and the civilian exemption, the amendment ratified by the head on 2026-10-29 at pull request 58)
 
 **Date:** 2026-10-18
 
@@ -42,17 +42,31 @@ clause so the design clauses have a ratifiable source (AGENTS.md R2, R7).
   under construction does not count. Domination and eradication, alliances,
   allied victory, draw offers, civilian armies, and an end-of-game timer are
   recorded debts.
-- **A defeated army's entities persist and its commands are ignored
-  (SIM-084).** The script's defeat marks the army out of the game and, 20
-  seconds later, kills every unit of the army outside the WALL category
-  (lua/aibrain.lua of lua.scd, lines 787 to 794). This version carries the
-  out-of-game mark but not the delayed kill, a departure: in a two-army match
-  the outcome is decided at the defeat tick either way, and with three or
-  more armies a defeated army's units keep fighting and keep their mass
-  markers where the original removes them after 200 ticks. The commands phase
-  ignores and counts, as a foreign command, every command of a defeated army
-  from the tick after the defeat. The kill rule and the civilian exemption
-  are tracked as a debt.
+- **A defeated army's entities are killed 200 ticks after the defeat
+  (SIM-084, SIM-087).** The script's defeat marks the army out of the game
+  and, 20 seconds later, kills every unit of the army outside the WALL
+  category (lua/aibrain.lua of lua.scd, lines 787 to 794). The army records
+  the tick T whose victory phase defeated it, and the death phase of tick
+  T + 200, after its own removals, removes every entity of that army whose
+  kind is not WALL (a kind absent from the world counts as not WALL), in
+  slot order and ascending id, through the helper the death phase uses for
+  its own removals, so an Attack at the head of another entity's queue that
+  names a killed entity is popped. The kill
+  sits in the death phase because the visible sets are rebuilt by the intel
+  phase after it and so stay consistent, the victory phase's freeze after an
+  outcome stands (in a two-army match the kill follows the outcome), and the
+  death phase stays the one remover of entities. The script lists the army's
+  units by a call whose treatment of unfinished units is unreadable; this
+  version reads it as killing them, finished or not. Kills are counted in
+  `kills`, apart from deaths. The commands phase ignores and counts, as a
+  foreign command, every command of a defeated army from the tick after the
+  defeat.
+- **A civilian army is never defeated and never counted (SIM-084,
+  SIM-085).** The script skips civilian brains in its defeat loop
+  (lua/victory.lua of lua.scd, line 28). Excluding them from the standing
+  count, and requiring two non-civilian armies before the phase judges, is
+  this project's reading of that skip. Only `State::add_civilian_army`
+  creates a civilian army, and nothing changes the mark afterwards.
 - **A world with no COMMAND kind defeats nobody (SIM-084).** The original
   would defeat every army with a zero count; this project's synthetic worlds
   for the economy, build, movement, and combat families contain no commander
@@ -65,12 +79,14 @@ clause so the design clauses have a ratifiable source (AGENTS.md R2, R7).
 - **The outcome is decided once (SIM-085).** The first victory phase after
   which at most one army stands names Winner of that army (counted in
   `victories`) or Draw (not counted). Afterwards the phase does nothing and
-  the ticks keep running. A state of fewer than two armies decides nothing,
-  defeats included.
-- **The serialized state grows (DET-009).** Two counters follow deaths,
-  `defeats` then `victories`, and the outcome follows the projectiles: a byte
-  0, or 1 then a tag byte (0 and the winning army's slot byte for Winner, 1
-  for Draw). The visible sets are not serialized. The catalog digest does
+  the ticks keep running. A state of fewer than two non-civilian armies
+  decides nothing, defeats included.
+- **The serialized state grows (DET-009).** Three counters follow deaths,
+  `defeats`, `victories`, then `kills`; each army carries, after its four
+  amounts, the defeat as a byte 0, or a byte 1 then the defeat tick as a
+  little-endian 64-bit integer, and then a civilian byte 0 or 1; and the
+  outcome follows the projectiles: a byte 0, or 1 then a tag byte (0 and the
+  winning army's slot byte for Winner, 1 for Draw). The visible sets are not serialized. The catalog digest does
   not change.
 
 ## Consequences
@@ -95,9 +111,9 @@ clause so the design clauses have a ratifiable source (AGENTS.md R2, R7).
 - The engine's vision arithmetic and grid resolution.
 - Whether the engine's acquisition requires the target to be visible.
 - The other two victory options and the allied-victory and draw-offer paths.
-- The script's civilian exemption (lua/victory.lua of lua.scd, line 28):
-  this version has no civilian armies and SIM-084 carries no exemption, so a
-  civilian army would be defeated at its first victory phase.
+- Reading the scenario's armies: no match setup in this version creates a
+  civilian army, since the civilian flag is match setup absent from every
+  map file. Issue 56 carries it.
 - The intel cost: armies x entities x seers per tick (`run_intel`),
   unmeasured. Signpost: a tick-time measurement at the unit cap. The table
   is derived and outside the serialized state, so a spatial index or
@@ -109,11 +125,13 @@ clause so the design clauses have a ratifiable source (AGENTS.md R2, R7).
   from S and would only enlarge every digest.
 - Defeating an army only when it has lost every unit: rejected as the
   eradication option, not the skirmish default.
-- Removing a defeated army's entities after the script's 20-second delay,
-  walls excepted: deferred, since it re-pins every whole-state golden and the
-  committed replay log and must re-run the cross-architecture comparison; it
-  is the original's rule and the persistence above is this version's
-  departure.
+- Removing a defeated army's entities in the victory phase: rejected, since
+  the victory phase would then remove entities after the intel phase has
+  built the visible sets, leaving them naming removed entities until the
+  next tick, would make a second remover beside the death phase, and in a two-army match it would act after the outcome, which SIM-085's freeze forbids.
+- Writing a defeated army's units' health to zero at the defeat's expiry and
+  letting the death phase find them: rejected, since an unfinished entity
+  is removed by the death phase only when the damage phase marks it, and the kill would need a second marking path through a phase that has already run; it would also leave a complete entity at zero health across a tick boundary, count the kill as a death, and land one tick late.
 - Re-pinning the synthetic multi-army test worlds with a commander kind:
   rejected, since it would put a commander into every later multi-army test
   for no rule the test checks; the precondition above stays instead.

@@ -105,10 +105,9 @@ fn conformance_sim_replay_covers_manifest() {
         "moves completed: {}",
         c.moves_completed
     );
-    assert!(
-        c.builds_completed > 0,
-        "builds completed: {}",
-        c.builds_completed
+    assert_eq!(
+        c.builds_completed, 5,
+        "builds completed: the UEF commander's mass extractor and three point defences, and the Cybran commander's generator"
     );
     assert!(
         c.projectile_impacts > 0,
@@ -119,6 +118,7 @@ fn conformance_sim_replay_covers_manifest() {
     assert!(c.stall_ticks >= 1, "stall ticks: {}", c.stall_ticks);
     assert_eq!(c.defeats, 1, "defeats");
     assert_eq!(c.victories, 1, "victories");
+    assert_eq!(c.kills, 1, "kills");
 }
 
 /// DET-024: the two cases are repeatable in one process, the NaN case
