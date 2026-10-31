@@ -1,0 +1,15 @@
+# One observation of the installed game running, for SIM-086 (docs/specs/sim.md): a mobile
+# unit ordered to attack a target inside its weapon's minimum radius. Observed and reported
+# by the observer below; no game data is copied. No tick-level numbers were taken, so no
+# clause is tested against this record; SIM-086 cites it for the back-off's direction.
+[provenance]
+build     = "Supreme Commander: Forged Alliance, Steam build 2845"
+date      = "2026-10-25"
+observer  = "Taylor Gunnoe"
+platform  = "Linux, Proton 11.0-100"
+procedure = "skirmish against one AI with cheats on; a T2 mobile artillery and an enemy structure spawned inside the artillery's minimum-range ring; the artillery ordered to attack the structure and watched until it fired"
+
+[numbers]
+fired_after_leaving_minimum = true
+fired_inside_minimum        = false
+moved_away_from_target      = true

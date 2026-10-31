@@ -82,8 +82,13 @@ source (AGENTS.md R2, R7).
   minimum: artillery and structure artillery (minimum 5 to 175), missile and
   torpedo kinds (3 to 20), the commanders and sub-commanders (1 or 2 against
   a maximum of 22 to 30), and one Aeon experimental (2 against 40). The
-  original engine's handling is unreadable, so the rule is this project's
-  design.
+  original engine's handling is unreadable in the installed scripts. One
+  observation of the running original
+  (tools/spec_eval/sim/observed/SIM-086.toml) saw a mobile artillery ordered
+  onto a target inside its minimum radius move away and fire only once outside
+  it, so the back-off's direction matches the original; the floor, the margin,
+  and where the attacker stops are this project's design until an observation
+  with tick-level numbers.
 - **Two per-tick values live outside the state.** The impacts the projectiles
   phase hands to the damage phase and the set of unfinished entities marked for
   death are created by the step and passed to the phases; nothing survives a
