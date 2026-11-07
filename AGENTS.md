@@ -126,12 +126,13 @@ Each item: statement · grounding (why unresolved) · signpost (what resolves it
   and `SimUtils.lua` 7,301 against 4,396, which is no stub), consistent with
   the mount order. Signpost: a pinned engine citation of the mount precedence, or
   an observation of the running original reading one of the four.
-- **U10 Observing the original.** One observation of the running original
-  is recorded (`tools/spec_eval/sim/observed/SIM-086.toml`: the back-off's
-  direction, without tick-level numbers); no clause is in the specification
-  lint's `observed` class, and every other behavioural rule rests on readable
-  Lua or on a recorded choice. Signpost: the first record with tick-level
-  numbers that a clause is tested against.
+- **U10 Observing the original.** Two observations of the running original
+  are recorded under `tools/spec_eval/sim/observed/` (SIM-086: the back-off's
+  direction; SIM-087: the defeat kill takes unfinished sites, about 20
+  seconds after the defeat — neither with tick-level numbers); no clause is
+  in the specification lint's `observed` class, and every other behavioural
+  rule rests on readable Lua or on a recorded choice. Signpost: the first
+  record with tick-level numbers that a clause is tested against.
 - **U8 Built-in versus plugin.** Which v0 behaviours (AI in particular) ship
   as first-party Wasm plugins rather than built-in Rust. Signpost: an ADR
   after the spec campaign.

@@ -1,0 +1,16 @@
+# One observation of the installed game running, for SIM-087 (docs/specs/sim.md): an army
+# defeated under Assassination while it owned an unfinished construction site. Observed and
+# reported by the observer below; no game data is copied. No tick-level numbers were taken,
+# so no clause is tested against this record; SIM-087 cites it for the kill's reach over
+# unfinished entities.
+[provenance]
+build     = "Supreme Commander: Forged Alliance, Steam build 2845"
+date      = "2026-11-07"
+observer  = "Taylor Gunnoe"
+platform  = "Linux, Proton 11.0-100"
+procedure = "skirmish against one AI under Assassination; a building started and left standing as an unfinished site; the commander self-destructed and the defeated army watched until the kill"
+
+[numbers]
+destroyed_with_the_other_units    = true
+seconds_from_defeat_to_kill_about = 20
+unfinished_site_destroyed         = true
