@@ -57,7 +57,10 @@ clause so the design clauses have a ratifiable source (AGENTS.md R2, R7).
   outcome stands (in a two-army match the kill follows the outcome), and the
   death phase stays the one remover of entities. The script lists the army's
   units by a call whose treatment of unfinished units is unreadable; this
-  version reads it as killing them, finished or not. Kills are counted in
+  version reads it as killing them, finished or not. One observation of the
+  running original (tools/spec_eval/sim/observed/SIM-087.toml) saw a
+  defeated army's unfinished site destroyed with its other units about 20
+  seconds after the defeat, so the reading matches the original. Kills are counted in
   `kills`, apart from deaths. The commands phase ignores and counts, as a
   foreign command, every command of a defeated army from the tick after the
   defeat.
