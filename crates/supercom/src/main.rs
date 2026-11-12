@@ -1,13 +1,26 @@
 //! Entry point of the `supercom` binary.
 //!
-//! For now the binary only resolves the game data directory and reports
-//! whether it exists. The engine proper lands behind the specification in
-//! `docs/specs/`.
+//! With no argument the binary resolves the game data directory and reports
+//! whether it exists. `supercom view` opens a window on an installed map and
+//! draws its terrain and water. The engine proper lands behind the
+//! specification in `docs/specs/`.
 
+mod cli;
+mod error;
+mod frame;
+mod input;
+mod mapfile;
+mod plan;
+mod window;
+
+use cli::{Command, ViewArgs};
+use error::RunError;
 use std::env;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use window::Outcome;
+use winit::event_loop::EventLoop;
 
 /// Environment variable that overrides the Forged Alliance install directory.
 const GAME_DIR_VAR: &str = "SUPERCOM_FA_DIR";
@@ -25,6 +38,42 @@ fn resolve_game_dir(override_dir: Option<OsString>, home: Option<OsString>) -> O
 }
 
 fn main() -> ExitCode {
+    match cli::parse_args(env::args_os().skip(1)) {
+        Err(usage) => {
+            eprintln!("{usage}");
+            ExitCode::FAILURE
+        }
+        Ok(Command::Bare) => bare(),
+        Ok(Command::View(args)) => view(&args),
+    }
+}
+
+/// `view`: the display first, then the install and the map, then the window.
+fn view(args: &ViewArgs) -> ExitCode {
+    match run_view(args) {
+        Ok(Outcome::Presented(frames)) => {
+            println!("presented {frames} frames");
+            ExitCode::SUCCESS
+        }
+        Ok(Outcome::Closed) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("supercom: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_view(args: &ViewArgs) -> Result<Outcome, RunError> {
+    let event_loop = EventLoop::new().map_err(|error| RunError::NoDisplay {
+        reason: error.to_string(),
+    })?;
+    let game_dir = resolve_game_dir(env::var_os(GAME_DIR_VAR), env::var_os("HOME"));
+    let map = plan::plan_run(game_dir.as_deref(), &args.folder)?;
+    window::run(event_loop, map, args.frames)
+}
+
+/// The run with no argument: report whether the game data is found.
+fn bare() -> ExitCode {
     println!("supercom {}", env!("CARGO_PKG_VERSION"));
     match resolve_game_dir(env::var_os(GAME_DIR_VAR), env::var_os("HOME")) {
         Some(dir) if dir.is_dir() => {

@@ -200,7 +200,9 @@ fn normals(heights: &[f32], grid: Grid, cell_x: f32, cell_z: f32) -> Result<Vec<
             let dz = (h(i, down)? - h(i, up)?) / (to_f32(down - up) * cell_z);
             let length = (dx * dx + dz * dz + 1.0).sqrt();
             let normal = [-dx / length, 1.0 / length, -dz / length];
-            if !normal.iter().all(|c| c.is_finite()) {
+            // A slope whose square overflows makes the length infinite and
+            // the normal zero: finite, but not a unit vector.
+            if !(length.is_finite() && normal.iter().all(|c| c.is_finite())) {
                 return Err(Error::NonFiniteNormal);
             }
             out.push(normal);

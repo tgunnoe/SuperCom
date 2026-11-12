@@ -109,6 +109,23 @@ pub struct SurfaceRenderer {
     pub format: TextureFormat,
 }
 
+/// The format the renderer draws in for a surface that offers `offered`, in
+/// the surface's order: the first sRGB format when there is one, otherwise
+/// the first format.
+///
+/// # Errors
+/// [`Error::Surface`] when the surface offers no format.
+pub fn surface_format(offered: &[TextureFormat]) -> Result<TextureFormat, Error> {
+    offered
+        .iter()
+        .copied()
+        .find(TextureFormat::is_srgb)
+        .or_else(|| offered.first().copied())
+        .ok_or_else(|| Error::Surface {
+            reason: "the surface offers no texture format".to_owned(),
+        })
+}
+
 async fn open(
     instance: &Instance,
     compatible: Option<&Surface<'_>>,
@@ -213,21 +230,24 @@ impl Renderer {
                 reason: error.to_string(),
             })?;
         let (adapter, device, queue) = pollster::block_on(open(&instance, Some(&surface)))?;
-        let formats = surface.get_capabilities(&adapter).formats;
-        let format = formats
-            .iter()
-            .copied()
-            .find(TextureFormat::is_srgb)
-            .or_else(|| formats.first().copied())
-            .ok_or_else(|| Error::Surface {
-                reason: "the surface offers no texture format".to_owned(),
-            })?;
+        let format = surface_format(&surface.get_capabilities(&adapter).formats)?;
         let renderer = Self::from_parts(&adapter, device, queue, format)?;
         Ok(SurfaceRenderer {
             renderer,
             surface,
             format,
         })
+    }
+
+    /// Runs `make`, a caller's wgpu calls, inside the renderer's validation
+    /// and out-of-memory error scopes, so an error they raise comes back as
+    /// a value and never reaches the device's default handler, which panics.
+    ///
+    /// # Errors
+    /// [`Error::Gpu`], naming `during`, for the first error either scope
+    /// captured.
+    pub fn guarded<T>(&self, during: &'static str, make: impl FnOnce() -> T) -> Result<T, Error> {
+        scoped(&self.device, during, make)
     }
 
     /// The device; a caller configures its surface with this one.
@@ -261,7 +281,8 @@ impl Renderer {
     }
 
     /// Runs the fit check against the device's buffer limit, then uploads
-    /// `mesh` and `water` for the draws that follow.
+    /// `mesh` and `water` for the draws that follow. An upload that is
+    /// refused or fails leaves the scene uploaded before it, still drawn.
     ///
     /// # Errors
     /// [`Error::GridTooLarge`] when the mesh's grid exceeds the device's

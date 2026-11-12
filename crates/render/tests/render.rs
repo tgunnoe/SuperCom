@@ -11,7 +11,7 @@ use common::{
 };
 use supercom_render::{
     Camera, Error, LIGHT_DIRECTION, TerrainMesh, WaterPlane, ZoomSpeed, grid_vertex_count,
-    normalize_height, shade,
+    normalize_height, shade, surface_format,
 };
 
 /// The relative tolerance the camera clauses state for inside-the-view tests.
@@ -780,4 +780,80 @@ fn render_camera_rejects_bad_inputs() {
         Camera::new(512.0, 256.0, 5.0, 4.0, 1.0),
         Err(Error::BadElevationRange { .. })
     ));
+}
+
+/// A guard, passing at the commit that adds it because the camera's guards
+/// already exist: zoom and pan leave the camera exactly as it was for input
+/// that is not finite. Its teeth are two mutants of `camera.rs`, each
+/// removing one guard, either of which makes this test fail.
+#[test]
+fn render_camera_ignores_non_finite_input() {
+    use supercom_render::ZoomSpeed::{Fast, Normal};
+    let mut camera = ok(Camera::new(512.0, 256.0, 0.0, 20.0, 1.5));
+    camera.zoom(-10.0, Normal);
+    camera.pan(30.0, -12.0);
+    let before = camera;
+    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        for speed in [Normal, Fast] {
+            camera.zoom(bad, speed);
+            assert_eq!(camera, before, "zoom by {bad} changed the camera");
+        }
+        for (dx, dz) in [(bad, 1.0), (1.0, bad), (bad, bad)] {
+            camera.pan(dx, dz);
+            assert_eq!(camera, before, "pan by ({dx}, {dz}) changed the camera");
+        }
+    }
+}
+
+#[test]
+fn render_surface_format_prefers_srgb_then_first() {
+    use supercom_render::wgpu::TextureFormat::{
+        Bgra8Unorm, Bgra8UnormSrgb, Rgba8Unorm, Rgba8UnormSrgb,
+    };
+    assert_eq!(
+        surface_format(&[Bgra8Unorm, Bgra8UnormSrgb, Rgba8UnormSrgb]),
+        Ok(Bgra8UnormSrgb),
+        "the first sRGB format wins over an earlier non-sRGB one"
+    );
+    assert_eq!(
+        surface_format(&[Rgba8UnormSrgb, Bgra8UnormSrgb]),
+        Ok(Rgba8UnormSrgb)
+    );
+    assert_eq!(
+        surface_format(&[Bgra8Unorm, Rgba8Unorm]),
+        Ok(Bgra8Unorm),
+        "with no sRGB format the first is chosen"
+    );
+    assert!(
+        matches!(surface_format(&[]), Err(Error::Surface { .. })),
+        "a surface that offers no format is an error"
+    );
+}
+
+#[test]
+fn render_steep_terrain_is_an_error() {
+    // Samples 0 and 1 times a scale of 1e30 are finite elevations, but the
+    // slope between neighbours is 1e30 per world unit, whose square
+    // overflows an f32: the normal would have length zero.
+    let steep = grid_map(4, 4, 4.0, 4.0, 1e30, |i, j| i16::from((i + j) % 2));
+    let built = TerrainMesh::build(&steep);
+    assert_eq!(
+        built.as_ref().err(),
+        Some(&Error::NonFiniteNormal),
+        "a slope whose square overflows is refused"
+    );
+    // A cell size so small that the slope overflows, over modest relief.
+    let tiny = grid_map(4, 4, 1e-30, 1e-30, 1.0, |i, j| {
+        i16::from((i + j) % 2) * 1000
+    });
+    assert_eq!(
+        TerrainMesh::build(&tiny).as_ref().err(),
+        Some(&Error::NonFiniteNormal),
+        "a cell so small that the slope overflows is refused"
+    );
+    let mild = grid_map(4, 4, 4.0, 4.0, 1.0, |i, j| i16::from((i + j) % 2));
+    assert!(
+        TerrainMesh::build(&mild).is_ok(),
+        "a gentle map still builds"
+    );
 }

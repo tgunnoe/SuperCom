@@ -7,13 +7,18 @@ and the shading function, all pure functions over plain `f32` arrays in the
 crate `supercom-render`. Its second part is the GPU pipeline in the same
 crate, which draws that terrain and water for a camera into any texture view
 through wgpu; it needs an adapter but no window, and its tests draw
-offscreen. Nothing here opens a window. Its camera and shading are decisions of this project, recorded
+offscreen. Its third part is the windowed mode, the `view` subcommand of the
+`supercom` binary, which opens a window on an installed map and calls the
+pipeline's one draw function; its decisions are pure functions of the
+binary, tested without a window. Its camera and shading are decisions of this project, recorded
 in docs/adr/0016-first-light-renderer.md: a search of the installed data finds
 no number for a world camera's field of view, clip planes, or zoom limits, so
 no clause below says how the original behaves.
 
-The frontier of this slice: the GPU pipeline's contract is specified below
-and the windowed mode arrives with its code; terrain splatting, decals, shadows, water effects,
+The frontier of this slice: the GPU pipeline's and the windowed mode's
+contracts are specified below; the window loop itself, the code that turns the
+window system's events into inputs and draws, is reached by no headless test
+and is tried only when a display is available; terrain splatting, decals, shadows, water effects,
 units, fog of war, strategic icons, and post-processing are later slices; and
 the vertical reading of REN-001 awaits a comparison with the running original.
 
@@ -125,3 +130,43 @@ At the strategic view of the installed map SCMP_012, drawn into a square target,
 
 **REN-031** `game-data` `test:conformance_gpu_installed_wet_map_shows_its_water_share`
 At the strategic view of the installed map SCMP_016, drawn into a square target, the water's colour MUST cover a fraction of the pixels that are not the clear colour within 0.03 of 0.095. The heightmap's share of samples at or below the stored water elevation 17.5 is 0.0954, and only 17 of its 66,049 samples sit exactly at that elevation, so ties in depth do not move the fraction.
+
+## The windowed mode
+
+The `supercom` binary gains one subcommand, `view`. Its decisions are pure
+functions in the binary, tested without a window; the one test that opens a
+window runs only when `SUPERCOM_REQUIRE_DISPLAY=1` is set. The names below
+are those of docs/adr/0016-first-light-renderer.md.
+
+**REN-032** `design` `test:supercom_parse_args_cases`
+The command line MUST be parsed by a pure function of the argument list, before anything else is done, so a usage error is reported whatever the display or the install. No argument MUST be the bare run, which prints the version line and whether the game data was found, exactly as before the windowed mode. `view` MUST take an optional map folder, `SCMP_012` when none is given, and an optional `--frames <n>` with n a positive integer of ASCII digits that fits 32 bits, in either order. The map folder MUST be a single non-empty path component: it contains no `/` or `\` and is neither `.` nor `..`. Any other argument list MUST print the usage to stderr and return the failure code before the install is read. The test parses each accepted form, with the empty list parsing to the bare run, and the rejected ones, among them an unknown option, a repeated `--frames`, two folders, a zero, signed, fractional, or oversized count, and folders with a separator or a dot component (docs/adr/0016-first-light-renderer.md).
+
+**REN-033** `design` `test:supercom_view_without_display_fails_cleanly`
+`view` MUST create the window system's event loop first, before the install is read. Where no display exists the creation fails, and the binary MUST then print to stderr a message that says no display is available and names `WAYLAND_DISPLAY`, `WAYLAND_SOCKET`, and `DISPLAY`, the variables the window system reads, and return the failure code without panicking. On Linux, the one platform where a display is found only through those variables, the test runs the built binary with `view` and those three variables removed from its environment and expects exit code 1, the message, and no mention of the install, which it points at a path that does not exist (docs/adr/0016-first-light-renderer.md).
+
+**REN-034** `design` `test:supercom_choose_map_file_cases`
+The map of a folder MUST be the one file in `<install>/maps/<folder>/` whose name ends `.scmap`, ignoring case; a folder with no such file, or with more than one, MUST be an error value naming the folder. The choice is a pure function of the folder's file names, tested over a match among other files, a match in capitals, near misses that only contain the suffix, an empty list, and two matches (docs/adr/0016-first-light-renderer.md).
+
+**REN-035** `design` `test:supercom_plan_run_failures`
+A run of `view` MUST proceed in this order: the display (REN-033), the install, resolved as the bare run resolves it, the map file (REN-034), its parse, the window, the renderer for the window's surface, the grid fit check against that renderer's device, the terrain mesh, the water plane, the camera, the upload, and the loop. The fit check, REN-024, MUST run before the mesh is built, so a map the device cannot hold ends the run with its error and the mesh is never allocated. Each failure MUST end the run with its text on stderr and the failure code. The steps up to the window are one pure-in-effect function of the install directory and the folder; its test creates directories under the system's temporary directory, removes them, and expects the failure of each step: an unresolved install, a missing install, a folder that cannot be listed, none and two map files, and a file that does not parse. Its success on an installed map is exercised by a conformance test (docs/adr/0016-first-light-renderer.md).
+
+**REN-036** `design` `test:supercom_input_drives_the_camera`
+The binary MUST turn the window system's events into its own input type, and one pure function MUST apply an input to the camera. A wheel of one line MUST zoom one step, away from the user toward the near end and toward the user toward the far end, at the normal speed, or the fast speed while shift is held; in the binary's input type a positive line count is a wheel turned away from the user. A pixel-delta wheel MUST count 40 pixels to the line, fractionally. WASD and the arrow keys MUST pan the target by 0.04 of the camera's distance per key event, north, west, south, and east as on the map (north is decreasing z); Home MUST go to the strategic view; Escape MUST close the window. Any other key is no input. The test applies each to a camera and expects the distance and target it implies, and expects a wheel count that is not finite to leave the camera unchanged (docs/adr/0016-first-light-renderer.md).
+
+**REN-037** `design` `test:render_camera_ignores_non_finite_input`
+`Camera::zoom` and `Camera::pan` MUST ignore input that is not finite and leave the camera exactly as it was. The test passes NaN and both infinities to each, and is pinned by two mutants of the camera's source, each removing one of the two guards, which make it fail (docs/adr/0016-first-light-renderer.md).
+
+**REN-038** `design` `test:supercom_frame_plan_over_sizes`
+Whether a frame is drawn MUST be a pure function of the window's size and the size the surface is configured at. When either dimension is zero, as when the window is minimized, the binary MUST leave the surface and the camera as they are and draw nothing until the size is positive again, and that is not an error. Otherwise it MUST draw, configuring the surface with the renderer's device first when the size differs from the configured one, and setting the camera's aspect ratio to the size's width over height; an error from setting the aspect ratio is reported once on stderr and is not fatal. A surface found lost or outdated MUST be configured again; a frame that did not present MUST be counted, and after 30 in a row the run ends with a failure; running out of memory ends the run with a failure. The counting is a pure type, tested beside the plan (docs/adr/0016-first-light-renderer.md).
+
+**REN-039** `design` `test:conformance_window_presents_frames`
+`view <folder> --frames <n>` MUST present n frames, print `presented <n> frames` to stdout, and return the success code. The test runs the built binary on `SCMP_012` with `--frames 3` only when `SUPERCOM_REQUIRE_DISPLAY=1` is set, with the environment it inherits, display variables included, so it is run only inside a nested compositor that shows nothing; without the flag it prints `SKIP: <reason>` and passes, whether or not a display exists. It waits at most a minute and then kills the binary and fails (docs/adr/0016-first-light-renderer.md).
+
+**REN-040** `design` `test:render_surface_format_prefers_srgb_then_first`
+The format the renderer draws in for a surface MUST be a pure function of the formats the surface offers, in their order: the first sRGB format when there is one, otherwise the first format, and an error value when the surface offers none. The surface constructor MUST use it (docs/adr/0016-first-light-renderer.md).
+
+**REN-041** `design` `test:conformance_gpu_guarded_calls_return_errors_as_values`
+The renderer MUST offer a public way to run a caller's wgpu calls inside its validation and out-of-memory error scopes and to get a captured error back as an error value, so that the window's surface configuration, texture acquisition, and presentation never report to the device's default handler, which panics. The test makes a call that raises nothing and expects its value, makes a texture of zero width inside the scope and expects the error value, and then draws (docs/adr/0016-first-light-renderer.md).
+
+**REN-042** `design` `test:render_steep_terrain_is_an_error`
+Building the terrain MUST return an error value, and MUST NOT panic, for a map whose slope leaves a vertex normal that is not a finite vector of unit length, either because an elevation difference is so large that its square overflows or because the cell is so small that the slope does. The test builds one map of each kind and a gentle map that still builds (docs/adr/0016-first-light-renderer.md).

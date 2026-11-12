@@ -828,6 +828,74 @@ fn conformance_gpu_misuse_is_an_error_value() {
     }
 }
 
+/// Calls made inside the renderer's error scopes come back as values, and
+/// the renderer draws afterwards.
+#[test]
+fn conformance_gpu_guarded_calls_return_errors_as_values() {
+    let format = TextureFormat::Rgba8UnormSrgb;
+    let Some(mut renderer) = gpu(format) else {
+        return;
+    };
+    let ran = std::cell::Cell::new(false);
+    let valid = renderer.guarded("a valid call", || {
+        ran.set(true);
+        7_u32
+    });
+    assert!(ran.get(), "the caller's calls are run");
+    assert_eq!(valid, Ok(7), "a call that raises nothing returns its value");
+
+    let device = renderer.device().clone();
+    let invalid = renderer.guarded("a zero-width texture", || {
+        let _ = device.create_texture(&TextureDescriptor {
+            label: None,
+            size: Extent3d {
+                width: 0,
+                height: 4,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format,
+            usage: TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+    });
+    assert!(
+        matches!(
+            &invalid,
+            Err(Error::Gpu {
+                during: "a zero-width texture",
+                ..
+            })
+        ),
+        "an invalid call is an error value: {invalid:?}"
+    );
+
+    let mesh = mesh_of(&east_ramp());
+    let camera = must(Camera::for_mesh(&mesh, 1.0), "the camera builds");
+    must(renderer.upload(&mesh, None), "the mesh uploads");
+    let texture = device.create_texture(&TextureDescriptor {
+        label: None,
+        size: Extent3d {
+            width: 4,
+            height: 4,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format,
+        usage: TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&TextureViewDescriptor::default());
+    must(
+        renderer.draw(&camera, &view, (4, 4)),
+        "the renderer still draws after a captured error",
+    );
+}
+
 // ---- REN-028 -----------------------------------------------------------
 
 #[test]
