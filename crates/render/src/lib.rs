@@ -24,8 +24,11 @@ pub use camera::{
 };
 pub use error::Error;
 pub use gate::{GpuGate, gpu_gate};
-pub use renderer::{Renderer, SurfaceRenderer};
+pub use renderer::{Renderer, SurfaceRenderer, surface_format};
 pub use shader::{CLEAR_COLOR, WATER_COLOR, shader_source};
 pub use shading::{AMBIENT, LIGHT_DIRECTION, RAMP, normalize_height, shade};
 pub use terrain::{INDEX_BYTES, TerrainMesh, VERTEX_BYTES, grid_fits, grid_vertex_count};
 pub use water::WaterPlane;
+/// The graphics library the renderer is built on, re-exported so an
+/// application names its types without a dependency line of its own.
+pub use wgpu;

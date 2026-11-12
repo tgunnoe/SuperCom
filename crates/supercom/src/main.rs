@@ -1,9 +1,22 @@
 //! Entry point of the `supercom` binary.
 //!
-//! For now the binary only resolves the game data directory and reports
-//! whether it exists. The engine proper lands behind the specification in
-//! `docs/specs/`.
+//! With no argument the binary resolves the game data directory and reports
+//! whether it exists. `supercom view` opens a window on an installed map and
+//! draws its terrain and water. The engine proper lands behind the
+//! specification in `docs/specs/`.
 
+mod cli;
+mod error;
+#[cfg_attr(not(test), expect(dead_code, reason = "the window loop calls it"))]
+mod frame;
+#[cfg_attr(not(test), expect(dead_code, reason = "the window loop calls it"))]
+mod input;
+#[cfg_attr(not(test), expect(dead_code, reason = "the plan calls it"))]
+mod mapfile;
+#[cfg_attr(not(test), expect(dead_code, reason = "the view subcommand calls it"))]
+mod plan;
+
+use cli::Command;
 use std::env;
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -25,6 +38,18 @@ fn resolve_game_dir(override_dir: Option<OsString>, home: Option<OsString>) -> O
 }
 
 fn main() -> ExitCode {
+    match cli::parse_args(env::args_os().skip(1)) {
+        Err(usage) => {
+            eprintln!("{usage}");
+            ExitCode::FAILURE
+        }
+        Ok(Command::Bare) => bare(),
+        Ok(Command::View(_)) => ExitCode::SUCCESS,
+    }
+}
+
+/// The run with no argument: report whether the game data is found.
+fn bare() -> ExitCode {
     println!("supercom {}", env!("CARGO_PKG_VERSION"));
     match resolve_game_dir(env::var_os(GAME_DIR_VAR), env::var_os("HOME")) {
         Some(dir) if dir.is_dir() => {

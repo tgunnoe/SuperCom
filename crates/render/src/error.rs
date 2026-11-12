@@ -42,8 +42,9 @@ pub enum Error {
     },
     /// A sample times the scale is not finite.
     NonFiniteElevation,
-    /// An elevation difference over finite elevations overflowed, so a
-    /// vertex normal is not finite.
+    /// A vertex normal is not a finite unit vector although every elevation
+    /// is finite: either an elevation difference so large that its square
+    /// overflows, or a cell size so small that the slope does.
     NonFiniteNormal,
     /// The aspect ratio is not finite and positive.
     BadAspect {
@@ -144,7 +145,7 @@ impl fmt::Display for Error {
             Self::NonFiniteNormal => {
                 write!(
                     f,
-                    "a vertex normal is not finite although every elevation is"
+                    "a vertex normal is not a finite unit vector although every elevation is finite"
                 )
             }
             Self::NoAdapter { reason } => write!(f, "no graphics adapter is available: {reason}"),

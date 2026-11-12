@@ -12,8 +12,9 @@ everything which needs no graphics device is a pure function in its own
 crate, `supercom-render`, testable without a display (AGENTS.md I4): the
 terrain grid built from a parsed map, the water plane, the camera, and the
 shading function. The GPU pipeline that draws them into any texture view
-lives in the same crate and is decided below (REN-019 to REN-029); the window
-is the next unit of work and calls the pipeline's one draw function.
+lives in the same crate and is decided below (REN-019 to REN-029); the window,
+the `view` subcommand of the `supercom` binary, calls the pipeline's one draw
+function and is decided below (REN-032 to REN-042).
 docs/specs/render.md holds the clauses; this record is the source each design
 clause names.
 
@@ -171,8 +172,9 @@ game.
   and is evaluated before a mesh is built and before any buffer exists,
   because wgpu reports an oversized buffer through a handler that panics by
   default. The device is requested with wgpu's default limits lowered to what
-  the adapter supports, never above, so the maximum buffer size is 256 MiB on
-  every host and the answer does not depend on which adapter was found.
+  the adapter supports, never above, so the maximum buffer size is at most
+  256 MiB: no host accepts a larger grid, and a host whose adapter supports
+  less refuses a grid sooner.
 - **Errors are values (REN-024, REN-025, REN-026, REN-027).** A missing adapter, a refused
   device request, a refused surface, an oversized grid, an inconsistent mesh,
   a draw before an upload, a zero-sized target, and a validation or
@@ -193,6 +195,92 @@ game.
   that has an adapter. A test that dumps frames for a human to look at writes
   them only when `SUPERCOM_RENDER_DUMP` names an absolute directory outside
   the repository, as binary PPM, so no image can enter the tree by a test run.
+- **The command line, parsed first (REN-032).** `supercom` with no argument is
+  the bare run it was; `supercom view [<map folder>] [--frames <n>]` opens the
+  window. The arguments are parsed by hand, without a parsing crate, by a pure
+  function of the argument list that runs before the display or the install
+  is touched, so a usage error reads the same on every host. Ground: the
+  grammar is two shapes, and a pure parser is testable without a window.
+  The folder is one path component, so `view ../x` cannot leave the install's
+  `maps` directory: it has no separator and is not `.` or `..`. The count is
+  a positive 32-bit integer of ASCII digits, so no sign or fraction is read
+  as one.
+- **The display is checked first (REN-033).** `view` creates the event loop
+  before it reads the install, and winit's creation fails when none of
+  `WAYLAND_DISPLAY`, `WAYLAND_SOCKET`, and `DISPLAY` is set. The binary
+  reports that failure in words that name the three variables and returns the
+  failure code. Ground: a headless host is the common case of a failure, and
+  the cheapest check goes first. The test is compiled on Linux alone, the one
+  platform where a display is found only through those variables.
+- **The map file rule (REN-034).** The map is the one file whose name ends
+  `.scmap`, ignoring case, in the folder; none or several is an error naming
+  the folder. Ground: an installed map is a folder of one `.scmap` beside
+  three Lua files, and guessing among several would load the wrong map
+  silently. The binary re-implements the small lookup with std and
+  `supercom-scmap` alone, so it depends on no loader or simulation crate.
+- **The run's order, and the fit check before the build (REN-035).** The
+  display, the install, the map file, its parse, the window, the renderer for
+  its surface, the fit check against that renderer's device, the mesh, the
+  water, the camera, the upload, the loop. Ground: each step needs the one
+  before it, and the fit check needs the device but not the mesh, so a map the
+  device cannot hold is refused by REN-024's pure function before its
+  buffers are built (AGENTS.md I6: an error value, never a panic in wgpu's
+  default handler). The steps up to the window are one function of the
+  install directory and the folder, so a test reaches them over temporary
+  directories.
+- **The input bindings and their constants (REN-036).** The wheel zooms one
+  step a line, away from the user toward the near end, and shift selects the
+  fast step of REN-010; a pixel-delta wheel (a touchpad) counts 40 pixels to
+  the line so that it zooms fractionally; WASD and the arrow keys pan by 0.04
+  of the distance per key event, so a held key's repeat moves the target in
+  proportion to the view; Home goes to the strategic view; Escape closes.
+  Keys are read by physical position, so the pan keys are where they are on
+  every layout. The constants are choices of this project; the original's
+  bindings were not read. Ground: only the camera is driven in this slice.
+- **Non-finite input is ignored (REN-037).** `Camera::zoom` and `Camera::pan`
+  already return early for a value that is not finite; the clause states it
+  and a test pins it with two mutants of the source, because a NaN would
+  otherwise reach the target and the matrices and make every later frame
+  invalid.
+- **Resizing and the zero-sized window (REN-038).** A pure function of the
+  size and the configured size says whether to draw and whether to configure.
+  A minimized window has a zero dimension, which wgpu documents as a panic
+  when configured; so nothing is configured, the camera is unchanged, and
+  nothing is drawn until the size is positive. A lost or outdated surface is
+  configured again; a run of 30 frames that did not present ends the run, so
+  a surface that never recovers fails instead of spinning.
+- **The frame count option (REN-039).** `--frames <n>` presents n frames,
+  prints `presented <n> frames`, and exits with success, so a script or a test
+  can run the window to a known end. Ground: a window loop otherwise ends only
+  when a person closes it, and a test must end by itself.
+- **The surface's format as a pure function (REN-040).** Which of a surface's
+  formats the renderer draws in is a function of the offered list alone: the
+  first sRGB format, else the first, else an error. The constructor calls it,
+  so the choice is tested without a surface.
+- **The window's wgpu calls inside the renderer's error scopes (REN-041).**
+  Configuring a surface, acquiring a texture, and presenting report errors to
+  the device, whose default handler panics. The renderer therefore offers a
+  public method that runs a caller's calls inside the validation and
+  out-of-memory scopes it already uses and returns the first captured error as
+  a value, and the window runs all three inside it. The binary names no wgpu
+  line of its own: the renderer re-exports wgpu for the types.
+- **A normal that is not a finite unit vector is refused (REN-042).** A slope
+  whose square overflows gave a normal of length zero, finite but not a unit
+  vector; the build now refuses a normal that is not finite and of unit
+  length, with the existing error variant widened to say so, because a zero
+  normal shades as black without a diagnostic.
+- **The event loop belongs to the application crate (all of the above).** As
+  ADR-0003 has it, the binary owns the window and the event loop and names
+  winit; `supercom-render` still names no windowing type. The binary hands the
+  renderer an `Arc` of the window as the surface target and winit's owned
+  display handle, which needs no unsafe code.
+- **The test that opens a window runs only when asked (REN-039).** It is named
+  `conformance_window_` and runs only when `SUPERCOM_REQUIRE_DISPLAY=1` is set,
+  inheriting the display it is given, so a plain test run and the gate open no
+  window on anyone's screen; a host with a display runs it inside a nested
+  compositor that shows nothing. Without the flag it prints a skip line and
+  passes.
+
 - **Tolerance.** The inside-the-view comparisons use a relative tolerance of
   1e-4 of w: f32 arithmetic over a matrix product errs by about 1e-6
   relative, and at the far end the corners lie on the screen's edge by
@@ -226,9 +314,10 @@ game.
 - **Blended water.** Shows the terrain through the surface, but makes a
   pixel's colour a function of two layers and the water's share of a frame
   depend on the terrain under it.
-- **Requesting the adapter's full limits.** Would let the fit check pass a
-  grid on one host that another refuses; the default limit makes the answer
-  the same everywhere.
+- **Requesting the adapter's full limits.** Would let a host with a large
+  adapter limit accept a grid that the default limit refuses; the lowered
+  default caps every host at 256 MiB, so no host accepts what the default
+  refuses, though a host with less refuses sooner.
 
 - **A math crate (glam, nalgebra).** Adds a dependency whose types would
   surface in the public API or force conversions, for a handful of

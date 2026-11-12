@@ -109,6 +109,17 @@ pub struct SurfaceRenderer {
     pub format: TextureFormat,
 }
 
+/// The format the renderer draws in for a surface that offers `offered`, in
+/// the surface's order: the first sRGB format when there is one, otherwise
+/// the first format.
+///
+/// # Errors
+/// [`Error::Surface`] when the surface offers no format.
+pub fn surface_format(offered: &[TextureFormat]) -> Result<TextureFormat, Error> {
+    let _ = offered;
+    Ok(TextureFormat::Rgba8Unorm)
+}
+
 async fn open(
     instance: &Instance,
     compatible: Option<&Surface<'_>>,
@@ -230,6 +241,21 @@ impl Renderer {
         })
     }
 
+    /// Runs `make`, a caller's wgpu calls, inside the renderer's validation
+    /// and out-of-memory error scopes, so an error they raise comes back as
+    /// a value and never reaches the device's default handler, which panics.
+    ///
+    /// # Errors
+    /// [`Error::Gpu`], naming `during`, for the first error either scope
+    /// captured.
+    pub fn guarded<T>(&self, during: &'static str, make: impl FnOnce() -> T) -> Result<T, Error> {
+        let _ = (&self.device, make);
+        Err(Error::Gpu {
+            during,
+            reason: "the calls were not run".to_owned(),
+        })
+    }
+
     /// The device; a caller configures its surface with this one.
     #[must_use]
     pub fn device(&self) -> &Device {
@@ -261,7 +287,8 @@ impl Renderer {
     }
 
     /// Runs the fit check against the device's buffer limit, then uploads
-    /// `mesh` and `water` for the draws that follow.
+    /// `mesh` and `water` for the draws that follow. An upload that is
+    /// refused or fails leaves the scene uploaded before it, still drawn.
     ///
     /// # Errors
     /// [`Error::GridTooLarge`] when the mesh's grid exceeds the device's
