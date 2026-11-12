@@ -1796,6 +1796,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "supercom-render"
+version = "0.0.1"
+dependencies = [
+ "supercom-scmap",
+ "supercom-testkit",
+]
+
+[[package]]
 name = "supercom-replay-harness"
 version = "0.0.1"
 dependencies = [

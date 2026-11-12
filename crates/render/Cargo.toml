@@ -1,0 +1,18 @@
+[package]
+description  = "Headless first-light renderer core: terrain grid, water plane, camera, and shading as pure functions"
+edition      = { workspace = true }
+license      = { workspace = true }
+name         = "supercom-render"
+publish      = false
+repository   = { workspace = true }
+rust-version = { workspace = true }
+version      = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+supercom-scmap = { path = "../scmap", version = "0.0.1" }
+
+[dev-dependencies]
+supercom-testkit = { path = "../testkit", version = "0.0.1" }
