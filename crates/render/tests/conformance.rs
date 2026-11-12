@@ -45,7 +45,7 @@ fn conformance_render_installed_maps() {
         mesh.lowest
     );
     assert!(
-        (mesh.highest - 20.164_062_5).abs() < 1e-6,
+        (mesh.highest - 20.164_062).abs() < 1e-6,
         "highest {}",
         mesh.highest
     );

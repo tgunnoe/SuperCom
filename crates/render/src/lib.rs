@@ -17,7 +17,7 @@ mod water;
 
 pub use camera::{
     Camera, FAST_ZOOM_STEP, FOV_Y_RADIANS, NEAR_DISTANCE, NEAR_PITCH_RADIANS, NORMAL_ZOOM_STEP,
-    VIEW_TOLERANCE, ZoomSpeed,
+    ZoomSpeed,
 };
 pub use error::Error;
 pub use shading::{LIGHT_DIRECTION, normalize_height, shade};

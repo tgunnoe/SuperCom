@@ -608,9 +608,10 @@ fn render_height_normalization_and_shading() {
     let lit = luminance(shade(0.5, LIGHT_DIRECTION));
     let unlit = luminance(shade(0.5, [0.0, -1.0, 0.0]));
     assert!(lit > unlit + 0.1, "lit {lit} against unlit {unlit}");
+    let (valley, summit) = (shade(0.0, [0.0, 1.0, 0.0]), shade(1.0, [0.0, 1.0, 0.0]));
     assert!(
-        shade(0.0, [0.0, 1.0, 0.0]) != shade(1.0, [0.0, 1.0, 0.0]),
-        "colour follows height"
+        luminance(summit) > luminance(valley) + 0.1,
+        "colour follows height: {valley:?} against {summit:?}"
     );
 }
 

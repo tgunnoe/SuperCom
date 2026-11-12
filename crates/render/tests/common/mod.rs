@@ -74,12 +74,14 @@ pub fn with_water(mut map: Map, elevation: f32) -> Map {
     map
 }
 
-/// A 6 by 6 cell map over 512 by 256 world units with a peak of 200 on the
-/// vertex at column 4, row 1 and a floor of 0, so its relief exceeds the
-/// camera's near zoom distance; the centre and corners are vertices.
+/// A 6 by 6 cell map over 512 by 256 world units whose floor is 0 to 20 and
+/// whose four corners, centre, and one off-centre vertex (column 4, row 1)
+/// stand at 200, so its relief exceeds the camera's near zoom distance and
+/// a target over any corner or the centre has a vertex on the target's
+/// plane at the middle of the screen.
 pub fn peak_map() -> Map {
     grid_map(6, 6, 512.0, 256.0, 1.0, |i, j| {
-        if (i, j) == (4, 1) {
+        if matches!((i, j), (0 | 6, 0 | 6) | (3, 3) | (4, 1)) {
             200
         } else {
             i16::from((i + j) % 3) * 10
