@@ -94,6 +94,21 @@ fn render_indices_form_two_upward_triangles_per_cell() {
         area += n[1] / 2.0;
     }
     assert!(close(area, 96.0 * 64.0, 1e-1), "triangles cover {area}");
+    // Both triangles of every cell share its north-east and south-west
+    // vertices: the cell is split along that diagonal.
+    for j in 0..2_u32 {
+        for i in 0..3_u32 {
+            let cell = to_usize(j * 3 + i);
+            let north_east = j * 4 + i + 1;
+            let south_west = (j + 1) * 4 + i;
+            for half in mesh.indices[cell * 6..cell * 6 + 6].chunks_exact(3) {
+                assert!(
+                    half.contains(&north_east) && half.contains(&south_west),
+                    "triangle {half:?} of cell ({i},{j}) misses the diagonal {north_east}-{south_west}"
+                );
+            }
+        }
+    }
 }
 
 // REN-004
@@ -189,6 +204,25 @@ fn render_normals_are_unit_length_and_up_on_flat_terrain() {
     let want = unit([-0.5, 1.0, 0.0]);
     for n in &ramp.normals {
         assert!(close(length(*n), 1.0, 1e-5));
+        assert!(
+            close(n[0], want[0], 1e-5) && close(n[1], want[1], 1e-5) && close(n[2], want[2], 1e-5),
+            "{n:?} against {want:?}"
+        );
+    }
+
+    // The same plane rising along z: the row differences are exact too, at
+    // the edge rows as well as inside.
+    let rise = ok(TerrainMesh::build(&grid_map(
+        4,
+        3,
+        40.0,
+        30.0,
+        1.0,
+        |_, j| i16::from(j) * 5,
+    )));
+    assert_eq!(rise.normals.len(), 20);
+    let want = unit([0.0, 1.0, -0.5]);
+    for n in &rise.normals {
         assert!(
             close(n[0], want[0], 1e-5) && close(n[1], want[1], 1e-5) && close(n[2], want[2], 1e-5),
             "{n:?} against {want:?}"
@@ -432,6 +466,13 @@ fn render_pitch_tilts_continuously_with_north_up_east_right() {
     }
     assert_eq!(seen, 101);
 
+    set_distance(&mut camera, f32::midpoint(near, far));
+    assert!(
+        close(camera.pitch(), 62.5_f32.to_radians(), 1e-3),
+        "pitch at the middle of the range is {}",
+        camera.pitch()
+    );
+
     for d in [near, far] {
         set_distance(&mut camera, d);
         pan_to(&mut camera, 256.0, 256.0);
@@ -500,6 +541,11 @@ fn render_pan_clamps_target_inside_narrowed_extent() {
                 (t[2] - 128.0).abs() <= 128.0 * narrowing + 1e-2,
                 "z {t:?} at {narrowing}"
             );
+            assert!(
+                close((t[0] - 256.0).abs(), 256.0 * narrowing, 1e-2)
+                    && close((t[2] - 128.0).abs(), 128.0 * narrowing, 1e-2),
+                "corner pan reaches the narrowed edge: {t:?} at {narrowing}"
+            );
             checked += 1;
         }
     }
@@ -557,6 +603,26 @@ fn render_clip_planes_bound_every_visible_vertex() {
             }
         }
     }
+
+    // A deep pit far below the target's plane, seen from the far end.
+    let pit = grid_map(4, 4, 128.0, 128.0, 1.0, |i, j| {
+        if (i, j) == (2, 2) { -3000 } else { 0 }
+    });
+    let pit_mesh = ok(TerrainMesh::build(&pit));
+    let pit_camera = ok(Camera::for_mesh(&pit_mesh, 1.0));
+    let pit_frame = frame(&pit_camera, 1.0);
+    let (pit_near, pit_far) = pit_camera.clip_planes();
+    let mut pit_checked = 0;
+    for p in &pit_mesh.positions {
+        if let Some(depth) = pit_frame.depth_inside(*p, TOL) {
+            pit_checked += 1;
+            assert!(
+                depth >= pit_near && depth <= pit_far,
+                "pit vertex {p:?} at depth {depth} outside {pit_near}..{pit_far}"
+            );
+        }
+    }
+    assert!(pit_checked > 0, "no pit vertex inside the view");
 }
 
 // REN-015
@@ -635,6 +701,24 @@ fn render_aspect_change_recomputes_range_and_reclamps() {
     assert!(
         close(camera.distance(), far_wide, far_wide * 1e-5),
         "distance re-clamped to the new far end"
+    );
+
+    let mut narrowed = ok(Camera::new(512.0, 256.0, 0.0, 50.0, 1.0));
+    set_distance(&mut narrowed, 200.0);
+    pan_to(&mut narrowed, 512.0, 256.0);
+    let offset_before = narrowed.target()[0] - 256.0;
+    assert!(narrowed.set_aspect(4.0).is_ok());
+    let (narrow_near, narrow_far) = narrowed.zoom_range();
+    let share = (narrow_far - 200.0) / (narrow_far - narrow_near);
+    let t = narrowed.target();
+    assert!(
+        256.0 * share < offset_before,
+        "the change must narrow the reach"
+    );
+    assert!(
+        (t[0] - 256.0).abs() <= 256.0 * share + 1e-2
+            && (t[2] - 128.0).abs() <= 128.0 * share + 1e-2,
+        "target {t:?} re-clamped to the narrowed reach {share}"
     );
 
     camera.zoom(-1000.0, ZoomSpeed::Normal);
