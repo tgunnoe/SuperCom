@@ -116,8 +116,14 @@ pub struct SurfaceRenderer {
 /// # Errors
 /// [`Error::Surface`] when the surface offers no format.
 pub fn surface_format(offered: &[TextureFormat]) -> Result<TextureFormat, Error> {
-    let _ = offered;
-    Ok(TextureFormat::Rgba8Unorm)
+    offered
+        .iter()
+        .copied()
+        .find(TextureFormat::is_srgb)
+        .or_else(|| offered.first().copied())
+        .ok_or_else(|| Error::Surface {
+            reason: "the surface offers no texture format".to_owned(),
+        })
 }
 
 async fn open(
@@ -224,15 +230,7 @@ impl Renderer {
                 reason: error.to_string(),
             })?;
         let (adapter, device, queue) = pollster::block_on(open(&instance, Some(&surface)))?;
-        let formats = surface.get_capabilities(&adapter).formats;
-        let format = formats
-            .iter()
-            .copied()
-            .find(TextureFormat::is_srgb)
-            .or_else(|| formats.first().copied())
-            .ok_or_else(|| Error::Surface {
-                reason: "the surface offers no texture format".to_owned(),
-            })?;
+        let format = surface_format(&surface.get_capabilities(&adapter).formats)?;
         let renderer = Self::from_parts(&adapter, device, queue, format)?;
         Ok(SurfaceRenderer {
             renderer,
@@ -249,11 +247,7 @@ impl Renderer {
     /// [`Error::Gpu`], naming `during`, for the first error either scope
     /// captured.
     pub fn guarded<T>(&self, during: &'static str, make: impl FnOnce() -> T) -> Result<T, Error> {
-        let _ = (&self.device, make);
-        Err(Error::Gpu {
-            during,
-            reason: "the calls were not run".to_owned(),
-        })
+        scoped(&self.device, during, make)
     }
 
     /// The device; a caller configures its surface with this one.
