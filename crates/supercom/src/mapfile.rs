@@ -40,10 +40,28 @@ impl std::error::Error for MapFileError {}
 /// # Errors
 /// [`MapFileError`] when no name matches or more than one does.
 pub fn choose_map_file(folder: &str, names: &[OsString]) -> Result<OsString, MapFileError> {
-    let _ = names;
-    Err(MapFileError::NoMapFile {
-        folder: folder.to_owned(),
-    })
+    let mut matches: Vec<&OsString> = names
+        .iter()
+        .filter(|name| {
+            name.to_string_lossy()
+                .to_ascii_lowercase()
+                .ends_with(".scmap")
+        })
+        .collect();
+    matches.sort();
+    match matches.as_slice() {
+        [] => Err(MapFileError::NoMapFile {
+            folder: folder.to_owned(),
+        }),
+        [only] => Ok((*only).clone()),
+        _ => Err(MapFileError::AmbiguousMapFile {
+            folder: folder.to_owned(),
+            names: matches
+                .iter()
+                .map(|name| name.to_string_lossy().into_owned())
+                .collect(),
+        }),
+    }
 }
 
 #[cfg(test)]

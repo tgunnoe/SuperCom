@@ -7,20 +7,20 @@
 
 mod cli;
 mod error;
-#[cfg_attr(not(test), expect(dead_code, reason = "the window loop calls it"))]
 mod frame;
-#[cfg_attr(not(test), expect(dead_code, reason = "the window loop calls it"))]
 mod input;
-#[cfg_attr(not(test), expect(dead_code, reason = "the plan calls it"))]
 mod mapfile;
-#[cfg_attr(not(test), expect(dead_code, reason = "the view subcommand calls it"))]
 mod plan;
+mod window;
 
-use cli::Command;
+use cli::{Command, ViewArgs};
+use error::RunError;
 use std::env;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use window::Outcome;
+use winit::event_loop::EventLoop;
 
 /// Environment variable that overrides the Forged Alliance install directory.
 const GAME_DIR_VAR: &str = "SUPERCOM_FA_DIR";
@@ -44,8 +44,32 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
         Ok(Command::Bare) => bare(),
-        Ok(Command::View(_)) => ExitCode::SUCCESS,
+        Ok(Command::View(args)) => view(&args),
     }
+}
+
+/// `view`: the display first, then the install and the map, then the window.
+fn view(args: &ViewArgs) -> ExitCode {
+    match run_view(args) {
+        Ok(Outcome::Presented(frames)) => {
+            println!("presented {frames} frames");
+            ExitCode::SUCCESS
+        }
+        Ok(Outcome::Closed) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("supercom: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_view(args: &ViewArgs) -> Result<Outcome, RunError> {
+    let event_loop = EventLoop::new().map_err(|error| RunError::NoDisplay {
+        reason: error.to_string(),
+    })?;
+    let game_dir = resolve_game_dir(env::var_os(GAME_DIR_VAR), env::var_os("HOME"));
+    let map = plan::plan_run(game_dir.as_deref(), &args.folder)?;
+    window::run(event_loop, map, args.frames)
 }
 
 /// The run with no argument: report whether the game data is found.

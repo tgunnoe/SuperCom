@@ -5,7 +5,6 @@ use std::fmt;
 use std::path::PathBuf;
 
 /// A failure of the `view` subcommand, in the order the run can meet them.
-#[expect(dead_code, reason = "the window loop constructs the rest")]
 #[derive(Clone, Debug, PartialEq)]
 pub enum RunError {
     /// The window system could not be reached.
