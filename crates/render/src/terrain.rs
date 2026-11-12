@@ -71,7 +71,23 @@ pub const INDEX_BYTES: u64 = 4;
 /// # Errors
 /// [`Error::GridTooLarge`] naming the first buffer that would exceed the
 /// limit, the vertex buffer before the index buffer.
-pub fn grid_fits(_columns: u32, _rows: u32, _max_buffer_size: u64) -> Result<(), Error> {
+pub fn grid_fits(columns: u32, rows: u32, max_buffer_size: u64) -> Result<(), Error> {
+    let vertices = (u128::from(columns) + 1) * (u128::from(rows) + 1);
+    let cells = u128::from(columns) * u128::from(rows);
+    for (buffer, bytes) in [
+        ("vertex", vertices * u128::from(VERTEX_BYTES)),
+        ("index", cells * 6 * u128::from(INDEX_BYTES)),
+    ] {
+        if bytes > u128::from(max_buffer_size) {
+            return Err(Error::GridTooLarge {
+                columns,
+                rows,
+                buffer,
+                bytes: u64::try_from(bytes).unwrap_or(u64::MAX),
+                limit: max_buffer_size,
+            });
+        }
+    }
     Ok(())
 }
 

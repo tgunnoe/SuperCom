@@ -15,6 +15,14 @@ pub enum GpuGate {
 /// whether `SUPERCOM_REQUIRE_GPU=1` is set. An adapter always runs; none
 /// skips unless required, and both outcomes carry the same reason.
 #[must_use]
-pub fn gpu_gate(_adapter_found: bool, _require: bool) -> GpuGate {
-    GpuGate::Run
+pub fn gpu_gate(adapter_found: bool, require: bool) -> GpuGate {
+    if adapter_found {
+        return GpuGate::Run;
+    }
+    let reason = "no graphics adapter found; set SUPERCOM_REQUIRE_GPU=1 to fail instead".to_owned();
+    if require {
+        GpuGate::Fail(reason)
+    } else {
+        GpuGate::Skip(reason)
+    }
 }
