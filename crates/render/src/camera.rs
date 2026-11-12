@@ -96,7 +96,8 @@ impl Camera {
     /// world units, and `aspect` the screen's width over its height.
     ///
     /// # Errors
-    /// [`Error::BadExtent`] for an extent that is not finite and positive,
+    /// [`Error::BadExtent`] for an extent that is not finite and positive or
+    /// so large that its strategic distance is not finite,
     /// [`Error::BadAspect`] for an aspect ratio that is not finite and
     /// positive, [`Error::BadElevationRange`] for an elevation that is not
     /// finite or a highest below the lowest, and [`Error::ExtentTooSmall`]
