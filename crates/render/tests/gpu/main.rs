@@ -1160,3 +1160,70 @@ fn render_gpu_gate_reasons_agree_and_name_the_flag() {
         "the reason names the flag: {skip}"
     );
 }
+
+/// Pins the record's "Errors are values" entry and the errors `draw`
+/// documents: a size that does not match the view is a validation error
+/// wgpu reports, captured by the frame's error scope and returned as a
+/// value, and the renderer draws correctly afterwards.
+#[test]
+fn conformance_gpu_mismatched_target_size_is_an_error_value() {
+    let format = TextureFormat::Rgba8UnormSrgb;
+    let Some(mut renderer) = gpu(format) else {
+        return;
+    };
+    let mesh = scene(&mut renderer, &east_ramp(), false);
+    let camera = must(Camera::for_mesh(&mesh, 1.0), "the camera builds");
+    let texture = renderer.device().create_texture(&TextureDescriptor {
+        label: None,
+        size: Extent3d {
+            width: 4,
+            height: 4,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format,
+        usage: TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&TextureViewDescriptor::default());
+    let mismatched = renderer.draw(&camera, &view, (8, 8));
+    assert!(
+        matches!(
+            mismatched,
+            Err(Error::Gpu {
+                during: "frame submission",
+                ..
+            })
+        ),
+        "a 4 by 4 view drawn as 8 by 8 is a captured validation error: {mismatched:?}"
+    );
+    let after = renderer.draw(&camera, &view, (4, 4));
+    assert!(after.is_ok(), "a correct draw follows: {after:?}");
+}
+
+/// Pins REN-025's sentence that a mesh whose buffers do not match its cell
+/// counts is refused: one normal too few, and one cell's indices too few.
+#[test]
+fn conformance_gpu_upload_refuses_mismatched_normals_and_indices() {
+    let Some(mut renderer) = gpu(TextureFormat::Rgba8UnormSrgb) else {
+        return;
+    };
+    let mut short_normals = mesh_of(&east_ramp());
+    short_normals.normals.pop();
+    let refused = renderer.upload(&short_normals, None);
+    assert!(
+        matches!(refused, Err(Error::InconsistentMesh)),
+        "a mesh with one normal too few is refused: {refused:?}"
+    );
+    let mut short_indices = mesh_of(&east_ramp());
+    short_indices
+        .indices
+        .truncate(short_indices.indices.len() - 6);
+    let refused = renderer.upload(&short_indices, None);
+    assert!(
+        matches!(refused, Err(Error::InconsistentMesh)),
+        "a mesh with one cell's indices missing is refused: {refused:?}"
+    );
+}
