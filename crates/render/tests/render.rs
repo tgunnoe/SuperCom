@@ -641,7 +641,7 @@ fn render_height_normalization_and_shading() {
 
     let luminance = |c: [f32; 3]| c[0] + c[1] + c[2];
     let tilt = |angle: f32| {
-        // Rotate the light direction away from itself toward +x/+z along a
+        // Rotate the light direction away from itself toward +x/-z along a
         // great circle: the dot with the light falls as the angle grows.
         let side = unit(cross(LIGHT_DIRECTION, [0.0, 1.0, 0.0]));
         let (s, c) = angle.sin_cos();

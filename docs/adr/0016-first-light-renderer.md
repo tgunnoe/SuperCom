@@ -11,9 +11,11 @@ above, with a camera the player can pan and zoom. It is split so that
 everything which needs no graphics device is a pure function in its own
 crate, `supercom-render`, testable without a display (AGENTS.md I4): the
 terrain grid built from a parsed map, the water plane, the camera, and the
-shading function. The graphics device and the window are the next two units
-of work and import what this crate makes public. docs/specs/render.md holds
-the clauses; this record is the source each design clause names.
+shading function. The GPU pipeline that draws them into any texture view
+lives in the same crate and is decided below (REN-019 to REN-029); the window
+is the next unit of work and calls the pipeline's one draw function.
+docs/specs/render.md holds the clauses; this record is the source each design
+clause names.
 
 The installed game does not supply the camera. A search of its Lua (17
 archives, 2,091 `.lua` members) finds no number for a world camera's field of
@@ -111,9 +113,86 @@ game.
   function depends on height and slope alone, which is all this slice has;
   textures and shadows replace it later.
 - **One crate, no windowing dependency (all of the above).** `supercom-render`
-  depends on `supercom-scmap` alone and names no foreign type in its API. The
-  event loop and the device belong to the application crate, as ADR-0003
-  has it; the GPU crate imports this one.
+  depends on `supercom-scmap`, `wgpu`, `bytemuck`, and `pollster`, and names
+  no windowing type in its API; its public items name types only from std,
+  `supercom-scmap`, itself, and `wgpu`. The event loop and the window belong
+  to the application crate, as ADR-0003 has it; they hand the renderer a
+  surface target and call its draw function.
+- **One draw path, the camera's matrix as given (REN-019).** The renderer is
+  built for one `wgpu::TextureFormat` and draws a frame for a `&Camera` into
+  any view of that format through one function; the offscreen tests and the
+  window call the same code. It writes `Camera::view_projection()` into the
+  uniform unchanged: the matrix's column-major layout is WGSL's `mat4x4<f32>`
+  (REN-008), and a second projection or a transposition in the renderer would
+  be a second place for the convention to go wrong.
+- **The target format's rule and the transfer function (REN-019, REN-021).**
+  The shader writes linear colour and the format's own encoding does the
+  rest: an sRGB format encodes on write, a Unorm format stores the value as
+  it is. Tests compare against the pure shading function's colour encoded the
+  same way, within 2 in 255 per channel, which covers the 8-bit rounding and
+  the GPU's arithmetic against the CPU's. A surface constructor picks an sRGB
+  format when the surface offers one.
+- **The clear colour (REN-020).** Linear (0.01, 0.01, 0.02): darker than the
+  darkest terrain colour (the ramp's first stop times the ambient share) so a
+  margin is told from terrain, and not the water's colour.
+- **Water: opaque, unlit, depth-tested (REN-022).** One flat quad in linear
+  (0.04, 0.22, 0.45), written without blending. Terrain below the surface is
+  then hidden by the depth test and terrain above it shows, which is the whole
+  visible rule of this slice; blending would show the terrain through the
+  water and make the share of water in a frame depend on the terrain's colour.
+  Its blue exceeds its red and green, which no terrain colour's does (every
+  ramp stop has blue below red), so a test tells them apart by channel order.
+- **Depth and culling (REN-019, REN-022).** A 32-bit float depth target,
+  cleared to 1.0, compared with `Less`, matching clip depth 0 at the near
+  plane (REN-008); back faces are culled with counter-clockwise front faces,
+  which is the mesh's winding seen from above (REN-003). The drawing tests
+  fail if the winding and the cull disagree, since the terrain would vanish.
+- **Orientation is checked on the GPU (REN-023).** The camera's matrix puts
+  north up and east right (REN-012), but a renderer could still flip a frame
+  by its viewport, its winding, or the order in which a readback is read. A
+  test therefore draws an asymmetric map at both ends of the zoom range and
+  reads the frame with row 0 at the top, so the whole path from the matrix to
+  the pixels is held to the convention, not the matrix alone.
+- **Shading per fragment (REN-021).** The vertex stage passes the elevation
+  and the normal; the fragment stage normalizes the elevation over the mesh's
+  range, guards a zero range, renormalizes the normal, and applies the ramp
+  and the light as `shade` does. Interpolating colours computed at the
+  vertices would bend the ramp across its middle stop, so the pure function
+  would not be the shader's specification.
+- **The shader is assembled from the Rust constants (REN-021, REN-029).** A
+  pure function formats the light direction, the ambient share, and the ramp
+  stops, which the shading module makes public, into the WGSL text as `f32`
+  literals that round-trip, so no shading number is typed in both languages
+  and a changed constant changes both sides.
+- **The fit check and the default limit (REN-024, REN-025).** A grid fits when
+  its vertex buffer (24 bytes a vertex: position and normal) and its index
+  buffer (4 bytes an index, six a cell) are at most the device's maximum
+  buffer size. The function takes the cell counts and the limit as integers
+  and is evaluated before a mesh is built and before any buffer exists,
+  because wgpu reports an oversized buffer through a handler that panics by
+  default. The device is requested with wgpu's default limits lowered to what
+  the adapter supports, never above, so the maximum buffer size is 256 MiB on
+  every host and the answer does not depend on which adapter was found.
+- **Errors are values (REN-024, REN-025, REN-026, REN-027).** A missing adapter, a refused
+  device request, a refused surface, an oversized grid, an inconsistent mesh,
+  a draw before an upload, a zero-sized target, and a validation or
+  out-of-memory error captured by an error scope around resource creation and
+  around each frame each return a variant of the crate's error. wgpu's own
+  errors are neither `Clone` nor `PartialEq`, so their text is carried as a
+  `String` and the error type stops being `Copy`. The device is requested with
+  no optional feature and with limits the adapter supports, so the panics the
+  request documents for those cannot fire; for that reason no test can make
+  the request fail, and the refused-device path is specified and implemented
+  but unexercised.
+- **The GPU tests' name, flag, and skip rule (REN-028).** A test that needs
+  an adapter is named `conformance_gpu_`; it does not read the install, except
+  the two that also draw an installed map. With no adapter it prints
+  `SKIP: <reason>` and passes; with `SUPERCOM_REQUIRE_GPU=1` it fails, so a CI
+  host with a GPU can demand that the tests ran. The decision is a pure
+  function of two booleans because the skip line cannot be reached on a host
+  that has an adapter. A test that dumps frames for a human to look at writes
+  them only when `SUPERCOM_RENDER_DUMP` names an absolute directory outside
+  the repository, as binary PPM, so no image can enter the tree by a test run.
 - **Tolerance.** The inside-the-view comparisons use a relative tolerance of
   1e-4 of w: f32 arithmetic over a matrix product errs by about 1e-6
   relative, and at the far end the corners lie on the screen's edge by
@@ -130,16 +209,35 @@ game.
   original. REN-001's vertical reading, and how the result looks, are decided
   by comparison with the running game, which this record does not close.
 - Whole-grid meshes of the largest maps hold 16.8 million vertices; chunking
-  and level of detail are deferred until measurement shows a need.
+  and level of detail are deferred until measurement shows a need. One limit
+  is already known: a whole-grid terrain cannot hold the three installed maps
+  that are 4096 cells a side. Their vertex buffer, at the renderer's vertex
+  stride of 24 bytes, is 402,849,816 bytes and their index buffer 402,653,184,
+  both past the default 268,435,456-byte buffer limit; the renderer refuses
+  such a grid with an error (REN-024, REN-025), and drawing it is tracked as
+  issue 69 of https://github.com/tgunnoe/SuperCom.
 
 ## Alternatives rejected
+
+- **Vertex colours instead of a per-fragment ramp.** One shading call per
+  vertex is cheaper, but colours interpolate linearly between vertices and
+  the ramp bends across its middle stop, so the pure function would not
+  describe what is drawn.
+- **Blended water.** Shows the terrain through the surface, but makes a
+  pixel's colour a function of two layers and the water's share of a frame
+  depend on the terrain under it.
+- **Requesting the adapter's full limits.** Would let the fit check pass a
+  grid on one host that another refuses; the default limit makes the answer
+  the same everywhere.
 
 - **A math crate (glam, nalgebra).** Adds a dependency whose types would
   surface in the public API or force conversions, for a handful of
   operations; the slice's needs are small and independently testable.
 - **Chunked terrain or level of detail now.** No measurement says the whole
   grid is too slow, and the chunking scheme depends on the GPU side's
-  measurements; building it first is speculative.
+  measurements; building it first is speculative. The one limit known without
+  measurement, the three installed 4096-cell maps whose buffers pass the
+  default limit, is recorded under Consequences and tracked as issue 69.
 - **A fixed-pitch camera.** A straight-down camera at every zoom loses the
   relief at close range; a tilted camera at the far end hides the map's far
   edge; the continuous pitch serves both ends.

@@ -1,17 +1,19 @@
 # Render specification
 
-This file specifies the first slice of the renderer: the part that needs no
-graphics device. It covers the terrain grid built from a parsed map, the
-water plane, the camera with its zoom range and clip planes, the height
-normalization, and the shading function, all as pure functions over plain
-`f32` arrays in the headless crate `supercom-render`. Nothing here draws or
-opens a window. Its camera and shading are decisions of this project, recorded
+This file specifies the first slice of the renderer. Its first part needs no
+graphics device: the terrain grid built from a parsed map, the water plane,
+the camera with its zoom range and clip planes, the height normalization,
+and the shading function, all pure functions over plain `f32` arrays in the
+crate `supercom-render`. Its second part is the GPU pipeline in the same
+crate, which draws that terrain and water for a camera into any texture view
+through wgpu; it needs an adapter but no window, and its tests draw
+offscreen. Nothing here opens a window. Its camera and shading are decisions of this project, recorded
 in docs/adr/0016-first-light-renderer.md: a search of the installed data finds
 no number for a world camera's field of view, clip planes, or zoom limits, so
 no clause below says how the original behaves.
 
-The frontier of this slice: the GPU pipeline's contract and the windowed mode
-arrive with their code; terrain splatting, decals, shadows, water effects,
+The frontier of this slice: the GPU pipeline's contract is specified below
+and the windowed mode arrives with its code; terrain splatting, decals, shadows, water effects,
 units, fog of war, strategic icons, and post-processing are later slices; and
 the vertical reading of REN-001 awaits a comparison with the running original.
 
@@ -78,3 +80,48 @@ The height normalization MUST map an elevation to (elevation - lowest) / (highes
 
 **REN-018** `game-data` `test:conformance_render_installed_maps`
 On the installed map SCMP_012 the terrain grid MUST have 66,049 vertices and 393,216 indices, its lowest and highest vertex elevations MUST be 3.453125 and 20.1640625 (the samples 442 and 2581 times the stored scale 0.0078125), and it MUST have no water plane; on the installed map SCMP_016 the water plane MUST sit at elevation 17.5.
+
+## The GPU pipeline
+
+The renderer draws into a texture view of one format it was built for. A
+`conformance_gpu_` test depends on an adapter and not on the install, except
+the two that read the installed maps and call `require_game` first.
+
+**REN-019** `design` `test:conformance_gpu_one_draw_function_fills_views_of_any_size`
+A renderer MUST be built for one target texture format and MUST draw a frame for a camera into any texture view of that format, of any positive size, through one function that is the only draw path, so the offscreen tests and the windowed mode run the same code; it MUST write the camera's view-projection matrix (REN-008) into the shader's uniform as given, without transposing it or projecting by itself. The test draws one scene into two offscreen views of different sizes through that function and expects terrain pixels in both (docs/adr/0016-first-light-renderer.md).
+
+**REN-020** `design` `test:conformance_gpu_empty_margins_hold_the_clear_colour`
+A pixel that no geometry covers MUST hold the clear colour, linear RGB (0.01, 0.01, 0.02), encoded with the target format's transfer function. The test draws the square map of the east plane into a view twice as wide as it is tall, expects the centre to be terrain, and only then expects the corners and the side margins to be the clear colour within 2 in 255 per channel (docs/adr/0016-first-light-renderer.md).
+
+**REN-021** `design` `test:conformance_gpu_terrain_pixels_match_the_shading_function`
+A terrain pixel MUST hold the colour of the shading function (REN-015) for that fragment: the elevation interpolated to the fragment normalized over the mesh's own range by the normalization of REN-015, a range of zero width included, and the interpolated normal renormalized; not an interpolation of colours computed at the vertices, which cannot follow the ramp across its middle stop. The light direction, the ambient share, and the three ramp stops in the shader source MUST be written from the crate's Rust constants. The colour MUST be encoded with the target format's transfer function, the sRGB encoding for an sRGB format and the identity for a Unorm format, and MUST be within 2 in 255 per channel of that. The test draws four synthetic planes (rising east, rising south, rising diagonally, flat) in Rgba8UnormSrgb, Bgra8UnormSrgb, and Rgba8Unorm, finds for each sampled pixel the surface point its centre sees, and compares the pixel with the colour the pure function gives there, over normalized heights from below 0.2 to above 0.8 and four distinct normals (docs/adr/0016-first-light-renderer.md).
+
+**REN-022** `design` `test:conformance_gpu_water_hides_only_terrain_below_its_surface`
+The water plane MUST be drawn at its stored elevation, opaque, in the linear RGB colour (0.04, 0.22, 0.45) with no lighting, with depth testing against the terrain, so terrain below the surface shows the water's colour and terrain above it shows its own. The water's colour MUST be told from every terrain colour by its blue channel exceeding both its red and its green. The test draws a plane that crosses the surface and samples both sides (docs/adr/0016-first-light-renderer.md).
+
+**REN-023** `design` `test:conformance_gpu_north_is_up_and_east_is_right_at_both_zoom_ends`
+In a frame read back with row 0 at the top, north (decreasing z) MUST be at the top and east (increasing x) at the right, at the far end of the zoom range and at the near end. The test draws a map that is higher to the east with a high shelf along its north edge, at both ends, and expects the shelf at the top of the terrain in the centre column and the higher ground at the right of the centre row (docs/adr/0016-first-light-renderer.md).
+
+**REN-024** `design` `test:render_grid_fit_is_a_pure_function_of_cells_and_limits`
+Whether a grid fits a device MUST be a pure function of the two cell counts and the device's maximum buffer size given as an integer: it MUST return an error value when the vertex buffer (24 bytes per vertex) or the index buffer (4 bytes per index, six per cell) would exceed that size, computed without overflow, and Ok otherwise. Under the default 256 MiB limit a grid of 4096 cells a side is refused and one of 2048 cells a side is accepted, both decided without building the grid (docs/adr/0016-first-light-renderer.md).
+
+**REN-025** `design` `test:conformance_gpu_upload_refuses_a_grid_over_the_device_limit`
+The renderer MUST run the fit check of REN-024 against the device's own maximum buffer size before it creates any buffer and MUST return its error, so no well-formed call reaches wgpu's default error handler, which panics; it MUST request its device with the default limits lowered to what the adapter supports, never above them, and MUST refuse a mesh whose buffers do not match its cell counts. The test uploads a mesh claiming 4096 cells a side and one with too few vertices (docs/adr/0016-first-light-renderer.md).
+
+**REN-026** `design` `test:render_missing_adapter_is_an_error_value`
+A missing adapter and a refused device request MUST each be an error value naming what failed, never a panic. The test reaches the first through the constructor that takes the backends to search, given an empty set; the second is implemented by returning the device request's error as its own variant and no test reaches it, because a request made inside an adapter's own limits cannot be made to fail without the arguments wgpu documents as panics (docs/adr/0016-first-light-renderer.md).
+
+**REN-027** `design` `test:conformance_gpu_misuse_is_an_error_value`
+Drawing before a mesh is uploaded, and drawing into a target with a zero dimension, MUST each be an error value and not a call into wgpu. The test expects both after a well-formed draw has succeeded (docs/adr/0016-first-light-renderer.md).
+
+**REN-028** `design` `test:render_gpu_gate_decides_over_four_cases`
+A `conformance_gpu_` test MUST pass printing `SKIP: <reason>` when no adapter exists, MUST fail with the same reason when `SUPERCOM_REQUIRE_GPU=1` is set and none exists, and MUST print the adapter's name and backend when it runs. The decision is a pure function of whether an adapter was found and whether the flag is set, tested over all four cases; the printed skip line itself cannot be reached on a host that has an adapter (docs/adr/0016-first-light-renderer.md).
+
+**REN-029** `design` `test:render_shader_source_is_assembled_from_the_rust_constants`
+The shader source MUST be returned by a pure function that writes the light direction, the ambient share, and the three ramp stops from the crate's Rust constants, so no shading number is typed in both languages, and MUST name the four entry points the pipelines use. The test checks the source for each constant's text and each entry point; that the source compiles and shades correctly is REN-021's test (docs/adr/0016-first-light-renderer.md).
+
+**REN-030** `game-data` `test:conformance_gpu_installed_dry_map_shows_only_terrain`
+At the strategic view of the installed map SCMP_012, drawn into a square target, the middle 80 percent of the frame's width and of its height MUST hold only terrain colours, neither the clear colour nor the water's, and no pixel of the frame may be the water's, because the map carries no water.
+
+**REN-031** `game-data` `test:conformance_gpu_installed_wet_map_shows_its_water_share`
+At the strategic view of the installed map SCMP_016, drawn into a square target, the water's colour MUST cover a fraction of the pixels that are not the clear colour within 0.03 of 0.095. The heightmap's share of samples at or below the stored water elevation 17.5 is 0.0954, and only 17 of its 66,049 samples sit exactly at that elevation, so ties in depth do not move the fraction.

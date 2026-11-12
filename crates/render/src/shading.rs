@@ -5,10 +5,10 @@
 pub const LIGHT_DIRECTION: [f32; 3] = [-0.36, 0.8, -0.48];
 
 /// Share of the light that reaches a surface turned away from it.
-const AMBIENT: f32 = 0.3;
+pub const AMBIENT: f32 = 0.3;
 
 /// Linear RGB ramp stops at normalized heights 0, 0.5, and 1.
-const RAMP: [[f32; 3]; 3] = [[0.18, 0.30, 0.12], [0.50, 0.42, 0.28], [0.92, 0.90, 0.86]];
+pub const RAMP: [[f32; 3]; 3] = [[0.18, 0.30, 0.12], [0.50, 0.42, 0.28], [0.92, 0.90, 0.86]];
 
 /// Maps `elevation` to `(elevation - lowest) / (highest - lowest)`, in
 /// world units; a range of zero width, or a result that is not finite, maps
