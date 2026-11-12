@@ -312,7 +312,7 @@ fn dump(frame: &Frame, label: &str) {
         Err(why) => fail(&why),
     };
     must(fs::create_dir_all(&dir), "the dump directory is created");
-    let mut bytes = format!("P6\n{} {}\n255\n", frame.width, frame.height).into_bytes();
+    let mut bytes = format!("P{}\n{} {}\n255\n", 6, frame.width, frame.height).into_bytes();
     bytes.extend(frame.pixels.iter().flatten());
     let name = label.replace(|c: char| !c.is_ascii_alphanumeric() && c != '-', "_");
     must(
@@ -939,5 +939,224 @@ fn conformance_gpu_installed_wet_map_shows_its_water_share() {
     assert!(
         (share - 0.095).abs() <= 0.03,
         "water covers {share} of the {covered} map pixels; the heightmap puts 0.095 of its samples at or below the surface"
+    );
+}
+
+// ---- sentences of REN-021, REN-028, and REN-029 pinned further --------
+
+/// Pins REN-021's sentence that a pixel holds the shading function's colour
+/// where the direct term is clamped at zero: a plane steep enough that its
+/// normal faces away from the light shows the ramp colour times the ambient
+/// share alone.
+#[test]
+fn conformance_gpu_surface_facing_away_from_the_light_is_ambient_only() {
+    let format = TextureFormat::Rgba8UnormSrgb;
+    let Some(mut renderer) = gpu(format) else {
+        return;
+    };
+    let at = |n: u32| i16::try_from(n).unwrap_or(0);
+    // Falls 1.25 world units per unit toward the south-east, away from the
+    // light, which comes from the north-west.
+    let map = map_of(8, 64.0, 1.0, |i, j| 10 * (16 - at(i) - at(j)));
+    let mesh = scene(&mut renderer, &map, false);
+    let normal = mesh.normals[mesh.normals.len() / 2];
+    let facing: f32 = normal.iter().zip(LIGHT_DIRECTION).map(|(n, l)| n * l).sum();
+    assert!(
+        facing < 0.0,
+        "the plane faces away from the light: {facing}"
+    );
+    let size = (192, 192);
+    let camera = must(Camera::for_mesh(&mesh, 1.0), "the camera builds");
+    let frame = draw_frame(&mut renderer, &camera, size, "ambient-only");
+    let matrix = camera.view_projection();
+    let surface = |x: f64, z: f64| 160.0 - 1.25 * (x + z);
+    for across in FRACTIONS {
+        for down in [0.08, 0.5, 0.92] {
+            let ((x, y), color, height) =
+                expected_on_plane(&mesh, &matrix, size, &surface, (across, down));
+            assert!(
+                frame.is_terrain(x, y),
+                "({x}, {y}) is terrain, not {:?}",
+                frame.at(x, y)
+            );
+            let want = expected(color, format);
+            assert!(
+                near(frame.at(x, y), want),
+                "({x}, {y}) at height {height} is {:?}, want ambient only {want:?}",
+                frame.at(x, y)
+            );
+        }
+    }
+}
+
+/// The mesh's own surface at a world position: the elevation and the
+/// vertex normals interpolated inside the triangle that holds it, the
+/// smallest barycentric weight, and whether the triangle's normals differ.
+struct MeshPoint {
+    elevation: f64,
+    normal: [f64; 3],
+    min_weight: f64,
+    creased: bool,
+}
+
+fn mesh_point(mesh: &TerrainMesh, east: f64, south: f64) -> MeshPoint {
+    let (fx, fz) = (
+        east / (f64::from(mesh.width) / f64::from(mesh.columns)),
+        south / (f64::from(mesh.height) / f64::from(mesh.rows)),
+    );
+    let (column, row) = (pixel_index(fx, mesh.columns), pixel_index(fz, mesh.rows));
+    let (across, down) = (fx - f64::from(column), fz - f64::from(row));
+    let north_west = to_usize(row * (mesh.columns + 1) + column);
+    let north_east = north_west + 1;
+    let south_west = north_west + to_usize(mesh.columns + 1);
+    let south_east = south_west + 1;
+    // The cell splits from its north-east vertex to its south-west one.
+    let corners = if across + down <= 1.0 {
+        [
+            (north_west, 1.0 - across - down),
+            (north_east, across),
+            (south_west, down),
+        ]
+    } else {
+        [
+            (north_east, 1.0 - down),
+            (south_west, 1.0 - across),
+            (south_east, across + down - 1.0),
+        ]
+    };
+    let mut elevation = 0.0;
+    let mut normal = [0.0; 3];
+    for (vertex, weight) in corners {
+        elevation += weight * f64::from(mesh.positions[vertex][1]);
+        for (sum, component) in normal.iter_mut().zip(mesh.normals[vertex]) {
+            *sum += weight * f64::from(component);
+        }
+    }
+    let first = mesh.normals[corners[0].0];
+    let creased = corners.iter().any(|&(vertex, _)| {
+        mesh.normals[vertex]
+            .iter()
+            .zip(first)
+            .any(|(p, q)| (p - q).abs() > 1e-4)
+    });
+    MeshPoint {
+        elevation,
+        normal,
+        min_weight: corners.iter().map(|c| c.1).fold(f64::MAX, f64::min),
+        creased,
+    }
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the shading function takes f32"
+)]
+fn as_f32(v: [f64; 3]) -> [f32; 3] {
+    v.map(|c| c as f32)
+}
+
+/// Pins REN-021's words "the interpolated normal renormalized": on a tent
+/// with a crease, neighbouring vertices carry different normals, and the
+/// pixels inside such triangles hold the shading function's colour for the
+/// interpolated normal scaled back to unit length.
+#[test]
+fn conformance_gpu_interpolated_normal_is_renormalized() {
+    let format = TextureFormat::Rgba8UnormSrgb;
+    let Some(mut renderer) = gpu(format) else {
+        return;
+    };
+    let map = map_of(8, 64.0, 1.0, |i, _| {
+        8 * i16::try_from(i.min(8 - i)).unwrap_or(0)
+    });
+    let mesh = scene(&mut renderer, &map, false);
+    let size = (192, 192);
+    let camera = must(Camera::for_mesh(&mesh, 1.0), "the camera builds");
+    let frame = draw_frame(&mut renderer, &camera, size, "renormalized-normal");
+    let matrix = camera.view_projection();
+    let surface = |x: f64, z: f64| mesh_point(&mesh, x, z).elevation;
+    let mut largest_gap = 0.0_f64;
+    let mut checked = 0;
+    for x in [26.0, 28.0, 30.0, 34.0, 36.0, 38.0] {
+        for z in [12.0, 28.0, 44.0] {
+            let nominal = [x, surface(x, z), z];
+            let (px, py) = pixel_of(&matrix, nominal, size);
+            let (sx, sz) = surface_under(&matrix, centre_ndc(px, py, size), &surface, (x, z));
+            let point = mesh_point(&mesh, sx, sz);
+            if !point.creased || point.min_weight < 0.1 {
+                continue;
+            }
+            checked += 1;
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "the shading function takes f32"
+            )]
+            let height = normalize_height(point.elevation as f32, mesh.lowest, mesh.highest);
+            let length = point.normal.iter().map(|c| c * c).sum::<f64>().sqrt();
+            let unit = point.normal.map(|c| c / length);
+            let want = expected(shade(height, as_f32(unit)), format);
+            let raw = expected(shade(height, as_f32(point.normal)), format);
+            largest_gap = largest_gap.max(
+                want.iter()
+                    .zip(raw)
+                    .map(|(w, r)| (w - r).abs())
+                    .fold(0.0, f64::max),
+            );
+            assert!(
+                frame.is_terrain(px, py),
+                "({px}, {py}) is terrain, not {:?}",
+                frame.at(px, py)
+            );
+            assert!(
+                near(frame.at(px, py), want),
+                "({px}, {py}) is {:?}, want {want:?} for the renormalized normal",
+                frame.at(px, py)
+            );
+        }
+    }
+    assert!(
+        checked >= 6,
+        "{checked} pixels lie inside creased triangles"
+    );
+    assert!(
+        largest_gap > TOLERANCE,
+        "without renormalizing the expectation moves only {largest_gap}, so the test could not tell"
+    );
+}
+
+/// Pins REN-029: the source holds each constant as a whole declaration, so
+/// a number that only begins with the Rust constant's text does not pass.
+#[test]
+fn render_shader_source_holds_each_constant_as_a_whole_token() {
+    let source = shader_source();
+    let vec3 = |v: [f32; 3]| format!("vec3<f32>({:?}, {:?}, {:?})", v[0], v[1], v[2]);
+    let declarations = [
+        format!("const AMBIENT: f32 = {AMBIENT:?};"),
+        format!("const LIGHT: vec3<f32> = {};", vec3(LIGHT_DIRECTION)),
+        format!("const STOP_0: vec3<f32> = {};", vec3(RAMP[0])),
+        format!("const STOP_1: vec3<f32> = {};", vec3(RAMP[1])),
+        format!("const STOP_2: vec3<f32> = {};", vec3(RAMP[2])),
+        format!("const WATER: vec3<f32> = {};", vec3(WATER_COLOR)),
+    ];
+    for declaration in declarations {
+        assert!(
+            source.contains(&declaration),
+            "the source lacks `{declaration}`"
+        );
+    }
+}
+
+/// Pins REN-028's words "the same reason": with no adapter, skipping and
+/// failing carry one reason, and it names the flag that makes the difference.
+#[test]
+fn render_gpu_gate_reasons_agree_and_name_the_flag() {
+    let (GpuGate::Skip(skip), GpuGate::Fail(required)) =
+        (gpu_gate(false, false), gpu_gate(false, true))
+    else {
+        fail("no adapter skips unless required, then fails");
+    };
+    assert_eq!(skip, required, "both outcomes carry one reason");
+    assert!(
+        skip.contains("SUPERCOM_REQUIRE_GPU=1"),
+        "the reason names the flag: {skip}"
     );
 }
