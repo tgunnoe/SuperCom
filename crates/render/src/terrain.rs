@@ -7,7 +7,12 @@ use supercom_scmap::Map;
 /// two triangles per cell. Coordinates are world units: x east along
 /// columns, y up, z south along rows.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct TerrainMesh {
+    /// Cells along x.
+    pub columns: u32,
+    /// Cells along z.
+    pub rows: u32,
     /// One `[x, y, z]` per sample, row by row.
     pub positions: Vec<[f32; 3]>,
     /// One unit normal per vertex, in the order of `positions`.
@@ -26,8 +31,8 @@ pub struct TerrainMesh {
     pub height: f32,
 }
 
-/// The exact `f32` for a count; counts past 2^24 round, which only shifts a
-/// vertex by a fraction of a cell on the largest maps.
+/// The `f32` for a count: exact up to 2^24, and every installed cell count
+/// (at most 4096) converts exactly; a count past 2^24 rounds.
 #[expect(
     clippy::cast_precision_loss,
     reason = "std has no lossless u32 to f32 conversion; cell counts reach 4096"
@@ -50,6 +55,42 @@ pub fn grid_vertex_count(columns: u32, rows: u32) -> Result<u32, Error> {
         .ok_or(too_many)
 }
 
+/// Bytes of one vertex as the renderer uploads it: position and normal, six
+/// `f32`.
+pub const VERTEX_BYTES: u64 = 24;
+
+/// Bytes of one 32-bit index.
+pub const INDEX_BYTES: u64 = 4;
+
+/// Whether a grid of `columns` by `rows` cells fits a device whose largest
+/// buffer is `max_buffer_size` bytes: both the vertex buffer
+/// ([`VERTEX_BYTES`] per vertex) and the index buffer ([`INDEX_BYTES`] times
+/// six per cell) must fit. Pure, so a caller runs it before building the
+/// grid.
+///
+/// # Errors
+/// [`Error::GridTooLarge`] naming the first buffer that would exceed the
+/// limit, the vertex buffer before the index buffer.
+pub fn grid_fits(columns: u32, rows: u32, max_buffer_size: u64) -> Result<(), Error> {
+    let vertices = (u128::from(columns) + 1) * (u128::from(rows) + 1);
+    let cells = u128::from(columns) * u128::from(rows);
+    for (buffer, bytes) in [
+        ("vertex", vertices * u128::from(VERTEX_BYTES)),
+        ("index", cells * 6 * u128::from(INDEX_BYTES)),
+    ] {
+        if bytes > u128::from(max_buffer_size) {
+            return Err(Error::GridTooLarge {
+                columns,
+                rows,
+                buffer,
+                bytes: u64::try_from(bytes).unwrap_or(u64::MAX),
+                limit: max_buffer_size,
+            });
+        }
+    }
+    Ok(())
+}
+
 impl TerrainMesh {
     /// Builds the grid for `map`: vertex `(i, j)` at x = `i` times (map
     /// width / columns), z = `j` times (map height / rows), and y = sample
@@ -57,8 +98,9 @@ impl TerrainMesh {
     ///
     /// # Errors
     /// [`Error::ZeroCells`], [`Error::BadExtent`], [`Error::NonFiniteScale`],
-    /// [`Error::TooManyVertices`], [`Error::SampleCount`], or
-    /// [`Error::NonFiniteElevation`] when the map cannot form a grid.
+    /// [`Error::TooManyVertices`], [`Error::SampleCount`],
+    /// [`Error::NonFiniteElevation`], or [`Error::NonFiniteNormal`] when the
+    /// map cannot form a grid.
     pub fn build(map: &Map) -> Result<Self, Error> {
         let heightmap = &map.heightmap;
         let (columns, rows) = (heightmap.width, heightmap.height);
@@ -110,6 +152,8 @@ impl TerrainMesh {
         let indices = indices(grid)?;
 
         Ok(Self {
+            columns,
+            rows,
             positions,
             normals,
             indices,
@@ -157,7 +201,7 @@ fn normals(heights: &[f32], grid: Grid, cell_x: f32, cell_z: f32) -> Result<Vec<
             let length = (dx * dx + dz * dz + 1.0).sqrt();
             let normal = [-dx / length, 1.0 / length, -dz / length];
             if !normal.iter().all(|c| c.is_finite()) {
-                return Err(Error::NonFiniteElevation);
+                return Err(Error::NonFiniteNormal);
             }
             out.push(normal);
         }

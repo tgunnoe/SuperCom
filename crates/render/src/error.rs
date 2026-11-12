@@ -2,8 +2,10 @@
 
 use std::fmt;
 
-/// Why a mesh or a camera could not be built.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// Why a mesh or a camera could not be built, or why the GPU side could not
+/// draw. GPU-side causes carry wgpu's own text as a `String`, because wgpu's
+/// error types are neither `Clone` nor `PartialEq`.
+#[derive(Clone, Debug, PartialEq)]
 pub enum Error {
     /// The sample count is not `(width + 1) * (height + 1)`.
     SampleCount {
@@ -40,6 +42,9 @@ pub enum Error {
     },
     /// A sample times the scale is not finite.
     NonFiniteElevation,
+    /// An elevation difference over finite elevations overflowed, so a
+    /// vertex normal is not finite.
+    NonFiniteNormal,
     /// The aspect ratio is not finite and positive.
     BadAspect {
         /// The aspect ratio as given.
@@ -59,6 +64,54 @@ pub enum Error {
         width: f32,
         /// Extent along z in world units.
         height: f32,
+    },
+    /// No adapter exists among the backends searched.
+    NoAdapter {
+        /// What wgpu reported.
+        reason: String,
+    },
+    /// The adapter refused the device request.
+    DeviceRequest {
+        /// What wgpu reported.
+        reason: String,
+    },
+    /// The surface could not be created or is unusable with the adapter.
+    Surface {
+        /// What went wrong.
+        reason: String,
+    },
+    /// A buffer the grid needs would exceed the device's maximum buffer
+    /// size.
+    GridTooLarge {
+        /// Cells along x.
+        columns: u32,
+        /// Cells along z.
+        rows: u32,
+        /// Which buffer: `"vertex"` or `"index"`.
+        buffer: &'static str,
+        /// The size in bytes that buffer would need.
+        bytes: u64,
+        /// The device's maximum buffer size in bytes.
+        limit: u64,
+    },
+    /// The mesh's buffers do not match its cell counts.
+    InconsistentMesh,
+    /// A frame was drawn before a mesh was uploaded.
+    NothingUploaded,
+    /// The render target has a zero dimension.
+    ZeroTarget {
+        /// Width in pixels.
+        width: u32,
+        /// Height in pixels.
+        height: u32,
+    },
+    /// wgpu reported a validation or out-of-memory error while the
+    /// renderer created resources or recorded a frame.
+    Gpu {
+        /// What the renderer was doing.
+        during: &'static str,
+        /// What wgpu reported.
+        reason: String,
     },
 }
 
@@ -87,6 +140,43 @@ impl fmt::Display for Error {
             ),
             Self::NonFiniteElevation => {
                 write!(f, "a sample times the scale is not a finite elevation")
+            }
+            Self::NonFiniteNormal => {
+                write!(
+                    f,
+                    "a vertex normal is not finite although every elevation is"
+                )
+            }
+            Self::NoAdapter { reason } => write!(f, "no graphics adapter is available: {reason}"),
+            Self::DeviceRequest { reason } => {
+                write!(f, "the adapter refused the device request: {reason}")
+            }
+            Self::Surface { reason } => write!(f, "the surface is unusable: {reason}"),
+            Self::GridTooLarge {
+                columns,
+                rows,
+                buffer,
+                bytes,
+                limit,
+            } => write!(
+                f,
+                "a grid of {columns} by {rows} cells needs a {buffer} buffer of {bytes} bytes, over the device's {limit}"
+            ),
+            Self::InconsistentMesh => {
+                write!(
+                    f,
+                    "the mesh's vertex and index counts do not match its cell counts"
+                )
+            }
+            Self::NothingUploaded => write!(f, "a frame was drawn before any mesh was uploaded"),
+            Self::ZeroTarget { width, height } => {
+                write!(
+                    f,
+                    "the render target is {width} by {height} pixels; both must be positive"
+                )
+            }
+            Self::Gpu { during, reason } => {
+                write!(f, "wgpu reported an error during {during}: {reason}")
             }
             Self::BadAspect { aspect } => {
                 write!(f, "aspect ratio {aspect} is not finite and positive")

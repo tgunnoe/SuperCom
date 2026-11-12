@@ -57,7 +57,11 @@ pub struct Camera {
 /// the target at its centre.
 fn strategic_distance(width: f32, height: f32, aspect: f32) -> Result<f32, Error> {
     let tan_half = (FOV_Y_RADIANS / 2.0).tan();
-    let far = (width / 2.0 / (tan_half * aspect)).max(height / 2.0 / tan_half);
+    let (across, down) = (width / 2.0 / tan_half, height / 2.0 / tan_half);
+    if !(across.is_finite() && down.is_finite()) {
+        return Err(Error::BadExtent { width, height });
+    }
+    let far = (across / aspect).max(down);
     if !far.is_finite() {
         return Err(Error::BadAspect { aspect });
     }
@@ -92,7 +96,8 @@ impl Camera {
     /// world units, and `aspect` the screen's width over its height.
     ///
     /// # Errors
-    /// [`Error::BadExtent`] for an extent that is not finite and positive,
+    /// [`Error::BadExtent`] for an extent that is not finite and positive or
+    /// so large that its strategic distance is not finite,
     /// [`Error::BadAspect`] for an aspect ratio that is not finite and
     /// positive, [`Error::BadElevationRange`] for an elevation that is not
     /// finite or a highest below the lowest, and [`Error::ExtentTooSmall`]

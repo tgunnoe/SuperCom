@@ -1,8 +1,8 @@
 //! Headless core of the first-light renderer: the terrain grid built from a
 //! parsed map, the water plane, the camera, and the shading function, all
-//! pure functions over plain `f32` arrays. Nothing here draws, opens a
-//! window, or links a graphics or math crate; the GPU side imports what this
-//! crate makes public.
+//! pure functions over plain `f32` arrays, and the GPU side that draws them
+//! with wgpu into any texture view. Nothing here opens a window or links a
+//! windowing or math crate; the windowed mode calls the one draw function.
 //!
 //! Conventions, shared by every item: x runs along heightmap columns (east),
 //! y is up, z runs along heightmap rows (south), right-handed, in world
@@ -11,6 +11,9 @@
 
 mod camera;
 mod error;
+mod gate;
+mod renderer;
+mod shader;
 mod shading;
 mod terrain;
 mod water;
@@ -20,6 +23,9 @@ pub use camera::{
     ZoomSpeed,
 };
 pub use error::Error;
-pub use shading::{LIGHT_DIRECTION, normalize_height, shade};
-pub use terrain::{TerrainMesh, grid_vertex_count};
+pub use gate::{GpuGate, gpu_gate};
+pub use renderer::{Renderer, SurfaceRenderer};
+pub use shader::{CLEAR_COLOR, WATER_COLOR, shader_source};
+pub use shading::{AMBIENT, LIGHT_DIRECTION, RAMP, normalize_height, shade};
+pub use terrain::{INDEX_BYTES, TerrainMesh, VERTEX_BYTES, grid_fits, grid_vertex_count};
 pub use water::WaterPlane;

@@ -1,5 +1,5 @@
 [package]
-description  = "Headless first-light renderer core: terrain grid, water plane, camera, and shading as pure functions"
+description  = "First-light renderer: terrain grid, water plane, camera, and shading as pure functions, and the wgpu pipeline that draws them"
 edition      = { workspace = true }
 license      = { workspace = true }
 name         = "supercom-render"
@@ -12,7 +12,10 @@ version      = { workspace = true }
 workspace = true
 
 [dependencies]
+bytemuck       = "1"
+pollster       = "1"
 supercom-scmap = { path = "../scmap", version = "0.0.1" }
+wgpu           = "30"
 
 [dev-dependencies]
 supercom-testkit = { path = "../testkit", version = "0.0.1" }
