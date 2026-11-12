@@ -199,7 +199,7 @@ game.
   the bare run it was; `supercom view [<map folder>] [--frames <n>]` opens the
   window. The arguments are parsed by hand, without a parsing crate, by a pure
   function of the argument list that runs before the display or the install
-  is touched, so a usage error reads the same on every host. Ground: the
+  is touched, so a usage error reads the same on any host. Ground: the
   grammar is two shapes, and a pure parser is testable without a window.
   The folder is one path component, so `view ../x` cannot leave the install's
   `maps` directory: it has no separator and is not `.` or `..`. The count is
@@ -316,7 +316,7 @@ game.
   depend on the terrain under it.
 - **Requesting the adapter's full limits.** Would let a host with a large
   adapter limit accept a grid that the default limit refuses; the lowered
-  default caps every host at 256 MiB, so no host accepts what the default
+  default caps all hosts at 256 MiB, so no host accepts what the default
   refuses, though a host with less refuses sooner.
 
 - **A math crate (glam, nalgebra).** Adds a dependency whose types would
