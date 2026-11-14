@@ -285,6 +285,14 @@ fn render_water_plane_matches_stored_elevation() {
         );
     }
 
+    for (width, height) in [(0.0, 128.0), (256.0, f32::NAN)] {
+        let flat = with_water(flat_map(2, 2, width, height, 0), 17.5);
+        assert!(
+            WaterPlane::from_map(&flat).is_none(),
+            "an extent of {width} by {height} gives no plane"
+        );
+    }
+
     let wet = with_water(dry, 17.5);
     let plane = WaterPlane::from_map(&wet);
     assert!(plane.is_some(), "a map with water has a plane");
