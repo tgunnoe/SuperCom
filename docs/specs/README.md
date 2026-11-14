@@ -17,7 +17,7 @@ source.
 | data-model  | Nickel contracts for the blueprint families; mod overlay semantics; the import cache                                                                                            | landed |
 | sim         | tick model, economy, units and categories, orders and build queues, weapons and projectiles, damage and armour, pathfinding, veterancy, intel, victory and defeat               | landed |
 | determinism | lockstep command stream, replay format, float strategy, desync detection                                                                                                        | landed |
-| render      | the terrain grid, the water plane, the camera with its zoom range and clip planes, height normalization and shading; the frontier is in render.md                               | landed |
+| render      | the terrain grid, the water plane, the camera and its zoom range, shading, the GPU pipeline that draws them, and the windowed mode of the binary; the frontier is in render.md  | landed |
 | plugin-api  | WIT worlds, host imports, versioning, sandbox policy                                                                                                                            | landed |
 | ai          | the skirmish AI interface and the built-in AI's contract                                                                                                                        | landed |
 | ui          | basic HUD and input behaviour                                                                                                                                                   | landed |
