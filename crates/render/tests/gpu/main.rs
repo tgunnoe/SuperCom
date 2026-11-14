@@ -503,6 +503,7 @@ fn conformance_gpu_one_draw_function_fills_views_of_any_size() {
 
 #[test]
 fn conformance_gpu_empty_margins_hold_the_clear_colour() {
+    assert_eq!(CLEAR_COLOR, [0.01, 0.01, 0.02]);
     let Some(mut renderer) = gpu(TextureFormat::Rgba8UnormSrgb) else {
         return;
     };
@@ -616,6 +617,7 @@ fn conformance_gpu_terrain_pixels_match_the_shading_function() {
 
 #[test]
 fn conformance_gpu_water_hides_only_terrain_below_its_surface() {
+    assert_eq!(WATER_COLOR, [0.04, 0.22, 0.45]);
     let format = TextureFormat::Rgba8UnormSrgb;
     let Some(mut renderer) = gpu(format) else {
         return;
@@ -765,6 +767,14 @@ fn conformance_gpu_upload_refuses_a_grid_over_the_device_limit() {
     assert!(
         matches!(inconsistent, Err(Error::InconsistentMesh)),
         "buffers that do not match the cell counts are refused: {inconsistent:?}"
+    );
+    let mut both_short = mesh_of(&east_ramp());
+    both_short.positions.pop();
+    both_short.normals.pop();
+    let inconsistent = renderer.upload(&both_short, None);
+    assert!(
+        matches!(inconsistent, Err(Error::InconsistentMesh)),
+        "positions and normals of equal length, one vertex short, are refused: {inconsistent:?}"
     );
 }
 
@@ -920,9 +930,76 @@ fn render_gpu_gate_decides_over_four_cases() {
 
 // ---- REN-029 -----------------------------------------------------------
 
+/// Parses and validates the shader without an adapter, then checks the
+/// uniform struct's layout against the 20 floats the renderer writes.
+fn check_shader_with_naga(source: &str) {
+    use supercom_render::wgpu::naga::{
+        ScalarKind, ShaderStage, TypeInner, VectorSize,
+        front::wgsl,
+        valid::{Capabilities, ValidationFlags, Validator},
+    };
+    let module = must(wgsl::parse_str(source), "naga parses the shader");
+    must(
+        Validator::new(ValidationFlags::all(), Capabilities::default()).validate(&module),
+        "naga validates the shader",
+    );
+    let stages = |wanted: ShaderStage| {
+        module
+            .entry_points
+            .iter()
+            .filter(|entry| entry.stage == wanted)
+            .count()
+    };
+    assert_eq!(module.entry_points.len(), 4, "four entry points");
+    assert_eq!(stages(ShaderStage::Vertex), 2, "two vertex entry points");
+    assert_eq!(
+        stages(ShaderStage::Fragment),
+        2,
+        "two fragment entry points"
+    );
+
+    let frame = module
+        .types
+        .iter()
+        .find(|(_, ty)| ty.name.as_deref() == Some("Frame"))
+        .map(|(_, ty)| &ty.inner);
+    let Some(TypeInner::Struct { members, span }) = frame else {
+        fail(&format!(
+            "the shader declares a struct Frame, found {frame:?}"
+        ));
+    };
+    assert_eq!(*span, 80, "Frame spans 64 bytes of matrix and 16 of vector");
+    assert_eq!(members.len(), 2, "Frame has two members");
+    let member = |k: usize| {
+        let inner = &module.types[members[k].ty].inner;
+        (members[k].name.as_deref(), members[k].offset, inner)
+    };
+    let (name, offset, inner) = member(0);
+    assert_eq!((name, offset), (Some("view_projection"), 0));
+    assert!(
+        matches!(
+            inner,
+            TypeInner::Matrix { columns: VectorSize::Quad, rows: VectorSize::Quad, scalar }
+                if scalar.kind == ScalarKind::Float && scalar.width == 4
+        ),
+        "view_projection is a 4 by 4 matrix of f32, not {inner:?}"
+    );
+    let (name, offset, inner) = member(1);
+    assert_eq!((name, offset), (Some("range"), 64));
+    assert!(
+        matches!(
+            inner,
+            TypeInner::Vector { size: VectorSize::Quad, scalar }
+                if scalar.kind == ScalarKind::Float && scalar.width == 4
+        ),
+        "range is a 4-vector of f32, not {inner:?}"
+    );
+}
+
 #[test]
 fn render_shader_source_is_assembled_from_the_rust_constants() {
     let source = shader_source();
+    check_shader_with_naga(&source);
     for entry in ["vs_terrain", "fs_terrain", "vs_water", "fs_water"] {
         assert!(source.contains(entry), "the source has {entry}");
     }

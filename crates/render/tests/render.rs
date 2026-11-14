@@ -229,6 +229,38 @@ fn render_normals_are_unit_length_and_up_on_flat_terrain() {
         );
     }
 
+    // A parabola along x, elevation i^2 / 16 at column i over cells one
+    // world unit wide: the slopes are 0.0625 and 0.4375 one-sided at the
+    // edges, and 0.125, 0.25, and 0.375 across the vertex inside, where a
+    // central difference is exact on a quadratic and a forward one is not.
+    let parabola = ok(TerrainMesh::build(&grid_map(
+        4,
+        4,
+        4.0,
+        4.0,
+        1.0 / 128.0,
+        |i, _| 8 * i16::from(i) * i16::from(i),
+    )));
+    assert_eq!(parabola.normals.len(), 25);
+    let wanted = [
+        [-0.062_378, 0.998_053, 0.0],
+        [-0.124_035, 0.992_278, 0.0],
+        [-0.242_536, 0.970_143, 0.0],
+        [-0.351_123, 0.936_329, 0.0],
+        [-0.400_819, 0.916_157, 0.0],
+    ];
+    for j in 0..5 {
+        for (i, want) in wanted.iter().enumerate() {
+            let n = parabola.normals[j * 5 + i];
+            assert!(
+                close(n[0], want[0], 1e-5)
+                    && close(n[1], want[1], 1e-5)
+                    && close(n[2], want[2], 1e-5),
+                "normal of column {i}, row {j}: {n:?} against {want:?}"
+            );
+        }
+    }
+
     let rough = peak_mesh();
     assert_eq!(rough.normals.len(), 49);
     assert!(
@@ -244,6 +276,22 @@ fn render_normals_are_unit_length_and_up_on_flat_terrain() {
 fn render_water_plane_matches_stored_elevation() {
     let dry = flat_map(2, 2, 256.0, 128.0, 0);
     assert!(WaterPlane::from_map(&dry).is_none());
+
+    for elevation in [f32::NAN, f32::INFINITY] {
+        let unbounded = with_water(flat_map(2, 2, 256.0, 128.0, 0), elevation);
+        assert!(
+            WaterPlane::from_map(&unbounded).is_none(),
+            "a stored elevation of {elevation} gives no plane"
+        );
+    }
+
+    for (width, height) in [(0.0, 128.0), (256.0, f32::NAN)] {
+        let flat = with_water(flat_map(2, 2, width, height, 0), 17.5);
+        assert!(
+            WaterPlane::from_map(&flat).is_none(),
+            "an extent of {width} by {height} gives no plane"
+        );
+    }
 
     let wet = with_water(dry, 17.5);
     let plane = WaterPlane::from_map(&wet);
@@ -604,6 +652,40 @@ fn render_clip_planes_bound_every_visible_vertex() {
         }
     }
 
+    // Numbers from the clauses, computed in f64 outside the crate: a flat map
+    // of 64 by 64 world units with one sample at 10, seen at the far end of
+    // the zoom range and at the near end.
+    let ridge = grid_map(64, 64, 64.0, 64.0, 1.0 / 128.0, |i, j| {
+        if (i, j) == (20, 30) { 1280 } else { 0 }
+    });
+    let ridge_mesh = ok(TerrainMesh::build(&ridge));
+    assert!(close(ridge_mesh.lowest, 0.0, 1e-6) && close(ridge_mesh.highest, 10.0, 1e-5));
+    let mut ridge_camera = ok(Camera::for_mesh(&ridge_mesh, 1.0));
+    ridge_camera.zoom(100.0, ZoomSpeed::Normal);
+    let wanted = [
+        (77.254_83, 38.627_42, 138.291_5),
+        (40.0, 12.566_3, 140.361_7),
+    ];
+    for (k, (distance, want_near, want_far)) in wanted.into_iter().enumerate() {
+        if k == 1 {
+            ridge_camera.zoom(-100.0, ZoomSpeed::Normal);
+        }
+        let (clip_near, clip_far) = ridge_camera.clip_planes();
+        assert!(
+            close(ridge_camera.distance(), distance, distance * TOL),
+            "distance {}",
+            ridge_camera.distance()
+        );
+        assert!(
+            close(clip_near, want_near, want_near * TOL),
+            "near plane {clip_near} against {want_near} at distance {distance}"
+        );
+        assert!(
+            close(clip_far, want_far, want_far * TOL),
+            "far plane {clip_far} against {want_far} at distance {distance}"
+        );
+    }
+
     // A deep pit far below the target's plane, seen from the far end.
     let pit = grid_map(4, 4, 128.0, 128.0, 1.0, |i, j| {
         if (i, j) == (2, 2) { -3000 } else { 0 }
@@ -671,6 +753,29 @@ fn render_height_normalization_and_shading() {
             "shading barely depends on the normal at height {height}"
         );
     }
+    // The ramp's stops times the light factor 0.3 + 0.7 max(0, n.l), which
+    // is 1 facing the light, 0.3 facing away, and 0.86 straight up.
+    let light = [-0.36, 0.8, -0.48];
+    let away = [0.36, -0.8, 0.48];
+    for (got, want, what) in [
+        (shade(0.0, light), [0.18, 0.30, 0.12], "valley, lit"),
+        (shade(0.5, light), [0.50, 0.42, 0.28], "middle, lit"),
+        (shade(1.0, light), [0.92, 0.90, 0.86], "summit, lit"),
+        (shade(0.0, away), [0.054, 0.090, 0.036], "valley, unlit"),
+        (
+            shade(1.0, [0.0, 1.0, 0.0]),
+            [0.7912, 0.7740, 0.7396],
+            "summit, up",
+        ),
+    ] {
+        assert!(
+            close(got[0], want[0], 1e-5)
+                && close(got[1], want[1], 1e-5)
+                && close(got[2], want[2], 1e-5),
+            "{what}: {got:?} against {want:?}"
+        );
+    }
+
     let lit = luminance(shade(0.5, LIGHT_DIRECTION));
     let unlit = luminance(shade(0.5, [0.0, -1.0, 0.0]));
     assert!(lit > unlit + 0.1, "lit {lit} against unlit {unlit}");
@@ -702,6 +807,43 @@ fn render_aspect_change_recomputes_range_and_reclamps() {
         close(camera.distance(), far_wide, far_wide * 1e-5),
         "distance re-clamped to the new far end"
     );
+
+    // On a square extent, aspect 2 leaves the vertical half-extent binding,
+    // so the distance stays 32 / tan(22.5 degrees) and the stored aspect
+    // alone puts the east edge's midpoint at half the screen's half-width.
+    let square = flat_map(64, 64, 64.0, 64.0, 0);
+    let mut stretched = ok(Camera::for_mesh(&ok(TerrainMesh::build(&square)), 1.0));
+    stretched.zoom(100.0, ZoomSpeed::Normal);
+    assert!(stretched.set_aspect(2.0).is_ok());
+    assert!(
+        close(stretched.distance(), 77.254_83, 77.254_83 * TOL),
+        "distance {}",
+        stretched.distance()
+    );
+    let m = stretched.view_projection();
+    let east = clip(&m, [64.0, 0.0, 32.0]);
+    let north = clip(&m, [32.0, 0.0, 0.0]);
+    assert!(
+        close(east[0] / east[3], 0.5, 1e-4),
+        "east edge at {}",
+        east[0] / east[3]
+    );
+    assert!(
+        close(north[1] / north[3], 1.0, 1e-4),
+        "north edge at {}",
+        north[1] / north[3]
+    );
+
+    // An aspect at which the strategic view would be no farther than the
+    // near end is refused and leaves the camera as it was: 24.14 at aspect
+    // 100 against 618.04 at aspect 1.
+    let mut tall = ok(Camera::new(512.0, 20.0, 0.0, 0.0, 1.0));
+    let kept = tall;
+    assert!(matches!(
+        tall.set_aspect(100.0),
+        Err(Error::ExtentTooSmall { .. })
+    ));
+    assert_eq!(tall, kept, "a refused aspect ratio changes nothing");
 
     let mut narrowed = ok(Camera::new(512.0, 256.0, 0.0, 50.0, 1.0));
     set_distance(&mut narrowed, 200.0);
@@ -780,12 +922,17 @@ fn render_camera_rejects_bad_inputs() {
         Camera::new(512.0, 256.0, 5.0, 4.0, 1.0),
         Err(Error::BadElevationRange { .. })
     ));
+    // Both elevations are finite, but their difference, 6e38, is past the
+    // largest finite f32, 3.4028e38.
+    assert!(matches!(
+        Camera::new(64.0, 64.0, -3.0e38, 3.0e38, 1.0),
+        Err(Error::BadElevationRange { .. })
+    ));
 }
 
 /// A guard, passing at the commit that adds it because the camera's guards
 /// already exist: zoom and pan leave the camera exactly as it was for input
-/// that is not finite. Its teeth are two mutants of `camera.rs`, each
-/// removing one guard, either of which makes this test fail.
+/// that is not finite.
 #[test]
 fn render_camera_ignores_non_finite_input() {
     use supercom_render::ZoomSpeed::{Fast, Normal};

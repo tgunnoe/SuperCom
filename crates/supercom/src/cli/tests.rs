@@ -53,6 +53,8 @@ fn supercom_parse_args_rejects_everything_else() {
         &["view", "--frames", "99999999999999999999"],
         &["view", "--frames", "2", "--frames", "3"],
         &["view", "--unknown"],
+        &["view", "-x"],
+        &["view", "SCMP_012", "-x"],
         &["view", "A", "B"],
         &["view", "--frames", "2", "A", "B"],
         &["SCMP_012"],

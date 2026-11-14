@@ -60,7 +60,7 @@ game.
 - **Hand-written f32 math, no math crate (REN-008, REN-009).** The slice
   needs a look-at, a perspective, a product, and a handful of vector
   operations. Writing them as plain arrays keeps the public API free of
-  foreign types, keeps the dependency list at `supercom-scmap`, and keeps the
+  foreign types, keeps a math crate out of the dependency list, and keeps the
   matrices testable against independent arithmetic written in the tests.
 - **Camera model (REN-009, REN-010, REN-011, REN-012).** A vertical field of
   view of 45 degrees: a conventional middle value that frames a map from
@@ -378,3 +378,28 @@ the head had not seen it when ratifying.
   feature and for the default limits lowered to the adapter's own (REN-025),
   and a change that asked for more would show only as a refused request,
   which a skip would hide on every host with an adapter.
+- **Corrected after ratification:** the statements of REN-007 (a stored water
+  elevation that is not finite, or a header extent that is not finite and
+  positive, gives no plane), REN-016 (a refused aspect ratio includes one at
+  which the strategic view would be no farther than the near end), REN-017 (a
+  relief that is not finite is refused, and the near end's boundary reads "no
+  farther than"), REN-029 (the source is parsed and validated without an
+  adapter, and the uniform struct's layout is checked), REN-032 (an argument
+  beginning with `-` is an option), REN-037 (the claim about two mutants is
+  dropped), and REN-039 (the flag with no install found fails) now say what
+  the code already did or what a test now checks. The bullet on hand-written
+  math said "keeps the dependency list at `supercom-scmap`", true when it was
+  written; the crate also depends on wgpu, bytemuck, and pollster, as the
+  later bullet says, so the sentence now says only that no math crate is in
+  the list.
+- **Found after ratification:** the forge's runner has no graphics adapter, so
+  every `conformance_gpu_` test skips there, and REN-029's parse and
+  validation are the only check the shader gets there (issue 77 of
+  https://github.com/tgunnoe/SuperCom).
+- **Found after ratification:** REN-035's order (the fit check before the
+  mesh) and REN-040's last sentence (the surface constructor uses the format
+  choice) are reached by no test, and rest on reading and a person's run
+  (issue 78 of https://github.com/tgunnoe/SuperCom).
+- **Found after ratification:** a camera refused a new aspect ratio keeps its
+  previous one, so the window draws stretched until a size is accepted; no
+  installed map is thin enough for this.

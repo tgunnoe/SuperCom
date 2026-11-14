@@ -40,6 +40,13 @@ fn supercom_plan_run_failures() {
     );
 
     let root = Scratch::new("failures");
+    let install_file = root.0.join("install-is-a-file");
+    fs::write(&install_file, b"not a directory").expect("the file is written");
+    assert_eq!(
+        plan_run(Some(&install_file), "m").err(),
+        Some(RunError::InstallMissing { dir: install_file }),
+        "an install that is a regular file is a missing install"
+    );
     assert!(
         matches!(
             plan_run(Some(&root.0), "absent").err(),
