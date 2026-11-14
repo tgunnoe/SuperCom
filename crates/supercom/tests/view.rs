@@ -101,6 +101,7 @@ fn supercom_view_without_display_fails_cleanly() {
 /// it opens a real window on the display it inherits, so it is run only
 /// inside a nested compositor, and presents three frames of an installed
 /// map. Without the flag it prints `SKIP: <reason>` and passes.
+/// With the flag set and no install found it fails, naming the install.
 #[test]
 fn conformance_window_presents_frames() {
     if std::env::var("SUPERCOM_REQUIRE_DISPLAY").as_deref() != Ok("1") {
@@ -108,7 +109,10 @@ fn conformance_window_presents_frames() {
         return;
     }
     let Some(fa) = supercom_testkit::require_game() else {
-        return;
+        fail(
+            "SUPERCOM_REQUIRE_DISPLAY=1 is set but no game install was found; \
+             set SUPERCOM_FA_DIR to the install",
+        );
     };
     let spawned = Command::new(BINARY)
         .args(["view", "SCMP_012", "--frames", "3"])

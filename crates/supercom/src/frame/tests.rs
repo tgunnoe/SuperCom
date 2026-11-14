@@ -86,4 +86,16 @@ fn supercom_progress_counts_frames_and_stalls() {
     }
     assert_eq!(stalling.stalled(), Step::GiveUp);
     assert_eq!(stalling.count(), 1, "stalls are not frames");
+
+    // The threshold as a number: 29 frames in a row that did not present
+    // leave the run going, and the 30th ends it.
+    let mut thirty = Progress::new(None);
+    for stall in 1..=29 {
+        assert_eq!(
+            thirty.stalled(),
+            Step::Continue,
+            "stall {stall} of 30 leaves the run going"
+        );
+    }
+    assert_eq!(thirty.stalled(), Step::GiveUp, "the 30th stall ends it");
 }
