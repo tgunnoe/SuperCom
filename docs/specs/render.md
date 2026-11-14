@@ -19,8 +19,8 @@ The frontier of this slice: the GPU pipeline's and the windowed mode's
 contracts are specified below; the window loop itself, the code that turns the
 window system's events into inputs and draws, is reached by no headless test
 and is tried only when a display is available, so a person's run is its
-evaluator (the record's last section says what the run at its ratification
-covered); a graphics device lost by the driver is reported by nothing (issue
+evaluator (the record's section Known at ratification says what the run at
+its ratification covered); a graphics device lost by the driver is reported by nothing (issue
 74 of https://github.com/tgunnoe/SuperCom); the three installed maps of 4096
 cells a side are refused and not drawn (issue 69); terrain splatting, decals,
 shadows, water effects, units, fog of war, strategic icons, and

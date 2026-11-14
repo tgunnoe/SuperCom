@@ -1,6 +1,6 @@
 # ADR-0016: The first-light renderer: a headless core of pure functions
 
-**Status:** ACCEPTED (ratified by the head on 2026-11-14, as written, after running the window on SCMP_012 and SCMP_016)
+**Status:** ACCEPTED (ratified by the head on 2026-11-14, as written, after running the window on SCMP_012 and SCMP_016; the section After ratification lists what was written or corrected since)
 
 **Date:** 2026-11-11
 
@@ -337,15 +337,21 @@ game.
 
 ## Known at ratification
 
-The head ratified this record on 2026-11-14 after running `supercom view` on
-SCMP_012 and SCMP_016 in a desktop session, on an Intel Arc B580 over Vulkan.
-Four limits were named with the request to ratify, and they stand:
+The head ratified this record on 2026-11-14 after running `supercom view` in
+a desktop session on an Intel Arc B580 over Vulkan: once on SCMP_012, four
+times on SCMP_016, and once on SCMP_029, which ended with the fit check's
+message. The head's verdict was 'the tests you asked for all check out'; it
+does not say which of the actions the request listed were tried, or whether
+the running original was beside the window. Four limits were named with the
+request to ratify, and they stand:
 
 - **The window loop is checked by a person's run.** No headless test reaches
-  the loop. REN-038's sentences on a lost or outdated surface, on the frames
-  that did not present, and on running out of memory, and REN-041's sentence
-  that the window's calls never report to the device's default handler, have
-  that run as their evaluator; the pure functions they call are tested.
+  the loop. REN-038's sentences on reporting an error from setting the aspect
+  ratio once, on a lost or outdated surface, on the frames that did not
+  present, and on running out of memory, and REN-041's sentence that the
+  window's calls never report to the device's default handler, have a person's
+  run as their only evaluator, and the output of the run above holds none of
+  their messages; the pure functions they call are tested.
 - **A lost surface is configured again, not recovered.** wgpu documents a
   lost surface as needing a new one, and the renderer keeps no instance to
   make one from; such a surface ends the run after the 30 frames of REN-038.
@@ -353,13 +359,22 @@ Four limits were named with the request to ratify, and they stand:
   then loses a device that was just requested. It has been seen in the GPU
   tests and never on the software driver (issue 74 of
   https://github.com/tgunnoe/SuperCom). A failed device request fails a
-  `conformance_gpu_` test with or without `SUPERCOM_REQUIRE_GPU=1`: REN-028's
-  skip covers a missing adapter only, because a request that an existing
-  adapter refuses may be the renderer's own fault, which a skip would hide.
-  Whether a lost device should skip when the flag is unset is decided with
-  issue 74.
+  `conformance_gpu_` test with or without `SUPERCOM_REQUIRE_GPU=1`, since
+  REN-028's skip covers a missing adapter only. Whether a lost device should
+  skip when the flag is unset is decided with issue 74.
 - **A lost device is named by nothing.** Neither the renderer nor the tests
   register a device-lost callback, and wgpu keeps a lost device's errors away
   from the error scopes. In `view`, a device lost after the window is built
   shows nothing new, and the run goes on or ends after the 30 frames with a
   message that does not mention the device (issue 74).
+
+## After ratification
+
+Written at the campaign's close on 2026-11-14, after the head's ratification;
+the head had not seen it when ratifying.
+
+- **Why a refused device request is not a skip.** A request that an existing
+  adapter refuses may be the renderer's own fault: the renderer asks for no
+  feature and for the default limits lowered to the adapter's own (REN-025),
+  and a change that asked for more would show only as a refused request,
+  which a skip would hide on every host with an adapter.
