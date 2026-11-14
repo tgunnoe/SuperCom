@@ -379,18 +379,19 @@ the head had not seen it when ratifying.
   and a change that asked for more would show only as a refused request,
   which a skip would hide on every host with an adapter.
 - **Corrected after ratification:** the statements of REN-007 (a stored water
-  elevation that is not finite gives no plane), REN-016 (a refused aspect
-  ratio includes one at which the strategic view would be no farther than the
-  near end), REN-017 (a relief that is not finite is refused, and the near
-  end's boundary reads "no farther than"), REN-029 (the source is parsed and
-  validated without an adapter, and the uniform struct's layout is checked),
-  REN-032 (an argument beginning with `-` is an option), REN-037 (the claim
-  about two mutants is dropped), and REN-039 (the flag with no install found
-  fails) now say what the code already did or what a test now checks. The
-  bullet on hand-written math said "keeps the dependency list at
-  `supercom-scmap`", true when it was written; the crate also depends on wgpu,
-  bytemuck, and pollster, as the later bullet says, so the sentence now says
-  only that no math crate is in the list.
+  elevation that is not finite, or a header extent that is not finite and
+  positive, gives no plane), REN-016 (a refused aspect ratio includes one at
+  which the strategic view would be no farther than the near end), REN-017 (a
+  relief that is not finite is refused, and the near end's boundary reads "no
+  farther than"), REN-029 (the source is parsed and validated without an
+  adapter, and the uniform struct's layout is checked), REN-032 (an argument
+  beginning with `-` is an option), REN-037 (the claim about two mutants is
+  dropped), and REN-039 (the flag with no install found fails) now say what
+  the code already did or what a test now checks. The bullet on hand-written
+  math said "keeps the dependency list at `supercom-scmap`", true when it was
+  written; the crate also depends on wgpu, bytemuck, and pollster, as the
+  later bullet says, so the sentence now says only that no math crate is in
+  the list.
 - **Found after ratification:** the forge's runner has no graphics adapter, so
   every `conformance_gpu_` test skips there, and REN-029's parse and
   validation are the only check the shader gets there (issue 77 of
