@@ -161,7 +161,8 @@ Each item: statement · grounding (why unresolved) · signpost (what resolves it
 Core (planned; `crates/supercom`, `crates/scd`, `crates/testkit`,
 `crates/plugin` with `wit/`, `crates/detbench`, `crates/scm`, `crates/dds`,
 `crates/scmap`, `crates/bp`, `crates/data`, `crates/bp-import`, `crates/sim`,
-`crates/sim-ingest`, and `crates/replay-harness` exist today — WIP):
+`crates/sim-ingest`, `crates/replay-harness`, and `crates/render` exist today —
+WIP):
 
 - `crates/supercom` — binary: configuration, wiring, launches a skirmish.
 - `crates/scd` — `.scd` archive virtual filesystem and mount order.
@@ -179,8 +180,9 @@ Core (planned; `crates/supercom`, `crates/scd`, `crates/testkit`,
 - `crates/plugin` — wasmtime host and plugin SDK; `wit/` — the engine API.
 - `crates/detbench` — determinism evidence: golden vectors for the float
   strategy and the on-demand benchmark; never shipped.
-- `crates/render` — wgpu renderer; `crates/ui` — winit/egui HUD, input,
-  camera and strategic zoom.
+- `crates/render` — wgpu renderer, with the camera and its strategic zoom; the
+  window, the event loop, and the camera's input are in `crates/supercom`;
+  `crates/ui` — egui HUD and command input.
 
 Context-sensitive: `docs/specs/` (authority), `docs/adr/` (decisions),
 `docs/models/` (formal models), `tools/` (the specification lint and the
@@ -190,7 +192,7 @@ specification domain, `survey/` census scripts over the installed game).
 ## Spec Pointers
 
 - docs/specs/README.md — the reverse-engineering spec index.
-- docs/adr/ — decisions 0001–0015.
+- docs/adr/ — decisions 0001–0016.
 - Graphics pipeline study:
   https://www.adriancourreges.com/blog/2015/06/23/supreme-commander-graphics-study/
 - Engine Lua API surface (read for understanding only, see I1):

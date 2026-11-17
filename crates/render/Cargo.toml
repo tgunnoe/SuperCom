@@ -1,0 +1,21 @@
+[package]
+description  = "First-light renderer: terrain grid, water plane, camera, and shading as pure functions, and the wgpu pipeline that draws them"
+edition      = { workspace = true }
+license      = { workspace = true }
+name         = "supercom-render"
+publish      = false
+repository   = { workspace = true }
+rust-version = { workspace = true }
+version      = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+bytemuck       = "1"
+pollster       = "1"
+supercom-scmap = { path = "../scmap", version = "0.0.1" }
+wgpu           = "30"
+
+[dev-dependencies]
+supercom-testkit = { path = "../testkit", version = "0.0.1" }
