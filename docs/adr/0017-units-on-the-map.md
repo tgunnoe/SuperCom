@@ -96,23 +96,27 @@ REN-056); this record is the source each names.
 
 - **The near end of the zoom range is 8 world units where
   docs/adr/0016-first-light-renderer.md decided 40 (REN-010).** The head ruled
-  on 2026-11-17 that the near end is 8, because at 40 a figure two world units
-  tall is about 26 pixels tall in a window 720 pixels high on a map whose bases
-  lie 13 units under its highest vertex (the figure's base 13 units and its top
-  11 units under the target's plane, at the near pitch of 35 degrees, by the
-  geometry of REN-009 and REN-012). The other camera rules of REN-009 to
-  REN-017 stay: the target stays on the plane of the map's highest vertex, so
-  a camera that follows the ground is issue 84 of
-  https://github.com/tgunnoe/SuperCom and not this record. The test of
-  REN-017 now takes an extent whose strategic view lies between 8 and 40 world
-  units as valid, and REN-023's fixture is adapted so that the east and the
-  west still differ at the nearer end.
+  on 2026-11-17 that the near end is 8, on the figure the head was shown: at a
+  near end of 40, a commander's mesh is about 29 pixels tall in the default
+  window. On SCMP_012 both start positions lie about 13 units under the plane
+  of the map's highest vertex, where the target stays (REN-009). At a near end
+  of 40 and the near pitch of 35 degrees (REN-012), the line of sight through
+  the screen's centre meets the ground at a start position 63.4 units from the
+  eye, where a length across the line of sight measures 13.7 pixels per world
+  unit in a window 720 pixels high; at a near end of 8 that point is 31.4
+  units from the eye, at 27.7 pixels per world unit, and the commander's mesh
+  is about 58 pixels tall. The other camera rules of REN-009 to REN-017 stay:
+  the target stays on the plane of the map's highest vertex, so a camera that
+  follows the ground is issue 84 of https://github.com/tgunnoe/SuperCom and
+  not this record. The test of REN-017 now takes an extent whose strategic
+  view lies between 8 and 40 world units as valid, and REN-023's fixture is
+  adapted so that the east and the west still differ at the nearer end.
 
 ## Consequences
 
 - The renderer's public surface grows by one model type, one instance type,
-  one style type, six pure functions, the model shader's source function, and
-  two operations on the renderer; the draw function and the terrain upload
+  one style type, six pure functions, the model shader's source function,
+  three constants for the byte counts, and two operations on the renderer; the draw function and the terrain upload
   are unchanged.
 - The binary can place anything it can describe as a model, in a colour,
   without the renderer changing. Models from the installed game's meshes, the
