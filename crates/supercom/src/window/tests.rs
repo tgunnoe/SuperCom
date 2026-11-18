@@ -1,12 +1,9 @@
 use super::*;
-use crate::cache::CacheVars;
 use crate::pacing::Pace;
 use crate::prepare::prepare_replay;
 use crate::testing::{Scratch, committed_log};
 use std::sync::Arc;
-use supercom_sim::{
-    Army, Pos, Q, Tick, World, first_divergence, read_replay, run_replay as sim_replay,
-};
+use supercom_sim::{Army, Pos, Q, Tick, World, first_divergence, run_replay as sim_replay};
 
 fn pace_of(due: u64, held_back: u64) -> Pace {
     Pace {
@@ -73,6 +70,44 @@ fn supercom_play_counts_held_frames_and_stops_at_the_last_checkpoint() {
         "nothing is stepped or counted once stepping has stopped"
     );
     assert_eq!(play.step_one(), Ok(Stepped::Stopped));
+}
+
+/// REN-073: with a clock that started long before, every owed tick runs in
+/// one frame under the cap of ten, stepping stops in it, and the fraction
+/// drawn at is exactly 1.0 in that frame and in the frame after, not the
+/// part of a tick the pacing left over.
+#[test]
+fn supercom_replaying_draws_the_final_state_at_a_whole_tick() {
+    let (play, _) = empty_run();
+    let started = Instant::now().checked_sub(std::time::Duration::from_secs(1000));
+    assert!(started.is_some(), "the clock can start 1000 s ago");
+    let Some(started) = started else { return };
+    let mut replaying = Replaying {
+        play,
+        speed: 1.0,
+        clock: Some(started),
+        fraction: 0.5,
+        reported: true,
+    };
+    assert!(!replaying.play.finished());
+
+    assert!(replaying.advance().is_ok());
+    assert!(
+        replaying.play.finished(),
+        "six owed ticks run in the one frame"
+    );
+    assert_eq!(replaying.play.ticks_run(), 6);
+    assert_eq!(
+        replaying.fraction, 1.0,
+        "the frame that stops draws the final state"
+    );
+
+    replaying.fraction = 0.25;
+    assert!(replaying.advance().is_ok());
+    assert_eq!(
+        replaying.fraction, 1.0,
+        "the frame after draws the final state"
+    );
 }
 
 /// Against the install: 4,600 steps, all 46 checkpoints matched, and the
@@ -146,7 +181,6 @@ fn conformance_replay_loop_names_the_tick_of_a_wrong_checkpoint() {
     }
     assert_eq!(play.step_one(), Err(RunError::Mismatch { tick: 99 }));
     assert_eq!((play.ticks_run(), play.matched()), (100, 0));
-    let _ = (CacheVars::default(), read_replay(&[]));
 }
 
 /// REN-076: a frame that held exactly one tick back is counted.

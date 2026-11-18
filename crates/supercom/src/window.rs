@@ -371,7 +371,8 @@ fn set_scene(replaying: &Replaying, gfx: &mut Gfx) -> Result<(), RunError> {
 /// Everything between the window and the first frame, in the order of the
 /// run: the window, the renderer for its surface, the grid fit check against
 /// that renderer's device, the mesh, the water, the camera, the upload, and,
-/// for a replay, the marker models.
+/// for a replay, the model set (the markers and one model for each resolved
+/// kind).
 fn build(
     event_loop: &ActiveEventLoop,
     map: &Map,

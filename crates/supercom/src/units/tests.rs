@@ -359,6 +359,198 @@ fn supercom_unit_kind_resolution_failures() {
     );
 }
 
+/// A reader of fixed answers: the mesh's bytes for a mesh path and the
+/// blueprint's for any other, or an error naming the path when absent.
+fn fixed_reader(
+    mesh: Option<&'static [u8]>,
+    blueprint: Option<&'static [u8]>,
+) -> impl Fn(&str) -> Result<Vec<u8>, String> {
+    move |path: &str| {
+        let bytes = if path.ends_with("_lod0.scm") {
+            mesh
+        } else {
+            blueprint
+        };
+        bytes
+            .map(<[u8]>::to_vec)
+            .ok_or_else(|| format!("{path} is absent"))
+    }
+}
+
+/// Two defects at once give the earlier step's failure, in the order of
+/// REN-084.
+#[test]
+fn supercom_unit_kind_resolution_reports_the_earlier_of_two_failures() {
+    let both_absent = step_of(resolve_kind("ueb1103", &fixed_reader(None, None)));
+    assert!(
+        matches!(&both_absent, Some((_, KindStep::MeshRead, _))),
+        "both files absent: {both_absent:?}"
+    );
+    let unparsed_and_absent = step_of(resolve_kind(
+        "ueb1103",
+        &fixed_reader(Some(b"not a mesh"), None),
+    ));
+    assert!(
+        matches!(&unparsed_and_absent, Some((_, KindStep::BlueprintRead, _))),
+        "a mesh that does not parse, a blueprint that is absent: {unparsed_and_absent:?}"
+    );
+    let neither_parses = step_of(resolve_kind(
+        "ueb1103",
+        &fixed_reader(Some(b"not a mesh"), Some(b"not a blueprint {{{")),
+    ));
+    assert!(
+        matches!(&neither_parses, Some((_, KindStep::MeshParse, _))),
+        "a mesh and a blueprint that both do not parse: {neither_parses:?}"
+    );
+}
+
+/// The string literals of Rust source, comments left out: the text between
+/// double quotes, with a backslash taking the next character.
+fn string_literals(source: &str) -> Vec<String> {
+    let (mut found, mut current) = (Vec::new(), String::new());
+    let (mut in_string, mut in_comment) = (false, false);
+    let mut chars = source.chars().peekable();
+    while let Some(c) = chars.next() {
+        if in_comment {
+            in_comment = c != '\n';
+        } else if in_string {
+            match c {
+                '\\' => {
+                    let _ = chars.next();
+                }
+                '"' => {
+                    in_string = false;
+                    found.push(std::mem::take(&mut current));
+                }
+                _ => current.push(c),
+            }
+        } else if c == '/' && chars.peek() == Some(&'/') {
+            in_comment = true;
+        } else if c == '"' {
+            in_string = true;
+        } else if c == '\'' {
+            // A character literal: '"' must not open a string.
+            if chars.peek() == Some(&'\\') {
+                let _ = chars.next();
+            }
+            let _ = chars.next();
+            if chars.peek() == Some(&'\'') {
+                let _ = chars.next();
+            }
+        }
+    }
+    found
+}
+
+/// The `.rs` files under `dir`, not named for tests, found recursively.
+fn source_files(dir: &Path, into: &mut Vec<std::path::PathBuf>) {
+    let entries = std::fs::read_dir(dir);
+    assert!(
+        entries.is_ok(),
+        "{dir:?} lists: {:?}",
+        entries.as_ref().err()
+    );
+    let Ok(entries) = entries else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name();
+        if path.is_dir() {
+            source_files(&path, into);
+        } else if path.extension().is_some_and(|ext| ext == "rs")
+            && name != "tests.rs"
+            && name != "testing.rs"
+        {
+            into.push(path);
+        }
+    }
+}
+
+/// REN-082: the binary states no faction's name: no string literal of a
+/// non-test source file holds one, and the walk read enough files that an
+/// empty one cannot pass.
+#[test]
+fn supercom_binary_names_no_faction() {
+    let mut files = Vec::new();
+    source_files(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut files,
+    );
+    assert!(files.len() >= 10, "read only {} files", files.len());
+    for file in &files {
+        let text = std::fs::read_to_string(file);
+        assert!(text.is_ok(), "{file:?} reads: {:?}", text.as_ref().err());
+        let text = text.unwrap_or_default();
+        for literal in string_literals(&text) {
+            for faction in ["UEF", "Aeon", "Cybran", "Seraphim"] {
+                assert!(
+                    !literal.contains(faction),
+                    "{file:?} holds the literal {literal:?}"
+                );
+            }
+        }
+    }
+    // The reader finds a literal past a comment, an escape, and a quote
+    // character, so the walk above is not blind.
+    let found =
+        string_literals("// \"UEF\"\nlet a = '\"'; let b = \"x\\\"y\"; let c = \"Cybran\";");
+    assert_eq!(found, ["xy".to_owned(), "Cybran".to_owned()]);
+}
+
+/// The text of a kind's failure holds the kind and the step's name as the
+/// clause lists them, one for each of the six steps, and the text of a
+/// mismatch holds its tick.
+#[test]
+fn supercom_unit_kind_failure_texts_name_the_step() {
+    let text = |result: Result<UnitMesh, RunError>| result.err().map(|error| error.to_string());
+    let mut short = quad_mesh();
+    short.vertices[1].normal = [0.0; 3];
+
+    let cases = [
+        (
+            "mesh read",
+            text(resolve_kind(
+                "uel0001",
+                &fixed_reader(None, Some(GOOD_BLUEPRINT)),
+            )),
+        ),
+        (
+            "blueprint read",
+            text(resolve_kind("uel0001", &fixed_reader(Some(b"MODL"), None))),
+        ),
+        (
+            "mesh parse",
+            text(resolve_kind(
+                "uel0001",
+                &fixed_reader(Some(b"not a mesh"), Some(GOOD_BLUEPRINT)),
+            )),
+        ),
+        (
+            "blueprint parse",
+            text(build_kind("uel0001", &quad_mesh(), b"not a blueprint {{{")),
+        ),
+        (
+            "scale",
+            text(build_kind("uel0001", &quad_mesh(), &blueprint_with(""))),
+        ),
+        (
+            "model check",
+            text(build_kind("uel0001", &short, GOOD_BLUEPRINT)),
+        ),
+    ];
+    for (name, text) in cases {
+        let prefix = format!("unit kind uel0001: {name}: ");
+        assert!(
+            text.as_deref().is_some_and(|t| t.starts_with(&prefix)),
+            "{name}: {text:?}"
+        );
+    }
+
+    assert_eq!(
+        RunError::Mismatch { tick: 99 }.to_string(),
+        "replay: the digest at tick 99 differs from its checkpoint"
+    );
+}
+
 /// Against an install that holds nothing the archives do not mount, and the
 /// error says which step.
 #[test]

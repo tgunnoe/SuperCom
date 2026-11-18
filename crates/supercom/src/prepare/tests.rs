@@ -136,6 +136,51 @@ fn supercom_prepare_replay_failures() {
     );
 }
 
+/// Two defects at once give the earlier step's failure, in the order of
+/// REN-057.
+#[test]
+fn supercom_prepare_replay_reports_the_earlier_of_two_failures() {
+    let root = Scratch::new("prepare-order");
+    let slash = write(
+        root.path(),
+        "slash.replay",
+        &bytes("a/b", vec![(Tick(99), [1; 32])]),
+    );
+    let no_install = root.path().join("no-such-install");
+    let missing_and_unreadable = error_text(prepare_replay(
+        Some(&no_install),
+        &root.path().join("absent.replay"),
+        CacheVars::default(),
+    ));
+    assert_eq!(
+        missing_and_unreadable.map(|e| e.0),
+        Some(RunError::InstallMissing { dir: no_install }),
+        "the install is checked before the replay file is read"
+    );
+    let no_checkpoint_and_slash =
+        write(root.path(), "empty-slash.replay", &bytes("a/b", Vec::new()));
+    let first = error_text(prepare_replay(
+        Some(root.path()),
+        &no_checkpoint_and_slash,
+        CacheVars::default(),
+    ));
+    assert!(
+        matches!(&first, Some((RunError::ReplayNoCheckpoints { path }, _))
+            if *path == no_checkpoint_and_slash),
+        "a replay with no checkpoint is refused before its map folder is checked: {first:?}"
+    );
+    let slash_and_no_cache = error_text(prepare_replay(
+        Some(root.path()),
+        &slash,
+        CacheVars::default(),
+    ));
+    assert!(
+        matches!(&slash_and_no_cache, Some((RunError::ReplayMapFolder { folder }, _))
+            if folder == "a/b"),
+        "the map folder is checked before the cache directory: {slash_and_no_cache:?}"
+    );
+}
+
 /// Against the install: the committed log prepares, a changed header does
 /// not, and the content check names itself.
 #[test]

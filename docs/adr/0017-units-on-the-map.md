@@ -290,21 +290,19 @@ REN-056); this record is the source each names.
   line, `view` with a folder and `--frames`, is extended by `replay <file>` with
   `--speed <x>` and `--frames <n>`; every list accepted before parses as before,
   and every list rejected before still fails unless it begins with `replay`.
-- **The binary now depends on the simulation's crates.** The first-light record
-  says the binary depends on no loader or simulation crate (REN-034's ground).
-  The replay run needs the simulation and the ingest that builds its world, so
-  the binary's manifest gains `supercom-sim` and `supercom-sim-ingest` and
-  nothing else; the rest of that record's ground for the map file's rule stands,
-  since `view` still re-implements the lookup. Through `supercom-sim-ingest`
-  the binary now also builds `supercom-scd`, `supercom-bp`,
-  `supercom-bp-import`, `supercom-data`, and the Nickel evaluator
-  `nickel-lang-core`. The binary never names the archive, mesh, or blueprint
-  loaders in this unit, and never depends on the replay harness or the
-  plugin host.
-  The binary's manifest also gains supercom-scd, supercom-scm, and
-  supercom-bp, for the meshes and their scales; the binary already builds the
-  first and the third through supercom-sim-ingest, the mesh loader is new to
-  its tree, and no package enters Cargo.lock.
+- **The binary now depends on the simulation's crates and on the loaders the
+  unit meshes need.** The first-light record says the binary depends on no
+  loader or simulation crate (REN-034's ground). The replay run needs the
+  simulation and the ingest that builds its world, and the unit meshes need the
+  archive, mesh, and blueprint loaders, so the binary's manifest gains
+  `supercom-sim`, `supercom-sim-ingest`, `supercom-scd`, `supercom-scm`, and
+  `supercom-bp`, and nothing else. The rest of that record's ground for the map
+  file's rule stands, since `view` still re-implements the lookup. Through
+  `supercom-sim-ingest` the binary also builds `supercom-bp-import`,
+  `supercom-data`, and the Nickel evaluator `nickel-lang-core`, and it built
+  `supercom-scd` and `supercom-bp` that way before it named them; the mesh
+  loader is new to its tree, and the loaders it now names add no package to
+  Cargo.lock. The binary never depends on the replay harness or the plugin host.
 
 ## Consequences
 

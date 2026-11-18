@@ -27,7 +27,7 @@ mod testing;
 mod units;
 mod window;
 
-use cache::CacheVars;
+use cache::cache_vars_from;
 use cli::{Command, ReplayArgs, ViewArgs};
 use error::RunError;
 use std::env;
@@ -85,11 +85,7 @@ fn run_replay(args: &ReplayArgs) -> Result<Outcome, RunError> {
         reason: error.to_string(),
     })?;
     let game_dir = resolve_game_dir(env::var_os(GAME_DIR_VAR), env::var_os("HOME"));
-    let cache = CacheVars {
-        override_dir: env::var_os("SUPERCOM_CACHE_DIR"),
-        xdg_cache_home: env::var_os("XDG_CACHE_HOME"),
-        home: env::var_os("HOME"),
-    };
+    let cache = cache_vars_from(&|name| env::var_os(name));
     let prepared = prepare::prepare_replay(game_dir.as_deref(), &args.file, cache)?;
     window::run_replay(event_loop, prepared, args.speed, args.frames)
 }

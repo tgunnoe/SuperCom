@@ -872,11 +872,32 @@ fn supercom_unnamed_kinds_are_markers_and_counted() {
     state.spawn(Army(2), "static1", pos(32.0, 0.0, 32.0), hundred());
     state.spawn(Army(2), "static1", pos(40.0, 0.0, 32.0), hundred());
     state.spawn(Army(3), "nosuchkind", pos(48.0, 0.0, 16.0), hundred());
+    let unnamed_unit = state.spawn(Army(3), "nosuchkind", pos(48.0, 0.0, 24.0), hundred());
+    // A projectile is not a kind: it changes neither the names nor the count.
+    state.projectiles.insert(
+        ProjectileId(1),
+        Projectile {
+            id: ProjectileId(1),
+            army: Army(3),
+            source: unnamed_unit,
+            kind: None,
+            pos: pos(20.0, 30.0, 40.0),
+            vel: [0.0; 3],
+            target: None,
+            aim: pos(0.0, 0.0, 0.0),
+            damage: Q::ZERO,
+            damage_radius: 0.0,
+            damage_type: String::new(),
+            lifetime: None,
+        },
+    );
+    assert_eq!(state.entities.len(), 5, "five entities");
     let want: std::collections::BTreeSet<String> =
         ["static1", "nosuchkind"].map(str::to_owned).into();
     assert_eq!(meshes.unnamed(&state), want, "distinct, by blueprint name");
+    assert_eq!(meshes.unnamed(&state).len(), 2, "counted once each");
     let near = drawn(&state, &kinds, 8.0);
-    assert_eq!(near.len(), 4);
+    assert_eq!(near.len(), 6, "five units and a projectile");
     assert_eq!(near[0].style, Style::Lit);
     assert!(
         near[1..]

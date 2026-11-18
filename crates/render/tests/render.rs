@@ -1248,13 +1248,17 @@ fn render_instance_check_refuses_each_bad_instance() {
         })
     );
     for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-        let mut skewed = placed(0);
-        skewed.transform[3][1] = bad;
-        assert_eq!(
-            check_instances(&[placed(0), skewed], 1),
-            Err(Error::InstanceTransform { instance: 1 }),
-            "transform entry {bad}"
-        );
+        for column in 0..4 {
+            for row in 0..4 {
+                let mut skewed = placed(0);
+                skewed.transform[column][row] = bad;
+                assert_eq!(
+                    check_instances(&[placed(0), skewed], 1),
+                    Err(Error::InstanceTransform { instance: 1 }),
+                    "transform entry [{column}][{row}] is {bad}"
+                );
+            }
+        }
     }
     for bad in [f32::NAN, f32::INFINITY, -0.1, 1.1, -1.0e-30] {
         let mut tinted = placed(0);
@@ -1527,6 +1531,40 @@ fn render_terrain_height_follows_the_split_of_a_cell() {
         (1.0, f32::INFINITY),
         (f32::NEG_INFINITY, 1.0),
     ] {
+        assert_eq!(mesh.height_at(x, z), None, "({x}, {z}) is outside");
+    }
+}
+
+// REN-069
+#[test]
+fn render_terrain_height_over_a_grid_that_is_not_square() {
+    // Two columns by four rows of cells over 8 by 16 world units, so a cell
+    // is 4 by 4. The vertex at column i and row j stands at 10 i + j * j,
+    // which differs along both axes and is not a plane.
+    let map = grid_map(2, 4, 8.0, 16.0, 1.0, |i, j| {
+        i16::from(i) * 10 + i16::from(j) * i16::from(j)
+    });
+    let mesh = ok(TerrainMesh::build(&map));
+    let expect = |x: f32, z: f32, want: f32| {
+        let got = mesh.height_at(x, z);
+        assert!(
+            got.is_some_and(|h| close(h, want, 1e-4)),
+            "height at ({x}, {z}) is {got:?}, expected {want}"
+        );
+    };
+    // Cell column 0, row 0: corners 0, 10, 1, 11; on the split, where both triangles give it.
+    expect(1.0, 3.0, 3.25);
+    // Cell column 1, row 2: corners 14, 24, 19, 29, on each side of the split.
+    expect(5.0, 9.0, 17.75);
+    expect(7.0, 11.0, 25.25);
+    // Cell column 0, row 3: corners 9, 19, 16, 26, on the split.
+    expect(3.0, 13.0, 18.25);
+    // The far edge along z is inside, and so is its middle.
+    expect(2.0, 16.0, 21.0);
+    expect(8.0, 16.0, 36.0);
+    // Past the far edge along x at a z inside the extent, there is none, and
+    // none past the far edge along z.
+    for (x, z) in [(8.5, 4.0), (8.1, 15.0), (2.0, 16.1), (4.0, 20.0)] {
         assert_eq!(mesh.height_at(x, z), None, "({x}, {z}) is outside");
     }
 }

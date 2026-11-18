@@ -49,7 +49,7 @@ impl Meshes {
     }
 
     /// The set the renderer uploads once: the four markers, then one model
-    /// per resolved kind in the order of [`Meshes::kinds`].
+    /// per resolved kind in the order this set holds them.
     #[must_use]
     pub fn model_set(&self) -> Vec<Model> {
         let mut set = marker_models();
