@@ -50,8 +50,12 @@ impl std::error::Error for CacheDirError {}
 /// own name: `SUPERCOM_CACHE_DIR`, `XDG_CACHE_HOME`, and `HOME`. A name
 /// `lookup` does not answer leaves its field unset.
 #[must_use]
-pub fn cache_vars_from(_lookup: &dyn Fn(&str) -> Option<OsString>) -> CacheVars {
-    CacheVars::default()
+pub fn cache_vars_from(lookup: &dyn Fn(&str) -> Option<OsString>) -> CacheVars {
+    CacheVars {
+        override_dir: lookup("SUPERCOM_CACHE_DIR"),
+        xdg_cache_home: lookup("XDG_CACHE_HOME"),
+        home: lookup("HOME"),
+    }
 }
 
 /// The cache directory: `SUPERCOM_CACHE_DIR` itself, else `XDG_CACHE_HOME`
