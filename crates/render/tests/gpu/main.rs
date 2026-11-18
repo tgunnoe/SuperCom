@@ -1719,6 +1719,83 @@ fn conformance_gpu_flat_is_never_hidden_and_lit_is_hidden_by_nearer_terrain() {
     );
 }
 
+// REN-048
+#[test]
+fn conformance_gpu_water_is_drawn_before_the_instances() {
+    let Some(mut renderer) = gpu(SRGB) else {
+        return;
+    };
+    // Flat ground at 0 under a water plane at 5 covers the whole frame in
+    // water. The water pipeline writes depth and compares with Less; a flat
+    // instance compares with Always and writes no depth. So a flat instance
+    // over the water shows only when the water is drawn first: drawn after
+    // it, the water, nearer than the ground depth the flat instance left,
+    // paints over it. The pixel at the instance's centre tells the orders
+    // apart: the instance's colour for water first, the water's for last.
+    let map = with_water(ground(), 5.0);
+    let mesh = scene(&mut renderer, &map, true);
+    let camera = must(Camera::for_mesh(&mesh, 1.0), "the camera builds");
+    must(renderer.upload_models(&[square(3.0)]), "the set uploads");
+    let centre = [32.0, 2.0, 32.0];
+    must(
+        renderer.set_instances(&[at(0, centre, MAGENTA, Style::Flat)]),
+        "the list is stored",
+    );
+    let frame = draw_frame(&mut renderer, &camera, SIZE, "water-order");
+    let (x, y) = pixel_of(
+        &camera.view_projection(),
+        centre.map(f64::from),
+        (frame.width, frame.height),
+    );
+    assert!(
+        is(frame.at(x, y), MAGENTA),
+        "a flat instance under the water's surface is drawn over it: {:?}",
+        frame.at(x, y)
+    );
+    let (corner_x, corner_y) = pixel_of(
+        &camera.view_projection(),
+        [4.0, 0.0, 4.0],
+        (frame.width, frame.height),
+    );
+    assert!(
+        frame.is_water(corner_x, corner_y),
+        "the water covers the ground away from the instance: {:?}",
+        frame.at(corner_x, corner_y)
+    );
+}
+
+// REN-048
+#[test]
+fn conformance_gpu_a_lit_instance_writes_depth() {
+    let Some(mut renderer) = gpu(SRGB) else {
+        return;
+    };
+    let camera = ground_scene(&mut renderer);
+    must(renderer.upload_models(&[square(3.0)]), "the set uploads");
+    let (red, green) = ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    // The squares overlap over x in 31 to 35 and z in 29 to 35. The upper
+    // one, at 5, is first in the list; the lower, at 2, is later, so
+    // without depth writes the later draw would cover the overlap.
+    must(
+        renderer.set_instances(&[
+            at(0, [32.0, 5.0, 32.0], red, Style::Lit),
+            at(0, [34.0, 2.0, 32.0], green, Style::Lit),
+        ]),
+        "the list is stored",
+    );
+    let frame = draw_frame(&mut renderer, &camera, SIZE, "lit-depth");
+    let overlap = probe(&frame, &camera, [33.0, 5.0, 32.0]);
+    assert!(
+        is(overlap, scaled(red, UP)),
+        "the overlap shows the upper lit square, not the later one: {overlap:?}"
+    );
+    let lower_only = probe(&frame, &camera, [36.0, 2.0, 32.0]);
+    assert!(
+        is(lower_only, scaled(green, UP)),
+        "the lower square shows where the upper one is not: {lower_only:?}"
+    );
+}
+
 // REN-049
 #[test]
 fn conformance_gpu_an_empty_instance_list_leaves_the_picture_unchanged() {
