@@ -95,8 +95,7 @@ pub fn shape_of(kind: Option<&UnitKind>) -> (usize, f32) {
 /// `camera_distance` away; otherwise it is drawn as its marker, never both.
 #[must_use]
 pub fn draws_mesh(camera_distance: f32, own_size: f32) -> bool {
-    let _ = (camera_distance, own_size, MESH_RANGE);
-    false
+    own_size > 0.0 && camera_distance <= MESH_RANGE * own_size
 }
 
 /// A simulation value as `f32`; positions and sizes are far inside its
