@@ -396,8 +396,9 @@ impl Renderer {
     ///
     /// # Errors
     /// [`Error::EmptyModel`], [`Error::ModelNormalCount`],
-    /// [`Error::ModelIndexCount`], [`Error::ModelIndexRange`], or
-    /// [`Error::ModelNonFinite`] for the first malformed model,
+    /// [`Error::ModelIndexCount`], [`Error::ModelIndexRange`],
+    /// [`Error::ModelNonFinite`], or [`Error::ModelShortNormal`] (a normal
+    /// whose squared length is below 1e-12) for the first malformed model,
     /// [`Error::ModelTooLarge`] when a model's buffer exceeds the device's
     /// maximum buffer size, and [`Error::Gpu`] when wgpu reports an error
     /// while creating the buffers.
