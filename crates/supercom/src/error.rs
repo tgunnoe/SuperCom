@@ -1,10 +1,5 @@
 //! Why a run of the `view` or `replay` subcommand ended.
 
-#![expect(
-    dead_code,
-    reason = "the replay run's variants are built by the code that follows its tests"
-)]
-
 use crate::cache::CacheDirError;
 use crate::mapfile::MapFileError;
 use std::fmt;
