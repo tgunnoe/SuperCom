@@ -18,10 +18,8 @@ pub enum KindStep {
     /// The kind's blueprint does not parse.
     BlueprintParse,
     /// The blueprint holds no usable `Display.UniformScale`.
-    #[expect(dead_code, reason = "the seam does not yet build a kind")]
     Scale,
     /// The renderer's check refuses the model built from the mesh.
-    #[expect(dead_code, reason = "the seam does not yet build a kind")]
     ModelCheck,
 }
 

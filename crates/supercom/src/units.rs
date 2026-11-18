@@ -7,10 +7,11 @@ use crate::error::{KindStep, RunError};
 use crate::markers::{MARKER_COUNT, marker_models};
 use std::collections::BTreeSet;
 use std::path::Path;
-use supercom_render::Model;
+use supercom_bp::Blueprint;
+use supercom_render::{Model, check_model};
 use supercom_scd::Vfs;
 use supercom_scm::Mesh;
-use supercom_sim::{Replay, State};
+use supercom_sim::{Faction, Order, Replay, State};
 
 /// One resolved kind: its lower-case id, the blueprint's uniform scale, and
 /// the model built from its lod0 mesh.
@@ -41,36 +42,58 @@ impl Meshes {
     /// The model-set index and the mesh of `kind`, if it was resolved.
     #[must_use]
     pub fn get(&self, kind: &str) -> Option<(usize, &UnitMesh)> {
-        let _ = (&self.meshes, kind, MARKER_COUNT);
-        None
+        let place = self.meshes.iter().position(|mesh| mesh.kind == kind)?;
+        self.meshes
+            .get(place)
+            .map(|mesh| (MARKER_COUNT + place, mesh))
     }
 
     /// The set the renderer uploads once: the four markers, then one model
     /// per resolved kind in the order of [`Meshes::kinds`].
     #[must_use]
     pub fn model_set(&self) -> Vec<Model> {
-        let _ = &self.meshes;
-        marker_models()
+        let mut set = marker_models();
+        set.extend(self.meshes.iter().map(|mesh| mesh.model.clone()));
+        set
     }
 
     /// The distinct kinds `state` holds that were not resolved, by the
     /// blueprint name each entity carries.
     #[must_use]
     pub fn unnamed(&self, state: &State) -> BTreeSet<String> {
-        let _ = (&self.meshes, state);
-        BTreeSet::new()
+        state
+            .entities
+            .values()
+            .filter(|entity| self.get(&entity.blueprint).is_none())
+            .map(|entity| entity.blueprint.clone())
+            .collect()
     }
 }
 
 /// The model of `mesh`: the stored positions, the stored normals, and the
-/// indices widened to 32 bits.
+/// indices widened to 32 bits. Nothing else of the mesh is read: not its
+/// bones, their inverse matrices, the tangents, the binormals, or the
+/// texture coordinates.
 #[must_use]
 pub fn model_of_mesh(mesh: &Mesh) -> Model {
-    let _ = mesh;
     Model {
-        positions: Vec::new(),
-        normals: Vec::new(),
-        indices: Vec::new(),
+        positions: mesh.vertices.iter().map(|v| v.position).collect(),
+        normals: mesh.vertices.iter().map(|v| v.normal).collect(),
+        indices: mesh.indices.iter().map(|&i| u32::from(i)).collect(),
+    }
+}
+
+/// The faction a replay header's player string names. The simulation's own
+/// parse of the string is private; the start state has already refused a
+/// header whose string is none of these four (DET-030), so a string that is
+/// not one of them names nothing here.
+fn faction(name: &str) -> Option<Faction> {
+    match name {
+        "UEF" => Some(Faction::UEF),
+        "Aeon" => Some(Faction::Aeon),
+        "Cybran" => Some(Faction::Cybran),
+        "Seraphim" => Some(Faction::Seraphim),
+        _ => None,
     }
 }
 
@@ -78,8 +101,53 @@ pub fn model_of_mesh(mesh: &Mesh) -> Model {
 /// player's commander and every build order's blueprint.
 #[must_use]
 pub fn kinds_named(replay: &Replay) -> Vec<String> {
-    let _ = replay;
-    Vec::new()
+    let commanders = replay
+        .header
+        .players
+        .iter()
+        .filter_map(|(_, name)| faction(name))
+        .map(|faction| faction.commander().to_owned());
+    let built = replay
+        .commands
+        .iter()
+        .filter_map(|command| match &command.order {
+            Order::BuildMobile { blueprint, .. } | Order::BuildFactory { blueprint } => {
+                Some(blueprint.to_ascii_lowercase())
+            }
+            _ => None,
+        });
+    commanders
+        .chain(built)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// The blueprint's `Display.UniformScale` as an `f32`.
+///
+/// # Errors
+/// A sentence when the blueprint holds no such number, or when it is not
+/// finite and positive as an `f32`.
+fn scale_of(blueprint: &Blueprint) -> Result<f32, String> {
+    let value = blueprint
+        .body
+        .get("Display")
+        .and_then(|display| display.get("UniformScale"))
+        .ok_or("the blueprint holds no Display.UniformScale")?
+        .as_f64()
+        .ok_or("Display.UniformScale is not a number")?;
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "std has no f64 to f32 conversion; a value past f32 is refused as not finite below"
+    )]
+    let scale = value as f32;
+    if scale.is_finite() && scale > 0.0 {
+        Ok(scale)
+    } else {
+        Err(format!(
+            "Display.UniformScale {value} is not a finite positive number"
+        ))
+    }
 }
 
 /// Resolves one kind from its two files' bytes and its parsed mesh: the
@@ -90,11 +158,20 @@ pub fn kinds_named(replay: &Replay) -> Vec<String> {
 /// [`KindStep::BlueprintParse`], [`KindStep::Scale`], then
 /// [`KindStep::ModelCheck`].
 pub fn build_kind(kind: &str, mesh: &Mesh, blueprint: &[u8]) -> Result<UnitMesh, RunError> {
-    let _ = (mesh, blueprint);
-    Err(RunError::UnitKind {
+    let failed = |step, reason: String| RunError::UnitKind {
         kind: kind.to_owned(),
-        step: KindStep::BlueprintParse,
-        reason: model_of_mesh(mesh).positions.len().to_string(),
+        step,
+        reason,
+    };
+    let parsed = supercom_bp::parse_bytes(blueprint)
+        .map_err(|error| failed(KindStep::BlueprintParse, error.to_string()))?;
+    let scale = scale_of(&parsed).map_err(|reason| failed(KindStep::Scale, reason))?;
+    let model = model_of_mesh(mesh);
+    check_model(0, &model).map_err(|error| failed(KindStep::ModelCheck, error.to_string()))?;
+    Ok(UnitMesh {
+        kind: kind.to_owned(),
+        scale,
+        model,
     })
 }
 
