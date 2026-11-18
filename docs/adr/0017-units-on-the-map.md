@@ -139,9 +139,10 @@ REN-056); this record is the source each names.
   that looks smooth, and holding the tick is the one timing fact the run
   reports. The cap bounds one frame's work to a second of match time at speed 1,
   so a stalled window cannot make the next frame step minutes of match time
-  before drawing. The speed's bounds are 0.1 to 10: below 0.1 a tick lasts a
-  second or more of wall time, and above 10 the cap would hold ticks back at a
-  steady 60 frames a second.
+  before drawing. The speed's bounds are 0.1 to 10,
+  this project's choice: below 0.1 a tick lasts a second or more of wall
+  time, and at 10 a frame owes a tick and two thirds at 60 frames a second,
+  so the cap holds ticks back only on a frame slower than a tenth of a second.
 - **Interpolation over one tick (REN-065).** A frame draws between the values
   before the last step taken in it and the values after it, by the fraction of a
   tick left over; headings take the short arc. An entity with no value from
@@ -183,10 +184,10 @@ REN-056); this record is the source each names.
   final state; the summary line gives the ticks run, the checkpoints matched out
   of how many, and the frames that held ticks back, and is written once, when
   stepping stops or, if the run ends sooner, when it ends. With `--frames <n>`
-  the run ends after n frames, writes the summary, prints `presented <n>
-frames`, and succeeds, as `view` does. Ground: the line is the run's evidence
-  for a person and for a script; writing it at the moment stepping stops puts it
-  in front of a person watching the window.
+  the run ends after n frames, writes the summary, prints
+  `presented <n> frames`, and succeeds, as `view` does. Ground: the line is
+  the run's evidence for a person and for a script; writing it at the moment
+  stepping stops puts it in front of a person watching the window.
 - **One pixel test of the whole path (REN-074).** The start state of the
   committed log, the instance list at the strategic view, drawn offscreen, and
   the pixel of each commander's drawn position read back. Ground: every pure
@@ -225,9 +226,12 @@ frames`, and succeeds, as `view` does. Ground: the line is the run's evidence
   The replay run needs the simulation and the ingest that builds its world, so
   the binary's manifest gains `supercom-sim` and `supercom-sim-ingest` and
   nothing else; the rest of that record's ground for the map file's rule stands,
-  since `view` still re-implements the lookup. The binary never names the
-  archive, mesh, or blueprint loaders in this unit, and never depends on the
-  replay harness or the plugin host.
+  since `view` still re-implements the lookup. Through `supercom-sim-ingest`
+  the binary now also builds `supercom-scd`, `supercom-bp`,
+  `supercom-bp-import`, `supercom-data`, and the Nickel evaluator
+  `nickel-lang-core`. The binary never names the archive, mesh, or blueprint
+  loaders in this unit, and never depends on the replay harness or the
+  plugin host.
 
 ## Consequences
 
