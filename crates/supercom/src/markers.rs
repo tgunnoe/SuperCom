@@ -11,6 +11,9 @@ pub const COMMANDER_MODEL: usize = 2;
 /// The model of a projectile.
 pub const PROJECTILE_MODEL: usize = 3;
 
+/// How many marker models the set starts with: the unit meshes follow.
+pub const MARKER_COUNT: usize = 4;
+
 /// The four models in the order of the constants above.
 #[must_use]
 pub fn marker_models() -> Vec<Model> {

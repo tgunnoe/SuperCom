@@ -151,3 +151,77 @@ fn conformance_window_replay_prints_summary_then_frames() {
         "the summary comes just before the frame count: {stdout:?}"
     );
 }
+
+/// The whole committed log at ten times the speed in one real window, run
+/// only under `SUPERCOM_REQUIRE_DISPLAY=1` inside a nested compositor that
+/// shows nothing: 4,000 frames pass the last checkpoint (the match takes
+/// about 46 seconds at this speed), and the summary line is written once,
+/// with 46 of 46 checkpoints matched and no kind drawn as a marker because
+/// it was not named.
+#[test]
+fn conformance_window_replay_at_ten_times_prints_one_summary() {
+    if std::env::var("SUPERCOM_REQUIRE_DISPLAY").as_deref() != Ok("1") {
+        println!("SKIP: set SUPERCOM_REQUIRE_DISPLAY=1 to open a window");
+        return;
+    }
+    let Some(fa) = supercom_testkit::require_game() else {
+        fail(
+            "SUPERCOM_REQUIRE_DISPLAY=1 is set but no game install was found; \
+             set SUPERCOM_FA_DIR to the install",
+        );
+    };
+    let cache = std::env::temp_dir().join(format!("supercom-replay-ten-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&cache);
+    let spawned = Command::new(BINARY)
+        .arg("replay")
+        .arg(committed_log())
+        .args(["--speed", "10", "--frames", "4000"])
+        .env("SUPERCOM_FA_DIR", fa)
+        .env("SUPERCOM_CACHE_DIR", &cache)
+        .stdout(Stdio::piped())
+        .spawn();
+    let Ok(mut child) = spawned else {
+        fail("the binary starts");
+    };
+    let deadline = Instant::now() + Duration::from_secs(300);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = std::fs::remove_dir_all(&cache);
+                fail("the window did not finish within five minutes");
+            }
+            Err(error) => fail(&format!("waiting for the binary failed: {error}")),
+        }
+    };
+    let output = child.wait_with_output();
+    let _ = std::fs::remove_dir_all(&cache);
+    let stdout = output
+        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+        .unwrap_or_default();
+    assert!(status.success(), "exit {status}; stdout {stdout:?}");
+    let lines: Vec<&str> = stdout.lines().collect();
+    let summaries: Vec<&&str> = lines
+        .iter()
+        .filter(|line| line.starts_with("replayed "))
+        .collect();
+    assert_eq!(summaries.len(), 1, "exactly one summary line: {stdout:?}");
+    assert!(
+        summaries[0].starts_with("replayed 4600 ticks, 46 of 46 checkpoints matched, "),
+        "{stdout:?}"
+    );
+    assert!(
+        summaries[0].ends_with(" frames held back, 0 kinds drawn as markers"),
+        "{stdout:?}"
+    );
+    assert_eq!(
+        lines.last().copied(),
+        Some("presented 4000 frames"),
+        "{stdout:?}"
+    );
+}

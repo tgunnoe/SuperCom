@@ -6,6 +6,7 @@ use crate::cache::{CacheVars, cache_dir};
 use crate::cli::is_single_component;
 use crate::error::RunError;
 use crate::plan::{check_install, read_map};
+use crate::units::{Meshes, kinds_named, resolve_kinds};
 use std::fs;
 use std::path::Path;
 use supercom_scmap::Map;
@@ -20,6 +21,8 @@ pub struct Prepared {
     pub replay: Replay,
     /// The state at tick 0 of the skirmish the replay's header names.
     pub state: State,
+    /// The unit kinds the replay names, resolved to meshes and scales.
+    pub meshes: Meshes,
 }
 
 /// Runs the steps before the window, in the order of REN-057.
@@ -29,7 +32,8 @@ pub struct Prepared {
 /// install, an unreadable or unparsable replay file, a replay with no
 /// checkpoint, a header map folder that is not a single component, no usable
 /// cache directory, a world that does not load, a replay that does not fit
-/// the world, or a map file that does not read or parse.
+/// the world, a map file that does not read or parse, or a named unit kind
+/// that does not resolve to a mesh and a scale.
 #[expect(
     clippy::needless_pass_by_value,
     reason = "the caller hands over the environment's values, which the run does not need again"
@@ -69,7 +73,13 @@ pub fn prepare_replay(
             reason: error.to_string(),
         })?;
     let map = read_map(install, folder)?;
-    Ok(Prepared { map, replay, state })
+    let meshes = resolve_kinds(install, &kinds_named(&replay))?;
+    Ok(Prepared {
+        map,
+        replay,
+        state,
+        meshes,
+    })
 }
 
 #[cfg(test)]

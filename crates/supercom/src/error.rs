@@ -5,6 +5,39 @@ use crate::mapfile::MapFileError;
 use std::fmt;
 use std::path::PathBuf;
 
+/// The step of resolving a unit kind that failed, in the order the steps are
+/// taken.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KindStep {
+    /// The kind's mesh could not be read from the archives.
+    MeshRead,
+    /// The kind's blueprint could not be read from the archives.
+    BlueprintRead,
+    /// The kind's mesh does not parse.
+    MeshParse,
+    /// The kind's blueprint does not parse.
+    BlueprintParse,
+    /// The blueprint holds no usable `Display.UniformScale`.
+    #[expect(dead_code, reason = "the seam does not yet build a kind")]
+    Scale,
+    /// The renderer's check refuses the model built from the mesh.
+    #[expect(dead_code, reason = "the seam does not yet build a kind")]
+    ModelCheck,
+}
+
+impl fmt::Display for KindStep {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::MeshRead => "mesh read",
+            Self::BlueprintRead => "blueprint read",
+            Self::MeshParse => "mesh parse",
+            Self::BlueprintParse => "blueprint parse",
+            Self::Scale => "scale",
+            Self::ModelCheck => "model check",
+        })
+    }
+}
+
 /// A failure of the `view` or `replay` subcommand, in the order the run can
 /// meet them.
 #[derive(Clone, Debug, PartialEq)]
@@ -80,6 +113,21 @@ pub enum RunError {
         /// What the simulation reported.
         reason: String,
     },
+    /// The install's archives could not be mounted to read the unit meshes.
+    UnitArchives {
+        /// What the archive layer reported.
+        reason: String,
+    },
+    /// A unit kind the replay names could not be resolved to a mesh and a
+    /// scale.
+    UnitKind {
+        /// The kind's lower-case id.
+        kind: String,
+        /// The step that failed.
+        step: KindStep,
+        /// What the loader or the check reported.
+        reason: String,
+    },
     /// A step's digest differs from the replay's checkpoint.
     Mismatch {
         /// The tick of the checkpoint.
@@ -145,6 +193,12 @@ impl fmt::Display for RunError {
             Self::World { reason } => write!(f, "world: cannot load: {reason}"),
             Self::ContentCheck { reason } => {
                 write!(f, "content check and start state: {reason}")
+            }
+            Self::UnitArchives { reason } => {
+                write!(f, "unit meshes: cannot mount the archives: {reason}")
+            }
+            Self::UnitKind { kind, step, reason } => {
+                write!(f, "unit kind {kind}: {step}: {reason}")
             }
             Self::Mismatch { tick } => write!(
                 f,

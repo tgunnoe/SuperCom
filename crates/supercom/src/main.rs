@@ -23,6 +23,7 @@ mod scene;
 mod stepping;
 #[cfg(test)]
 mod testing;
+mod units;
 mod window;
 
 use cache::CacheVars;

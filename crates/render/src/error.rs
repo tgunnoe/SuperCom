@@ -143,6 +143,13 @@ pub enum Error {
         /// The offending vertex.
         vertex: usize,
     },
+    /// A model's normal is shorter than 1e-6.
+    ModelShortNormal {
+        /// The model's index in the set.
+        model: usize,
+        /// The offending vertex.
+        vertex: usize,
+    },
     /// A buffer a model needs would exceed the device's maximum buffer
     /// size.
     ModelTooLarge {
@@ -267,6 +274,7 @@ impl fmt::Display for Error {
             | Self::ModelIndexCount { .. }
             | Self::ModelIndexRange { .. }
             | Self::ModelNonFinite { .. }
+            | Self::ModelShortNormal { .. }
             | Self::ModelTooLarge { .. }
             | Self::InstanceModel { .. }
             | Self::InstanceTransform { .. }
@@ -321,6 +329,10 @@ impl Error {
             Self::ModelNonFinite { model, vertex } => write!(
                 f,
                 "model {model} has a position or normal that is not finite at vertex {vertex}"
+            ),
+            Self::ModelShortNormal { model, vertex } => write!(
+                f,
+                "model {model} has a normal shorter than 1e-6 at vertex {vertex}"
             ),
             Self::ModelTooLarge {
                 vertices,

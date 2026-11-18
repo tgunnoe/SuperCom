@@ -196,6 +196,65 @@ REN-056); this record is the source each names.
   colour, a wrong model index, and a transform in the wrong space, none of which
   a test of one function sees.
 
+- **The loader's labels follow a measurement, not the importer (FMT-060).** The
+  importer FMT-027 cites names a vertex's three vectors tangent, normal,
+  binormal at its line 281. A census of the install's 1,938 version-5 meshes
+  found the second stored vector to be the surface normal in every one: it has
+  the greatest mean absolute cosine with the face normal, and 1,839 meshes
+  agree with it on a share of at least 0.99. `crates/scm` therefore reads the
+  second stored vector into `normal` and the third into `tangent`, and says
+  what was departed from. Ground: the draw takes its normals from this field,
+  and a normal read from the third vector would light every mesh wrongly; the
+  conformance test asserts the census's counts exactly, so a loader that
+  followed the importer again fails it.
+- **A mesh is drawn from its stored coordinates with one forward yaw (REN-077,
+  REN-078, REN-079, REN-080, REN-081).** The only fix-up between a stored mesh
+  and what is drawn is a yaw of a quarter turn at placement, which takes a
+  mesh's +z to the unit's heading, with the blueprint's `Display.UniformScale`
+  and no other change: no mirror, axis swap, winding reversal, rest transform,
+  bone, `rest_pose_inverse`, tangent, or binormal. This is this project's
+  choice. The measurements of the five kinds in the committed log (+y up,
+  winding counter-clockwise from outside, the Muzzle bones forward at +z, and
+  the vertices nearer their bones' places than the origin) are consistent with
+  it, and the stored positions are drawn as the rest pose as this project's
+  reading of them. No record states a side of a unit or a handedness.
+- **The kinds a replay names are resolved before the window (REN-082, REN-083,
+  REN-084, REN-085).** Each header player's commander and every build order's
+  blueprint, keyed in ASCII lower case, give the kinds; each is read through
+  `supercom-scd`, `supercom-scm`, and `supercom-bp` and refused with an error
+  value naming the kind and the step. Ground: a mesh that fails to load must not
+  appear as a blank unit minutes into a run, and the model set is uploaded once,
+  so every kind must be known before the loop. The simulation's own parse of a
+  faction's name is private, so the binary matches the four names itself; the
+  start state has refused any other.
+- **The renderer refuses a normal shorter than 1e-6 (REN-086).** The meshes
+  of UXB0008 and UXB0009 hold vertices whose normal is shorter than that, so a
+  run that names either ends at the model check. Mending installed normals is
+  not done here. Ground: a zero normal lights as black or as noise, and a
+  refusal at the check is a value, where the shader would hide it.
+- **Mesh or marker by one pure rule (REN-087, REN-088, REN-090).** A unit is
+  drawn as its lit mesh when the camera is at most 50 times its own size away,
+  and as its marker otherwise, never both. Ground: the marker's size floor is
+  2 per cent of the camera's distance (REN-068), so beyond 50 times its size a
+  unit is already drawn larger than itself; the mesh takes over where it would
+  be at least as large as the marker. The close-zoom pixel test shows the
+  mesh lit by the other frames it must not equal: flat, absent, recoloured.
+- **Kinds met but not named are markers, and are counted (REN-089, REN-091,
+  REN-072).** A unit of a kind the replay did not name is drawn as its marker
+  at every zoom, and the run's last line counts such kinds. The committed log
+  names five kinds and meets no other, so its line ends `0 kinds drawn as
+markers`. The windowed test plays it at ten times the speed and expects one
+  summary line, which answers the lead maintainer's question on that line.
+- **The census is this choice's known limit.** Of the 230 unit meshes with a
+  Muzzle bone, the counts with a mean z above 0.5, below -0.5, and within 0.5 of
+  zero are, by class, land 65, 4, 8; air 27, 6, 5; structure 50, 20, 12; sea 14,
+  16, 3. Of the 78 unit meshes with both Left and Right bones, the Left bones'
+  mean x is positive and the Right bones' negative in 30, the reverse in 45, and
+  neither in 3, so the side names do not say which side is the unit's own; a
+  bone's name is matched with regard to case, Muzzle anywhere in it, Left or
+  Right at its start. These are measurements of 2026-11-17 that the suite does
+  not re-run; the suite pins only the five kinds of the committed log.
+
 ## Extensions of the first-light record
 
 - **The near end of the zoom range is 8 world units where
@@ -232,6 +291,10 @@ REN-056); this record is the source each names.
   `nickel-lang-core`. The binary never names the archive, mesh, or blueprint
   loaders in this unit, and never depends on the replay harness or the
   plugin host.
+  The binary's manifest also gains supercom-scd, supercom-scm, and
+  supercom-bp, for the meshes and their scales; the binary already builds the
+  first and the third through supercom-sim-ingest, the mesh loader is new to
+  its tree, and no package enters Cargo.lock.
 
 ## Consequences
 

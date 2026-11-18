@@ -188,3 +188,41 @@ fn conformance_play_keeps_the_values_from_before_the_last_step() {
         "a frame that steps nothing keeps its values"
     );
 }
+
+/// The kinds met are counted once each, as the run goes: a state of one
+/// kind that the meshes do not hold gives a count of one however often it is
+/// noted, and a held kind gives none.
+#[test]
+fn supercom_play_counts_each_unnamed_kind_once() {
+    use crate::units::UnitMesh;
+    use supercom_render::Model;
+    use supercom_sim::{Pos, Q};
+
+    let (mut play, _) = empty_run();
+    assert_eq!(play.unnamed(), 0);
+    let held = Meshes::new(vec![UnitMesh {
+        kind: "held".to_owned(),
+        scale: 1.0,
+        model: Model {
+            positions: Vec::new(),
+            normals: Vec::new(),
+            indices: Vec::new(),
+        },
+    }]);
+    let at = Pos {
+        x: 1.0,
+        y: 0.0,
+        z: 1.0,
+    };
+    play.state.spawn(Army(1), "held", at, Q::from_num(10));
+    play.note_unnamed(&held);
+    assert_eq!(play.unnamed(), 0, "a kind the meshes hold is named");
+    play.state.spawn(Army(1), "other", at, Q::from_num(10));
+    play.state.spawn(Army(1), "other", at, Q::from_num(10));
+    play.note_unnamed(&held);
+    play.note_unnamed(&held);
+    assert_eq!(play.unnamed(), 1, "one kind however often it is noted");
+    play.state.spawn(Army(1), "third", at, Q::from_num(10));
+    play.note_unnamed(&held);
+    assert_eq!(play.unnamed(), 2);
+}

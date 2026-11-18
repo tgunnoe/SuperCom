@@ -8,11 +8,12 @@ use crate::error::RunError;
 use crate::frame::{FramePlan, Progress, Step, frame_plan};
 use crate::input::{Flow, Input, apply_input, key_input, wheel_input};
 use crate::interp::Kept;
-use crate::markers::marker_models;
 use crate::pacing::{Pace, pace};
 use crate::prepare::Prepared;
-use crate::scene::instances;
+use crate::scene::scene_instances;
 use crate::stepping::{Verdict, may_step, summary_line, verdict};
+use crate::units::Meshes;
+use std::collections::BTreeSet;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Instant;
@@ -61,6 +62,7 @@ pub struct Play {
     ticks_run: u64,
     matched: usize,
     held_frames: u64,
+    unnamed: BTreeSet<String>,
 }
 
 impl Play {
@@ -74,7 +76,19 @@ impl Play {
             ticks_run: 0,
             matched: 0,
             held_frames: 0,
+            unnamed: BTreeSet::new(),
         }
+    }
+
+    /// Notes the kinds the state now holds that `meshes` does not.
+    pub fn note_unnamed(&mut self, meshes: &Meshes) {
+        self.unnamed.extend(meshes.unnamed(&self.state));
+    }
+
+    /// How many distinct kinds met so far were not named by the replay.
+    #[must_use]
+    pub fn unnamed(&self) -> usize {
+        self.unnamed.len()
     }
 
     /// Steps one tick with the commands stamped for it, compares the digest
@@ -198,6 +212,7 @@ struct Replaying {
     clock: Option<Instant>,
     fraction: f64,
     reported: bool,
+    meshes: Meshes,
 }
 
 impl Replaying {
@@ -216,6 +231,7 @@ impl Replaying {
                 self.play.ticks_run(),
             );
             self.play.frame(&owed)?;
+            self.play.note_unnamed(&self.meshes);
             self.fraction = if self.play.finished() {
                 1.0
             } else {
@@ -238,7 +254,8 @@ impl Replaying {
                     self.play.ticks_run(),
                     self.play.matched(),
                     self.play.total(),
-                    self.play.held_frames()
+                    self.play.held_frames(),
+                    self.play.unnamed()
                 )
             );
         }
@@ -294,7 +311,12 @@ pub fn run_replay(
     speed: f64,
     frames: Option<NonZeroU32>,
 ) -> Result<Outcome, RunError> {
-    let Prepared { map, replay, state } = prepared;
+    let Prepared {
+        map,
+        replay,
+        state,
+        meshes,
+    } = prepared;
     let mut app = App {
         map,
         progress: Progress::new(frames),
@@ -307,6 +329,7 @@ pub fn run_replay(
             clock: None,
             fraction: 1.0,
             reported: false,
+            meshes,
         }),
     };
     drive(event_loop, &mut app)
@@ -316,11 +339,12 @@ pub fn run_replay(
 /// fraction of a tick it is drawn at.
 fn set_scene(replaying: &Replaying, gfx: &mut Gfx) -> Result<(), RunError> {
     let state = replaying.play.state();
-    let list = instances(
+    let list = scene_instances(
         state,
         replaying.play.kept(),
         replaying.fraction,
         &state.world().units,
+        &replaying.meshes,
         &gfx.mesh,
         gfx.camera.distance(),
     )?;
@@ -332,7 +356,11 @@ fn set_scene(replaying: &Replaying, gfx: &mut Gfx) -> Result<(), RunError> {
 /// run: the window, the renderer for its surface, the grid fit check against
 /// that renderer's device, the mesh, the water, the camera, the upload, and,
 /// for a replay, the marker models.
-fn build(event_loop: &ActiveEventLoop, map: &Map, markers: bool) -> Result<Gfx, RunError> {
+fn build(
+    event_loop: &ActiveEventLoop,
+    map: &Map,
+    meshes: Option<&Meshes>,
+) -> Result<Gfx, RunError> {
     let attributes = Window::default_attributes()
         .with_title("SuperCom")
         .with_inner_size(LogicalSize::new(1280.0, 720.0));
@@ -363,8 +391,8 @@ fn build(event_loop: &ActiveEventLoop, map: &Map, markers: bool) -> Result<Gfx, 
     let size = window.inner_size();
     let camera = Camera::for_mesh(&mesh, crate::frame::aspect((size.width, size.height)))?;
     surface.renderer.upload(&mesh, water.as_ref())?;
-    if markers {
-        surface.renderer.upload_models(&marker_models())?;
+    if let Some(meshes) = meshes {
+        surface.renderer.upload_models(&meshes.model_set())?;
     }
     Ok(Gfx {
         window,
@@ -515,7 +543,11 @@ impl ApplicationHandler for App {
         if self.gfx.is_some() {
             return;
         }
-        match build(event_loop, &self.map, self.replay.is_some()) {
+        match build(
+            event_loop,
+            &self.map,
+            self.replay.as_ref().map(|replaying| &replaying.meshes),
+        ) {
             Ok(gfx) => {
                 if let Some(replaying) = self.replay.as_mut() {
                     replaying.clock = Some(Instant::now());

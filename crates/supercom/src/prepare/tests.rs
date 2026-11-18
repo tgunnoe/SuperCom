@@ -127,6 +127,20 @@ fn supercom_prepare_replay_failures() {
         matches!(&world, Some((RunError::World { .. }, text)) if text.starts_with("world:")),
         "an install holding nothing gives no world: {world:?}"
     );
+
+    // The step after the map file: the kinds the header's two players name,
+    // and an install whose archives do not mount.
+    let named = read_replay(&bytes("SCMP_012", vec![(Tick(99), [1; 32])]));
+    assert_eq!(
+        named.map(|replay| crate::units::kinds_named(&replay)).ok(),
+        Some(vec!["uel0001".to_owned(), "url0001".to_owned()]),
+        "a replay of a UEF and a Cybran player names their two commanders"
+    );
+    let mounted = crate::units::resolve_kinds(root.path(), &["uel0001".to_owned()]);
+    assert!(
+        matches!(&mounted, Err(RunError::UnitArchives { .. })),
+        "an install holding nothing mounts no archives: {mounted:?}"
+    );
 }
 
 /// Against the install: the committed log prepares, a changed header does
@@ -165,6 +179,65 @@ fn conformance_prepare_replay_checks_content_then_starts() {
     assert!(
         matches!(&refused, Some((RunError::ContentCheck { .. }, text))
             if text.starts_with("content check and start state:")),
+        "{refused:?}"
+    );
+}
+
+/// The committed log names five kinds, resolved after the map file: the
+/// model set is the markers and the five in sorted order; a log that names a
+/// kind the install lacks ends the run at that step, after every step before
+/// it, with an error naming the kind.
+#[test]
+fn conformance_prepare_replay_resolves_the_named_kinds() {
+    let Some(fa) = supercom_testkit::require_game() else {
+        return;
+    };
+    let root = Scratch::new("prepare-kinds");
+    let log = committed_log();
+    let prepared = prepare_replay(Some(&fa), &log, root.cache_vars());
+    assert!(prepared.is_ok(), "{:?}", prepared.as_ref().err());
+    let Ok(prepared) = prepared else { return };
+    let five = ["ueb1103", "ueb2101", "uel0001", "urb1101", "url0001"];
+    assert_eq!(crate::units::kinds_named(&prepared.replay), five);
+    assert_eq!(prepared.meshes.model_set().len(), 9);
+    for (place, kind) in five.iter().enumerate() {
+        assert_eq!(
+            prepared.meshes.get(kind).map(|(index, _)| index),
+            Some(4 + place),
+            "{kind}"
+        );
+    }
+
+    let parsed = read_replay(&fs::read(&log).unwrap_or_default());
+    assert!(
+        parsed.is_ok(),
+        "the committed log reads: {:?}",
+        parsed.as_ref().err()
+    );
+    let Ok(mut replay) = parsed else { return };
+    let last = replay
+        .commands
+        .last()
+        .map(|c| (c.tick, c.source, c.seq, c.army));
+    let (tick, source, seq, army) = last.unwrap_or((Tick(0), 0, 0, Army(1)));
+    replay.commands.push(supercom_sim::Command {
+        tick,
+        source,
+        seq: seq + 1,
+        army,
+        units: Vec::new(),
+        order: supercom_sim::Order::BuildFactory {
+            blueprint: "NoSuchKind".to_owned(),
+        },
+        mode: supercom_sim::QueueMode::Replace,
+    });
+    let mut changed = Vec::new();
+    write_replay(&replay, &mut changed);
+    let altered = write(root.path(), "unknown-kind.replay", &changed);
+    let refused = error_text(prepare_replay(Some(&fa), &altered, root.cache_vars()));
+    assert!(
+        matches!(&refused, Some((RunError::UnitKind { kind, step: crate::error::KindStep::MeshRead, .. }, text))
+            if kind == "nosuchkind" && text.starts_with("unit kind nosuchkind: mesh read")),
         "{refused:?}"
     );
 }
