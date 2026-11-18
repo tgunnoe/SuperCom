@@ -1354,3 +1354,76 @@ fn render_lit_shading_is_ambient_plus_the_light_share() {
     let up = shade_lit([1.0, 0.5, 0.0], [0.0, 1.0, 0.0]);
     assert_point(up, [0.86, 0.43, 0.0], "a normal straight up");
 }
+// REN-043 and REN-045 state the order of their refusals: a model with no
+// vertex is empty whatever else is wrong with it, a count mismatch comes
+// before a ragged index list, that before an index past the end, that before
+// a value that is not finite, and a model's vertex buffer is refused before
+// its index buffer. Each case below breaks two rules so the order shows.
+#[test]
+fn render_model_check_and_fit_refuse_in_their_stated_order() {
+    let indices_only = Model {
+        positions: Vec::new(),
+        normals: Vec::new(),
+        indices: vec![0, 1, 2],
+    };
+    assert_eq!(
+        check_model(7, &indices_only),
+        Err(Error::EmptyModel { model: 7 })
+    );
+    let empty_and_unequal = Model {
+        positions: Vec::new(),
+        normals: vec![[0.0, 1.0, 0.0]],
+        indices: vec![0, 1, 2],
+    };
+    assert_eq!(
+        check_model(7, &empty_and_unequal),
+        Err(Error::EmptyModel { model: 7 })
+    );
+    let unequal_and_ragged = Model {
+        positions: vec![[0.0; 3]; 3],
+        normals: vec![[0.0, 1.0, 0.0]; 2],
+        indices: vec![0, 1],
+    };
+    assert_eq!(
+        check_model(8, &unequal_and_ragged),
+        Err(Error::ModelNormalCount {
+            model: 8,
+            positions: 3,
+            normals: 2
+        })
+    );
+    let ragged_and_wild = Model {
+        positions: vec![[0.0; 3]; 3],
+        normals: vec![[0.0, 1.0, 0.0]; 3],
+        indices: vec![0, 1, 2, 9],
+    };
+    assert_eq!(
+        check_model(8, &ragged_and_wild),
+        Err(Error::ModelIndexCount {
+            model: 8,
+            indices: 4
+        })
+    );
+    let wild_and_infinite = Model {
+        positions: vec![[f32::NAN; 3]; 3],
+        normals: vec![[0.0, 1.0, 0.0]; 3],
+        indices: vec![0, 1, 9],
+    };
+    assert_eq!(
+        check_model(8, &wild_and_infinite),
+        Err(Error::ModelIndexRange {
+            model: 8,
+            index: 9,
+            vertices: 3
+        })
+    );
+    // 4 vertices of 24 bytes and 30 indices of 4: 96 and 120 bytes over 95.
+    assert!(matches!(
+        model_fits(4, 30, 95),
+        Err(Error::ModelTooLarge {
+            buffer: "vertex",
+            bytes: 96,
+            ..
+        })
+    ));
+}
