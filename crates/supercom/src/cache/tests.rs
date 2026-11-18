@@ -8,6 +8,38 @@ fn vars(over: Option<&str>, xdg: Option<&str>, home: Option<&str>) -> CacheVars 
     }
 }
 
+/// REN-059: each of the three variables is read under its own name: a lookup
+/// that answers one exact name sets that field alone, and a lookup that
+/// answers no name sets none.
+#[test]
+fn supercom_cache_vars_are_read_under_their_names() {
+    let only = |name: &'static str| {
+        let lookup = move |asked: &str| (asked == name).then(|| OsString::from("/value"));
+        cache_vars_from(&lookup)
+    };
+    let none = cache_vars_from(&|_: &str| None);
+    assert_eq!(
+        (none.override_dir, none.xdg_cache_home, none.home),
+        (None, None, None)
+    );
+
+    let over = only("SUPERCOM_CACHE_DIR");
+    assert_eq!(
+        (over.override_dir, over.xdg_cache_home, over.home),
+        (Some(OsString::from("/value")), None, None)
+    );
+    let xdg = only("XDG_CACHE_HOME");
+    assert_eq!(
+        (xdg.override_dir, xdg.xdg_cache_home, xdg.home),
+        (None, Some(OsString::from("/value")), None)
+    );
+    let home = only("HOME");
+    assert_eq!(
+        (home.override_dir, home.xdg_cache_home, home.home),
+        (None, None, Some(OsString::from("/value")))
+    );
+}
+
 /// Each rule, in order, with an empty value falling through, and the
 /// refusals.
 #[test]

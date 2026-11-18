@@ -46,6 +46,14 @@ impl fmt::Display for CacheDirError {
 
 impl std::error::Error for CacheDirError {}
 
+/// The three cache variables as `lookup` answers them, each read under its
+/// own name: `SUPERCOM_CACHE_DIR`, `XDG_CACHE_HOME`, and `HOME`. A name
+/// `lookup` does not answer leaves its field unset.
+#[must_use]
+pub fn cache_vars_from(_lookup: &dyn Fn(&str) -> Option<OsString>) -> CacheVars {
+    CacheVars::default()
+}
+
 /// The cache directory: `SUPERCOM_CACHE_DIR` itself, else `XDG_CACHE_HOME`
 /// joined with `supercom`, else `HOME` joined with `.cache/supercom`.
 ///
