@@ -1,21 +1,27 @@
-//! The GPU side: a renderer that draws a terrain mesh and a water plane for
-//! a camera into any texture view of one format.
+//! The GPU side: a renderer that draws a terrain mesh and a water plane, then
+//! models placed as lit and flat instances, for a camera into any texture
+//! view of one format.
 
 use crate::terrain::VERTEX_BYTES;
-use crate::{Camera, Error, TerrainMesh, WaterPlane, grid_fits, grid_vertex_count, shader};
+use crate::{
+    Camera, Error, INSTANCE_BYTES, Instance as Placed, Model, Style, TerrainMesh, WaterPlane,
+    check_instances, check_model, grid_fits, grid_vertex_count, instances_fit, model_fits,
+    model_shader, shader,
+};
 use std::num::NonZeroU64;
 use wgpu::{
-    Adapter, Backend, Backends, BindGroup, BindGroupDescriptor, BindGroupEntry,
+    Adapter, Backend, Backends, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
     BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, Buffer, BufferBindingType,
     BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites, CommandEncoderDescriptor,
     CompareFunction, DepthStencilState, Device, DeviceDescriptor, ErrorFilter, Extent3d, Face,
     Features, FragmentState, FrontFace, IndexFormat, Instance, InstanceDescriptor, Limits, LoadOp,
-    MultisampleState, Operations, PipelineLayoutDescriptor, PrimitiveState, PrimitiveTopology,
-    Queue, RenderPassColorAttachment, RenderPassDepthStencilAttachment, RenderPassDescriptor,
-    RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions, ShaderModuleDescriptor,
-    ShaderSource, ShaderStages, StoreOp, Surface, SurfaceTarget, TextureDescriptor,
-    TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor,
-    VertexAttribute, VertexBufferLayout, VertexFormat, VertexState, VertexStepMode,
+    MultisampleState, Operations, PipelineLayout, PipelineLayoutDescriptor, PrimitiveState,
+    PrimitiveTopology, Queue, RenderPassColorAttachment, RenderPassDepthStencilAttachment,
+    RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions,
+    ShaderModuleDescriptor, ShaderSource, ShaderStages, StoreOp, Surface, SurfaceTarget,
+    TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
+    TextureViewDescriptor, VertexAttribute, VertexBufferLayout, VertexFormat, VertexState,
+    VertexStepMode,
 };
 
 /// The depth target's format.
@@ -35,6 +41,36 @@ const VERTEX_ATTRIBUTES: [VertexAttribute; 2] = [
         format: VertexFormat::Float32x3,
         offset: 12,
         shader_location: 1,
+    },
+];
+
+/// The instance buffer's attributes: the transform's four columns, then the
+/// colour. Locations 0 and 1 belong to the vertex buffer.
+const INSTANCE_ATTRIBUTES: [VertexAttribute; 5] = [
+    VertexAttribute {
+        format: VertexFormat::Float32x4,
+        offset: 0,
+        shader_location: 2,
+    },
+    VertexAttribute {
+        format: VertexFormat::Float32x4,
+        offset: 16,
+        shader_location: 3,
+    },
+    VertexAttribute {
+        format: VertexFormat::Float32x4,
+        offset: 32,
+        shader_location: 4,
+    },
+    VertexAttribute {
+        format: VertexFormat::Float32x4,
+        offset: 48,
+        shader_location: 5,
+    },
+    VertexAttribute {
+        format: VertexFormat::Float32x3,
+        offset: 64,
+        shader_location: 6,
     },
 ];
 
@@ -73,6 +109,24 @@ struct Scene {
     range: [f32; 2],
 }
 
+/// A run of consecutive instances of one style that share a model, drawn by
+/// one call.
+#[derive(Clone, Copy, Debug)]
+struct Run {
+    model: usize,
+    style: Style,
+    first: u32,
+    count: u32,
+}
+
+/// What [`Renderer::set_instances`] left on the device: the buffer holds the
+/// lit instances in list order, then the flat ones in list order.
+#[derive(Debug)]
+struct GpuInstances {
+    buffer: Buffer,
+    runs: Vec<Run>,
+}
+
 /// The depth target for one size.
 #[derive(Debug)]
 struct DepthTarget {
@@ -90,10 +144,14 @@ pub struct Renderer {
     format: TextureFormat,
     terrain_pipeline: RenderPipeline,
     water_pipeline: RenderPipeline,
+    lit_pipeline: RenderPipeline,
+    flat_pipeline: RenderPipeline,
     uniform: Buffer,
     bind_group: BindGroup,
     depth: Option<DepthTarget>,
     scene: Option<Scene>,
+    models: Vec<GpuMesh>,
+    instances: Option<GpuInstances>,
 }
 
 /// A renderer built for a surface, with the surface and the format chosen
@@ -164,20 +222,23 @@ impl Renderer {
         format: TextureFormat,
     ) -> Result<Self, Error> {
         let info = adapter.get_info();
-        let (terrain_pipeline, water_pipeline, uniform, bind_group) =
-            scoped(&device, "pipeline creation", || pipelines(&device, format))?;
+        let made = scoped(&device, "pipeline creation", || pipelines(&device, format))?;
         Ok(Self {
             device,
             queue,
             adapter_name: info.name,
             backend: info.backend,
             format,
-            terrain_pipeline,
-            water_pipeline,
-            uniform,
-            bind_group,
+            terrain_pipeline: made.terrain,
+            water_pipeline: made.water,
+            lit_pipeline: made.lit,
+            flat_pipeline: made.flat,
+            uniform: made.uniform,
+            bind_group: made.bind_group,
             depth: None,
             scene: None,
+            models: Vec::new(),
+            instances: None,
         })
     }
 
@@ -328,6 +389,106 @@ impl Renderer {
         Ok(())
     }
 
+    /// Checks every model of `models` and the fit of its buffers against the
+    /// device's buffer limit, then uploads the set, which replaces the one
+    /// before it and empties the instance list. A set that is refused or
+    /// fails leaves the set and the list as they were.
+    ///
+    /// # Errors
+    /// [`Error::EmptyModel`], [`Error::ModelNormalCount`],
+    /// [`Error::ModelIndexCount`], [`Error::ModelIndexRange`], or
+    /// [`Error::ModelNonFinite`] for the first malformed model,
+    /// [`Error::ModelTooLarge`] when a model's buffer exceeds the device's
+    /// maximum buffer size, and [`Error::Gpu`] when wgpu reports an error
+    /// while creating the buffers.
+    pub fn upload_models(&mut self, models: &[Model]) -> Result<(), Error> {
+        let limit = self.device.limits().max_buffer_size;
+        for (at, model) in models.iter().enumerate() {
+            check_model(at, model)?;
+            model_fits(model.positions.len(), model.indices.len(), limit)?;
+        }
+        let set = scoped(&self.device, "model upload", || {
+            models
+                .iter()
+                .map(|model| {
+                    let vertices: Vec<f32> = model
+                        .positions
+                        .iter()
+                        .zip(&model.normals)
+                        .flat_map(|(p, n)| [p[0], p[1], p[2], n[0], n[1], n[2]])
+                        .collect();
+                    self.mesh_buffers("model", &vertices, &model.indices)
+                })
+                .collect::<Vec<_>>()
+        })?;
+        self.models = set;
+        self.instances = None;
+        Ok(())
+    }
+
+    /// Checks `instances` against the uploaded set and the device's buffer
+    /// limit, then stores them for the draws that follow, replacing the
+    /// list before them; an empty list is valid and empties it. A list that
+    /// is refused or fails leaves the list as it was.
+    ///
+    /// # Errors
+    /// [`Error::InstancesTooLarge`] when the list's buffer exceeds the
+    /// device's maximum buffer size, [`Error::InstanceModel`],
+    /// [`Error::InstanceTransform`], or [`Error::InstanceColor`] for the
+    /// first offending instance, and [`Error::Gpu`] when wgpu reports an
+    /// error while creating the buffer.
+    pub fn set_instances(&mut self, instances: &[Placed]) -> Result<(), Error> {
+        instances_fit(instances.len(), self.device.limits().max_buffer_size)?;
+        check_instances(instances, self.models.len())?;
+        let mut ordered: Vec<&Placed> = Vec::with_capacity(instances.len());
+        for style in [Style::Lit, Style::Flat] {
+            ordered.extend(instances.iter().filter(|i| i.style == style));
+        }
+        let mut runs: Vec<Run> = Vec::new();
+        for (at, instance) in ordered.iter().enumerate() {
+            let at = u32::try_from(at).unwrap_or(u32::MAX);
+            match runs.last_mut() {
+                Some(run) if run.model == instance.model && run.style == instance.style => {
+                    run.count += 1;
+                }
+                _ => runs.push(Run {
+                    model: instance.model,
+                    style: instance.style,
+                    first: at,
+                    count: 1,
+                }),
+            }
+        }
+        if ordered.is_empty() {
+            self.instances = None;
+            return Ok(());
+        }
+        let floats: Vec<f32> = ordered
+            .iter()
+            .flat_map(|i| {
+                i.transform
+                    .iter()
+                    .flatten()
+                    .chain(i.color.iter())
+                    .copied()
+                    .collect::<Vec<f32>>()
+            })
+            .collect();
+        let bytes: &[u8] = bytemuck::cast_slice(&floats);
+        let buffer = scoped(&self.device, "instance upload", || {
+            let buffer = self.device.create_buffer(&BufferDescriptor {
+                label: Some("instances"),
+                size: bytes.len() as u64,
+                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.queue.write_buffer(&buffer, 0, bytes);
+            buffer
+        })?;
+        self.instances = Some(GpuInstances { buffer, runs });
+        Ok(())
+    }
+
     fn mesh_buffers(&self, label: &'static str, vertices: &[f32], indices: &[u32]) -> GpuMesh {
         let make = |usage: BufferUsages, bytes: &[u8]| {
             let buffer = self.device.create_buffer(&BufferDescriptor {
@@ -427,6 +588,27 @@ impl Renderer {
                     pass.set_pipeline(&self.water_pipeline);
                     draw_mesh(&mut pass, water);
                 }
+                if let Some(list) = &self.instances {
+                    for (style, pipeline) in [
+                        (Style::Lit, &self.lit_pipeline),
+                        (Style::Flat, &self.flat_pipeline),
+                    ] {
+                        pass.set_pipeline(pipeline);
+                        pass.set_vertex_buffer(1, list.buffer.slice(..));
+                        for run in list.runs.iter().filter(|run| run.style == style) {
+                            let Some(model) = self.models.get(run.model) else {
+                                continue;
+                            };
+                            pass.set_vertex_buffer(0, model.vertices.slice(..));
+                            pass.set_index_buffer(model.indices.slice(..), IndexFormat::Uint32);
+                            pass.draw_indexed(
+                                0..model.index_count,
+                                0,
+                                run.first..run.first + run.count,
+                            );
+                        }
+                    }
+                }
             }
             self.queue.submit([encoder.finish()]);
         })
@@ -460,11 +642,33 @@ fn depth_target(device: &Device, size: (u32, u32)) -> DepthTarget {
     }
 }
 
-/// The two pipelines, their uniform buffer, and the bind group that binds it.
-fn pipelines(
-    device: &Device,
-    format: TextureFormat,
-) -> (RenderPipeline, RenderPipeline, Buffer, BindGroup) {
+/// The four pipelines, their uniform buffer, and the bind group that binds
+/// it.
+struct Pipelines {
+    terrain: RenderPipeline,
+    water: RenderPipeline,
+    lit: RenderPipeline,
+    flat: RenderPipeline,
+    uniform: Buffer,
+    bind_group: BindGroup,
+}
+
+/// How one pipeline differs from the others: its shader entry points, its
+/// vertex buffers, and the face culling and depth state.
+struct Variant<'a> {
+    label: &'static str,
+    module: &'a wgpu::ShaderModule,
+    vertex: &'static str,
+    fragment: &'static str,
+    buffers: &'a [Option<VertexBufferLayout<'a>>],
+    cull: Option<Face>,
+    depth_write: bool,
+    depth_compare: CompareFunction,
+}
+
+/// The frame uniform buffer, the bind group layout that exposes it to both
+/// stages, and the bind group that binds it.
+fn frame_binding(device: &Device) -> (Buffer, BindGroupLayout, BindGroup) {
     let uniform_bytes = (UNIFORM_FLOATS * 4) as u64;
     let uniform = device.create_buffer(&BufferDescriptor {
         label: Some("frame uniform"),
@@ -493,6 +697,55 @@ fn pipelines(
             resource: uniform.as_entire_binding(),
         }],
     });
+    (uniform, group_layout, bind_group)
+}
+
+fn build_pipeline(
+    device: &Device,
+    layout: &PipelineLayout,
+    format: TextureFormat,
+    variant: &Variant<'_>,
+) -> RenderPipeline {
+    device.create_render_pipeline(&RenderPipelineDescriptor {
+        label: Some(variant.label),
+        layout: Some(layout),
+        vertex: VertexState {
+            module: variant.module,
+            entry_point: Some(variant.vertex),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: variant.buffers,
+        },
+        primitive: PrimitiveState {
+            topology: PrimitiveTopology::TriangleList,
+            front_face: FrontFace::Ccw,
+            cull_mode: variant.cull,
+            ..PrimitiveState::default()
+        },
+        depth_stencil: Some(DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(variant.depth_write),
+            depth_compare: Some(variant.depth_compare),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: MultisampleState::default(),
+        fragment: Some(FragmentState {
+            module: variant.module,
+            entry_point: Some(variant.fragment),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(ColorTargetState {
+                format,
+                blend: None,
+                write_mask: ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+fn pipelines(device: &Device, format: TextureFormat) -> Pipelines {
+    let (uniform, group_layout, bind_group) = frame_binding(device);
     let layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
         label: Some("first light"),
         bind_group_layouts: &[Some(&group_layout)],
@@ -502,53 +755,55 @@ fn pipelines(
         label: Some("first light"),
         source: ShaderSource::Wgsl(shader::shader_source().into()),
     });
-    let buffers = [Some(VertexBufferLayout {
+    let model_module = device.create_shader_module(ShaderModuleDescriptor {
+        label: Some("models"),
+        source: ShaderSource::Wgsl(model_shader::model_shader_source().into()),
+    });
+    let vertex_layout = VertexBufferLayout {
         array_stride: VERTEX_BYTES,
         step_mode: VertexStepMode::Vertex,
         attributes: &VERTEX_ATTRIBUTES,
-    })];
-    let build = |label: &'static str, vertex: &'static str, fragment: &'static str| {
-        device.create_render_pipeline(&RenderPipelineDescriptor {
-            label: Some(label),
-            layout: Some(&layout),
-            vertex: VertexState {
-                module: &module,
-                entry_point: Some(vertex),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &buffers,
-            },
-            primitive: PrimitiveState {
-                topology: PrimitiveTopology::TriangleList,
-                front_face: FrontFace::Ccw,
-                cull_mode: Some(Face::Back),
-                ..PrimitiveState::default()
-            },
-            depth_stencil: Some(DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(CompareFunction::Less),
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: MultisampleState::default(),
-            fragment: Some(FragmentState {
-                module: &module,
-                entry_point: Some(fragment),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(ColorTargetState {
-                    format,
-                    blend: None,
-                    write_mask: ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        })
     };
-    (
-        build("terrain", "vs_terrain", "fs_terrain"),
-        build("water", "vs_water", "fs_water"),
+    let terrain_buffers = [Some(vertex_layout.clone())];
+    let model_buffers = [
+        Some(vertex_layout),
+        Some(VertexBufferLayout {
+            array_stride: INSTANCE_BYTES,
+            step_mode: VertexStepMode::Instance,
+            attributes: &INSTANCE_ATTRIBUTES,
+        }),
+    ];
+    let build = |variant: &Variant<'_>| build_pipeline(device, &layout, format, variant);
+    let solid = |label, vertex, fragment| Variant {
+        label,
+        module: &module,
+        vertex,
+        fragment,
+        buffers: &terrain_buffers,
+        cull: Some(Face::Back),
+        depth_write: true,
+        depth_compare: CompareFunction::Less,
+    };
+    let model = |label, vertex, fragment, lit: bool| Variant {
+        label,
+        module: &model_module,
+        vertex,
+        fragment,
+        buffers: &model_buffers,
+        cull: lit.then_some(Face::Back),
+        depth_write: lit,
+        depth_compare: if lit {
+            CompareFunction::Less
+        } else {
+            CompareFunction::Always
+        },
+    };
+    Pipelines {
+        terrain: build(&solid("terrain", "vs_terrain", "fs_terrain")),
+        water: build(&solid("water", "vs_water", "fs_water")),
+        lit: build(&model("lit models", "vs_lit", "fs_lit", true)),
+        flat: build(&model("flat models", "vs_flat", "fs_flat", false)),
         uniform,
         bind_group,
-    )
+    }
 }

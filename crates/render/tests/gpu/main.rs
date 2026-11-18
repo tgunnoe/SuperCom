@@ -11,9 +11,9 @@ use std::fmt::Debug;
 use std::path::{Path, PathBuf};
 use std::{env, fs, sync::mpsc};
 use supercom_render::{
-    AMBIENT, CLEAR_COLOR, Camera, Error, GpuGate, LIGHT_DIRECTION, RAMP, Renderer, TerrainMesh,
-    WATER_COLOR, WaterPlane, ZoomSpeed, gpu_gate, grid_fits, normalize_height, shade,
-    shader_source,
+    AMBIENT, CLEAR_COLOR, Camera, Error, GpuGate, Instance, LIGHT_DIRECTION, Model, RAMP, Renderer,
+    Style, TerrainMesh, WATER_COLOR, WaterPlane, ZoomSpeed, gpu_gate, grid_fits,
+    model_shader_source, normalize_height, placement, shade, shader_source,
 };
 use supercom_scmap::{Heightmap, Map, Water};
 use wgpu::{
@@ -667,15 +667,15 @@ fn conformance_gpu_water_hides_only_terrain_below_its_surface() {
 // ---- REN-023 -----------------------------------------------------------
 
 /// Higher to the east, with a high shelf along the north edge (rows 0 and
-/// 1): elevation sample times 0.125, a relief of 12.5 so the near end still
-/// sees the whole slope.
+/// 1): elevation sample times 0.125. The rise to the east is steep and sits
+/// in the middle columns, so at the near end, where the frame spans a few
+/// world units, the ground still differs from west to east.
 fn shelf_map() -> Map {
-    map_of(8, 64.0, 0.125, |i, j| {
-        if j < 2 {
-            140
-        } else {
-            40 + 8 * i16::try_from(i).unwrap_or(0)
-        }
+    map_of(8, 64.0, 0.125, |i, j| match (j, i) {
+        (0 | 1, _) => 400,
+        (_, 0..=3) => 0,
+        (_, 4) => 120,
+        _ => 240,
     })
 }
 
@@ -689,7 +689,16 @@ fn conformance_gpu_north_is_up_and_east_is_right_at_both_zoom_ends() {
     let far = must(Camera::for_mesh(&mesh, 1.0), "the camera builds");
     let mut near_end = far;
     near_end.zoom(-1000.0, ZoomSpeed::Normal);
-    near_end.pan(0.0, -8.0);
+    // The near end is 8 world units: at the old 40 this fixture would pass
+    // too, so the end is asserted before any pixel is read.
+    assert!(
+        (near_end.distance() - 8.0).abs() <= 1e-5,
+        "the near end is 8 world units, not {}",
+        near_end.distance()
+    );
+    // Ten units north puts the centre row on the rise and the top of the
+    // frame on the shelf's foot.
+    near_end.pan(0.0, -10.0);
     for (name, camera) in [("far", far), ("near", near_end)] {
         let frame = draw_frame(&mut renderer, &camera, size, &format!("orientation-{name}"));
         let column = frame.column_span(80);
@@ -1371,4 +1380,557 @@ fn conformance_gpu_upload_refuses_mismatched_normals_and_indices() {
         matches!(refused, Err(Error::InconsistentMesh)),
         "a mesh with one cell's indices missing is refused: {refused:?}"
     );
+}
+
+// ---- models and instances ----------------------------------------------
+
+const SRGB: TextureFormat = TextureFormat::Rgba8UnormSrgb;
+const SIZE: (u32, u32) = (160, 160);
+
+/// The linear colour of flat ground seen from above: the ramp's first stop
+/// (0.18, 0.30, 0.12) at normalized height 0, times the light's share for a
+/// normal straight up, 0.3 + 0.7 * 0.8 = 0.86.
+const GROUND: [f32; 3] = [0.1548, 0.258, 0.1032];
+
+/// The share of a colour a surface facing straight up keeps: 0.86.
+const UP: f32 = 0.86;
+
+const MAGENTA: [f32; 3] = [1.0, 0.0, 1.0];
+
+/// Flat ground at elevation 0 over 64 world units: its colour is `GROUND`
+/// everywhere, and the strategic camera sees it from straight above with
+/// the map's centre at the frame's centre.
+fn ground() -> Map {
+    map_of(8, 64.0, 1.0, |_, _| 0)
+}
+
+/// A square of side `2 * half` in the xz plane at y = 0, counter-clockwise
+/// seen from above, so it faces up.
+fn square(half: f32) -> Model {
+    Model {
+        positions: vec![
+            [-half, 0.0, -half],
+            [-half, 0.0, half],
+            [half, 0.0, -half],
+            [half, 0.0, half],
+        ],
+        normals: vec![[0.0, 1.0, 0.0]; 4],
+        indices: vec![0, 1, 2, 2, 1, 3],
+    }
+}
+
+/// The same square wound clockwise seen from above, so it faces down.
+fn down_square(half: f32) -> Model {
+    Model {
+        indices: vec![0, 2, 1, 2, 3, 1],
+        ..square(half)
+    }
+}
+
+/// An instance at `position` with no turn and no scale.
+fn at(model: usize, position: [f32; 3], color: [f32; 3], style: Style) -> Instance {
+    Instance {
+        model,
+        transform: [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [position[0], position[1], position[2], 1.0],
+        ],
+        color,
+        style,
+    }
+}
+
+/// Uploads the flat ground and returns the camera at its strategic view.
+fn ground_scene(renderer: &mut Renderer) -> Camera {
+    let mesh = scene(renderer, &ground(), false);
+    must(Camera::for_mesh(&mesh, 1.0), "the camera builds")
+}
+
+/// The pixel of `frame` that the world point `point` projects to.
+fn probe(frame: &Frame, camera: &Camera, point: [f32; 3]) -> Rgb {
+    let (x, y) = pixel_of(
+        &camera.view_projection(),
+        point.map(f64::from),
+        (frame.width, frame.height),
+    );
+    frame.at(x, y)
+}
+
+/// Whether `pixel` is the linear colour `want`, encoded for `SRGB`.
+fn is(pixel: Rgb, want: [f32; 3]) -> bool {
+    near(pixel, expected(want, SRGB))
+}
+
+fn scaled(color: [f32; 3], share: f32) -> [f32; 3] {
+    color.map(|c| c * share)
+}
+
+// REN-044
+#[test]
+fn conformance_gpu_model_upload_replaces_the_set_and_a_refusal_changes_nothing() {
+    let Some(mut renderer) = gpu(SRGB) else {
+        return;
+    };
+    let camera = ground_scene(&mut renderer);
+    must(
+        renderer.upload_models(&[square(3.0)]),
+        "a well-formed set uploads",
+    );
+    let centre = [32.0, 1.0, 32.0];
+    must(
+        renderer.set_instances(&[at(0, centre, MAGENTA, Style::Flat)]),
+        "the instance names the model",
+    );
+    let frame = draw_frame(&mut renderer, &camera, SIZE, "models-set");
+    assert!(
+        is(probe(&frame, &camera, centre), MAGENTA),
+        "the instance is drawn: {:?}",
+        probe(&frame, &camera, centre)
+    );
+
+    // Each refusal names its model and leaves the set and the list as they
+    // were, so the same frame follows.
+    let mut unequal = square(3.0);
+    unequal.normals.pop();
+    let mut ragged = square(3.0);
+    ragged.indices.pop();
+    let mut wild = square(3.0);
+    wild.indices[5] = 4;
+    let mut nan = square(3.0);
+    nan.positions[2][0] = f32::NAN;
+    let empty = Model {
+        positions: Vec::new(),
+        normals: Vec::new(),
+        indices: Vec::new(),
+    };
+    let refused = [
+        renderer.upload_models(&[square(3.0), empty]),
+        renderer.upload_models(&[square(3.0), unequal]),
+        renderer.upload_models(&[square(3.0), ragged]),
+        renderer.upload_models(&[square(3.0), wild]),
+        renderer.upload_models(&[square(3.0), nan]),
+    ];
+    assert!(matches!(refused[0], Err(Error::EmptyModel { model: 1 })));
+    assert!(matches!(
+        refused[1],
+        Err(Error::ModelNormalCount { model: 1, .. })
+    ));
+    assert!(matches!(
+        refused[2],
+        Err(Error::ModelIndexCount { model: 1, .. })
+    ));
+    assert!(matches!(
+        refused[3],
+        Err(Error::ModelIndexRange { model: 1, .. })
+    ));
+    assert!(matches!(
+        refused[4],
+        Err(Error::ModelNonFinite { model: 1, .. })
+    ));
+    let after = draw_frame(&mut renderer, &camera, SIZE, "models-refused");
+    assert!(
+        is(probe(&after, &camera, centre), MAGENTA),
+        "a refused upload leaves the list: {:?}",
+        probe(&after, &camera, centre)
+    );
+    let second = renderer.set_instances(&[at(1, centre, MAGENTA, Style::Flat)]);
+    assert!(
+        matches!(
+            second,
+            Err(Error::InstanceModel {
+                instance: 0,
+                model: 1,
+                models: 1
+            })
+        ),
+        "a refused upload leaves the set of one model: {second:?}"
+    );
+
+    // A good set replaces the set and empties the list.
+    must(
+        renderer.upload_models(&[square(3.0), square(1.0)]),
+        "a set of two uploads",
+    );
+    let emptied = draw_frame(&mut renderer, &camera, SIZE, "models-replaced");
+    assert!(
+        is(probe(&emptied, &camera, centre), GROUND),
+        "uploading a set empties the list: {:?}",
+        probe(&emptied, &camera, centre)
+    );
+    assert!(
+        renderer
+            .set_instances(&[at(1, centre, MAGENTA, Style::Flat)])
+            .is_ok(),
+        "the new set holds a second model"
+    );
+}
+
+// REN-047
+#[test]
+fn conformance_gpu_instance_list_stays_until_replaced() {
+    let Some(mut renderer) = gpu(SRGB) else {
+        return;
+    };
+    let nowhere = renderer.set_instances(&[at(0, [0.0; 3], MAGENTA, Style::Flat)]);
+    assert!(
+        matches!(
+            nowhere,
+            Err(Error::InstanceModel {
+                instance: 0,
+                model: 0,
+                models: 0
+            })
+        ),
+        "no model set holds no model: {nowhere:?}"
+    );
+    assert!(
+        renderer.set_instances(&[]).is_ok(),
+        "an empty list is valid"
+    );
+    let camera = ground_scene(&mut renderer);
+    must(renderer.upload_models(&[square(3.0)]), "the set uploads");
+    let (a, b) = ([16.0, 1.0, 16.0], [48.0, 1.0, 48.0]);
+    let cyan = [0.0, 1.0, 1.0];
+    must(
+        renderer.set_instances(&[at(0, a, MAGENTA, Style::Flat)]),
+        "the list is stored",
+    );
+    for label in ["list-first", "list-second"] {
+        let frame = draw_frame(&mut renderer, &camera, SIZE, label);
+        assert!(
+            is(probe(&frame, &camera, a), MAGENTA),
+            "{label}: the list stays: {:?}",
+            probe(&frame, &camera, a)
+        );
+    }
+    let mut tinted = at(0, b, cyan, Style::Flat);
+    tinted.color[1] = 1.5;
+    let mut skewed = at(0, b, cyan, Style::Flat);
+    skewed.transform[0][0] = f32::NAN;
+    for (list, name) in [
+        (
+            vec![at(0, b, cyan, Style::Flat), at(1, b, cyan, Style::Flat)],
+            "a model outside the set",
+        ),
+        (vec![tinted], "a colour channel past 1"),
+        (vec![skewed], "a transform that is not finite"),
+    ] {
+        assert!(renderer.set_instances(&list).is_err(), "{name} is refused");
+    }
+    let kept = draw_frame(&mut renderer, &camera, SIZE, "list-refused");
+    assert!(
+        is(probe(&kept, &camera, a), MAGENTA) && is(probe(&kept, &camera, b), GROUND),
+        "a refused list leaves the list: {:?} and {:?}",
+        probe(&kept, &camera, a),
+        probe(&kept, &camera, b)
+    );
+    must(renderer.set_instances(&[]), "an empty list is valid");
+    let cleared = draw_frame(&mut renderer, &camera, SIZE, "list-empty");
+    assert!(
+        is(probe(&cleared, &camera, a), GROUND),
+        "an empty list replaces the list: {:?}",
+        probe(&cleared, &camera, a)
+    );
+    must(
+        renderer.set_instances(&[at(0, b, cyan, Style::Flat)]),
+        "a new list is stored",
+    );
+    let replaced = draw_frame(&mut renderer, &camera, SIZE, "list-replaced");
+    assert!(
+        is(probe(&replaced, &camera, b), cyan) && is(probe(&replaced, &camera, a), GROUND),
+        "the new list is drawn and the old one is gone: {:?} and {:?}",
+        probe(&replaced, &camera, b),
+        probe(&replaced, &camera, a)
+    );
+}
+
+// REN-048
+#[test]
+fn conformance_gpu_flat_is_never_hidden_and_lit_is_hidden_by_nearer_terrain() {
+    let Some(mut renderer) = gpu(SRGB) else {
+        return;
+    };
+    let camera = ground_scene(&mut renderer);
+    must(
+        renderer.upload_models(&[square(3.0), down_square(3.0), square(1.5)]),
+        "the set uploads",
+    );
+    let (red, green, blue) = ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
+    let (yellow, cyan, grey) = ([1.0, 1.0, 0.0], [0.0, 1.0, 1.0], [0.5, 0.5, 0.5]);
+    let visible = [16.0, 5.0, 16.0];
+    let buried = [48.0, -5.0, 16.0];
+    let buried_flat = [48.0, -5.0, 48.0];
+    let culled = [16.0, 5.0, 48.0];
+    let backwards_flat = [32.0, 5.0, 32.0];
+    let lit_over = [32.0, 5.0, 16.0];
+    must(
+        renderer.set_instances(&[
+            at(0, visible, red, Style::Lit),
+            at(0, buried, green, Style::Lit),
+            at(0, buried_flat, blue, Style::Flat),
+            at(1, culled, yellow, Style::Lit),
+            at(1, backwards_flat, cyan, Style::Flat),
+            at(0, lit_over, grey, Style::Lit),
+            at(2, [32.0, -5.0, 16.0], MAGENTA, Style::Flat),
+        ]),
+        "the list is stored",
+    );
+    let frame = draw_frame(&mut renderer, &camera, SIZE, "draw-order");
+    let seen = |point: [f32; 3]| probe(&frame, &camera, point);
+    assert!(
+        is(seen(visible), scaled(red, UP)),
+        "a lit instance above the ground is drawn lit: {:?}",
+        seen(visible)
+    );
+    assert!(
+        is(seen(buried), GROUND),
+        "a lit instance below the ground is hidden by it: {:?}",
+        seen(buried)
+    );
+    assert!(
+        is(seen(buried_flat), blue),
+        "a flat instance below the ground is not hidden: {:?}",
+        seen(buried_flat)
+    );
+    assert!(
+        is(seen(culled), GROUND),
+        "a lit instance's back face is culled: {:?}",
+        seen(culled)
+    );
+    assert!(
+        is(seen(backwards_flat), cyan),
+        "a flat instance is not culled: {:?}",
+        seen(backwards_flat)
+    );
+    // Inside the lit square's footprint but outside the flat one's, the lit
+    // colour shows; at the flat square's centre, under the lit square and
+    // under the ground, the flat colour does.
+    assert!(
+        is(seen([34.4, 5.0, 16.0]), scaled(grey, UP)),
+        "the lit square shows around the flat one: {:?}",
+        seen([34.4, 5.0, 16.0])
+    );
+    assert!(
+        is(seen([32.0, -5.0, 16.0]), MAGENTA),
+        "a flat instance under a lit one and the ground is on top: {:?}",
+        seen([32.0, -5.0, 16.0])
+    );
+}
+
+// REN-049
+#[test]
+fn conformance_gpu_an_empty_instance_list_leaves_the_picture_unchanged() {
+    let Some(mut renderer) = gpu(SRGB) else {
+        return;
+    };
+    let mesh = scene(&mut renderer, &east_ramp(), true);
+    let strategic = must(Camera::for_mesh(&mesh, 1.0), "the camera builds");
+    let mut close_up = strategic;
+    close_up.zoom(-1000.0, ZoomSpeed::Normal);
+    for (name, camera, size) in [
+        ("strategic", strategic, (160, 120)),
+        ("close", close_up, (96, 96)),
+    ] {
+        let label = |what: &str| format!("unchanged-{name}-{what}");
+        let bare = draw_frame(&mut renderer, &camera, size, &label("bare"));
+        must(renderer.upload_models(&[square(3.0)]), "the set uploads");
+        let with_set = draw_frame(&mut renderer, &camera, size, &label("set"));
+        assert!(
+            with_set.pixels == bare.pixels,
+            "{name}: a model set with an empty list changes no pixel"
+        );
+        must(
+            renderer.set_instances(&[at(0, [32.0, 32.0, 32.0], MAGENTA, Style::Flat)]),
+            "the list is stored",
+        );
+        let with_list = draw_frame(&mut renderer, &camera, size, &label("list"));
+        assert!(
+            with_list.pixels != bare.pixels,
+            "{name}: the instance is drawn, so the comparison means something"
+        );
+        must(renderer.set_instances(&[]), "an empty list is valid");
+        let emptied = draw_frame(&mut renderer, &camera, size, &label("emptied"));
+        assert!(
+            emptied.pixels == bare.pixels,
+            "{name}: an emptied list changes no pixel"
+        );
+    }
+}
+
+/// A quad in the plane whose unit normal is (0.6, 0.8, 0) and whose edges
+/// run along z and along (0.8, -0.6, 0), 32 model units a side, centred on
+/// the origin and counter-clockwise seen from the side the normal points to.
+fn tilted() -> Model {
+    Model {
+        positions: vec![
+            [-12.8, 9.6, -16.0],
+            [12.8, -9.6, -16.0],
+            [12.8, -9.6, 16.0],
+            [-12.8, 9.6, 16.0],
+        ],
+        normals: vec![[0.6, 0.8, 0.0]; 4],
+        indices: vec![0, 2, 1, 0, 3, 2],
+    }
+}
+
+// REN-053
+#[test]
+fn conformance_gpu_lit_pixels_match_the_lit_shading_function() {
+    let Some(mut renderer) = gpu(SRGB) else {
+        return;
+    };
+    let camera = ground_scene(&mut renderer);
+    must(renderer.upload_models(&[tilted()]), "the set uploads");
+    // Scale 0.25 and a heading of a quarter turn: the normal (0.6, 0.8, 0)
+    // is scaled to length 0.25 and turned to (0, 0.8, 0.6), whose share of
+    // the light (-0.36, 0.8, -0.48) is 0.64 - 0.288 = 0.352, so the lit
+    // factor is 0.3 + 0.7 * 0.352 = 0.5464. Left unturned or not
+    // renormalized, the normal would give 0.5968 or about 0.36.
+    let half_turn = std::f32::consts::FRAC_PI_2;
+    let lit_at = [32.0, 8.0, 32.0];
+    let flat_at = [16.0, 8.0, 16.0];
+    let (lit_color, flat_color) = ([1.0, 0.6, 0.2], [0.25, 0.5, 0.75]);
+    let place = |position| must(placement(position, half_turn, 0.25, 0.0), "placement");
+    let mut lit = at(0, lit_at, lit_color, Style::Lit);
+    lit.transform = place(lit_at);
+    let mut flat = at(0, flat_at, flat_color, Style::Flat);
+    flat.transform = place(flat_at);
+    must(renderer.set_instances(&[lit, flat]), "the list is stored");
+    let frame = draw_frame(&mut renderer, &camera, SIZE, "lit-pixels");
+    let lit_pixel = probe(&frame, &camera, lit_at);
+    assert!(
+        is(lit_pixel, scaled(lit_color, 0.5464)),
+        "a lit pixel is the colour times 0.5464: {lit_pixel:?}, want {:?}",
+        expected(scaled(lit_color, 0.5464), SRGB)
+    );
+    let flat_pixel = probe(&frame, &camera, flat_at);
+    assert!(
+        is(flat_pixel, flat_color),
+        "a flat pixel is the colour as given: {flat_pixel:?}"
+    );
+}
+
+/// A triangle from the origin along +x: its base 4 units wide at the origin,
+/// its tip 10 units out along +x.
+fn arrow() -> Model {
+    Model {
+        positions: vec![[0.0, 0.0, -2.0], [0.0, 0.0, 2.0], [10.0, 0.0, 0.0]],
+        normals: vec![[0.0, 1.0, 0.0]; 3],
+        indices: vec![0, 1, 2],
+    }
+}
+
+// REN-055
+#[test]
+fn conformance_gpu_model_heading_points_right_at_zero_and_down_at_a_quarter_turn() {
+    let Some(mut renderer) = gpu(SRGB) else {
+        return;
+    };
+    let camera = ground_scene(&mut renderer);
+    must(renderer.upload_models(&[arrow()]), "the set uploads");
+    let origin = [32.0, 1.0, 32.0];
+    // The strategic view has north up and east to the right (REN-023), so
+    // +x is to the right of the frame and +z toward its bottom.
+    for (heading, along, behind, name) in [
+        (0.0, [37.0, 1.0, 32.0], [27.0, 1.0, 32.0], "heading 0"),
+        (
+            std::f32::consts::FRAC_PI_2,
+            [32.0, 1.0, 37.0],
+            [32.0, 1.0, 27.0],
+            "a quarter turn",
+        ),
+    ] {
+        let mut arrow = at(0, origin, MAGENTA, Style::Flat);
+        arrow.transform = must(placement(origin, heading, 1.0, 0.0), "placement");
+        must(renderer.set_instances(&[arrow]), "the list is stored");
+        let frame = draw_frame(&mut renderer, &camera, SIZE, &format!("heading-{name}"));
+        assert!(
+            is(probe(&frame, &camera, along), MAGENTA),
+            "{name}: the model extends toward the tip: {:?}",
+            probe(&frame, &camera, along)
+        );
+        assert!(
+            is(probe(&frame, &camera, behind), GROUND),
+            "{name}: and not away from it: {:?}",
+            probe(&frame, &camera, behind)
+        );
+    }
+}
+
+// REN-056
+#[test]
+fn conformance_gpu_terrain_upload_leaves_the_models_and_the_list() {
+    let Some(mut renderer) = gpu(SRGB) else {
+        return;
+    };
+    let mesh = mesh_of(&ground());
+    let camera = must(Camera::for_mesh(&mesh, 1.0), "the camera builds");
+    let centre = [32.0, 1.0, 32.0];
+    must(
+        renderer.upload_models(&[square(3.0)]),
+        "a model set uploads before the terrain",
+    );
+    must(
+        renderer.set_instances(&[at(0, centre, MAGENTA, Style::Flat)]),
+        "an instance list is stored before the terrain",
+    );
+    let texture = renderer.device().create_texture(&TextureDescriptor {
+        label: None,
+        size: Extent3d {
+            width: 4,
+            height: 4,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: SRGB,
+        usage: TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&TextureViewDescriptor::default());
+    let early = renderer.draw(&camera, &view, (4, 4));
+    assert!(
+        matches!(early, Err(Error::NothingUploaded)),
+        "a draw with no terrain is an error whatever else is set: {early:?}"
+    );
+    must(renderer.upload(&mesh, None), "the terrain uploads");
+    let first = draw_frame(&mut renderer, &camera, SIZE, "independent-first");
+    assert!(
+        is(probe(&first, &camera, centre), MAGENTA),
+        "the instance set before the terrain is drawn: {:?}",
+        probe(&first, &camera, centre)
+    );
+    must(renderer.upload(&mesh, None), "the terrain uploads again");
+    let second = draw_frame(&mut renderer, &camera, SIZE, "independent-second");
+    assert!(
+        is(probe(&second, &camera, centre), MAGENTA),
+        "a second terrain upload leaves the instance: {:?}",
+        probe(&second, &camera, centre)
+    );
+}
+
+// REN-054
+#[test]
+fn render_model_shader_source_is_a_second_module_assembled_from_the_constants() {
+    let source = model_shader_source();
+    check_shader_with_naga(&source);
+    for entry in ["vs_lit", "fs_lit", "vs_flat", "fs_flat"] {
+        assert!(source.contains(entry), "the source has {entry}");
+        assert!(
+            !shader_source().contains(entry),
+            "the first module has no {entry}"
+        );
+    }
+    for entry in ["vs_terrain", "fs_terrain", "vs_water", "fs_water"] {
+        assert!(!source.contains(entry), "the second module has no {entry}");
+    }
+    for number in LIGHT_DIRECTION.iter().chain([&AMBIENT]) {
+        assert!(
+            source.contains(&format!("{number:?}")),
+            "the source writes {number:?} from the Rust constant"
+        );
+    }
 }
