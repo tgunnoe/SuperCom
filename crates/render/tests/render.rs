@@ -1552,7 +1552,7 @@ fn render_terrain_height_over_a_grid_that_is_not_square() {
             "height at ({x}, {z}) is {got:?}, expected {want}"
         );
     };
-    // Cell column 0, row 0: corners 0, 10, 1, 11; north-west of the split.
+    // Cell column 0, row 0: corners 0, 10, 1, 11; on the split, where both triangles give it.
     expect(1.0, 3.0, 3.25);
     // Cell column 1, row 2: corners 14, 24, 19, 29, on each side of the split.
     expect(5.0, 9.0, 17.75);
