@@ -4,7 +4,9 @@ use crate::pacing::Pace;
 use crate::prepare::prepare_replay;
 use crate::testing::{Scratch, committed_log};
 use std::sync::Arc;
-use supercom_sim::{Army, Tick, World, first_divergence, read_replay, run_replay as sim_replay};
+use supercom_sim::{
+    Army, Pos, Q, Tick, World, first_divergence, read_replay, run_replay as sim_replay,
+};
 
 fn pace_of(due: u64, held_back: u64) -> Pace {
     Pace {
@@ -37,7 +39,7 @@ fn empty_run() -> (Play, Vec<Digest>) {
         commands: Vec::new(),
         checkpoints: vec![(Tick(2), digests[2]), (Tick(5), digests[5])],
     };
-    (Play::new(state, replay), digests)
+    (Play::new(state, replay, Meshes::default()), digests)
 }
 
 /// Frames of 3 due: the counts after each, the held-back frame counted once
@@ -90,7 +92,7 @@ fn conformance_replay_loop_matches_the_committed_log() {
     assert!(oracle.is_ok(), "{:?}", oracle.as_ref().err());
     let Ok((expected, _)) = oracle else { return };
 
-    let mut play = Play::new(prepared.state, prepared.replay);
+    let mut play = Play::new(prepared.state, prepared.replay, prepared.meshes);
     let mut digests = Vec::new();
     loop {
         let stepped = play.step_one();
@@ -111,6 +113,11 @@ fn conformance_replay_loop_matches_the_committed_log() {
     assert_eq!((play.matched(), play.total()), (46, 46));
     assert_eq!(first_divergence(&digests, &expected), None);
     assert!(play.finished());
+    assert_eq!(play.unnamed(), 0, "the committed log meets no other kind");
+    assert_eq!(
+        play.summary(),
+        "replayed 4600 ticks, 46 of 46 checkpoints matched, 0 frames held back, 0 kinds drawn as markers"
+    );
 }
 
 /// A wrong digest at tick 99 stops the loop at the hundredth step.
@@ -130,7 +137,7 @@ fn conformance_replay_loop_names_the_tick_of_a_wrong_checkpoint() {
     if let Some(first) = prepared.replay.checkpoints.first_mut() {
         first.1[0] ^= 1;
     }
-    let mut play = Play::new(prepared.state, prepared.replay);
+    let mut play = Play::new(prepared.state, prepared.replay, prepared.meshes);
     for step in 0..99 {
         assert!(
             matches!(play.step_one(), Ok(Stepped::Digest(_))),
@@ -161,8 +168,12 @@ fn conformance_play_keeps_the_values_from_before_the_last_step() {
     let prepared = prepare_replay(Some(&fa), &committed_log(), root.cache_vars());
     assert!(prepared.is_ok(), "{:?}", prepared.as_ref().err());
     let Ok(prepared) = prepared else { return };
-    let mut play = Play::new(prepared.state.clone(), prepared.replay.clone());
-    let mut oracle = Play::new(prepared.state, prepared.replay);
+    let mut play = Play::new(
+        prepared.state.clone(),
+        prepared.replay.clone(),
+        prepared.meshes.clone(),
+    );
+    let mut oracle = Play::new(prepared.state, prepared.replay, prepared.meshes);
     let mut moved = false;
     for _ in 0..1500 {
         assert!(oracle.step_one().is_ok());
@@ -186,5 +197,84 @@ fn conformance_play_keeps_the_values_from_before_the_last_step() {
         play.kept(),
         &kept,
         "a frame that steps nothing keeps its values"
+    );
+}
+
+/// A run over a state holding an entity of the kind `first`, with checkpoints
+/// only at ticks 40 and 41 so that the entities spawned and removed below
+/// never meet a comparison.
+fn run_with_one_entity() -> Play {
+    let mut state = State::with_world(Arc::new(World::empty()), 3);
+    state.spawn(
+        Army(1),
+        "first",
+        Pos {
+            x: 1.0,
+            y: 0.0,
+            z: 1.0,
+        },
+        Q::from_num(10),
+    );
+    let replay = Replay {
+        header: supercom_sim::ReplayHeader {
+            format_version: supercom_sim::REPLAY_FORMAT_VERSION,
+            engine_version: "test".to_owned(),
+            map: "m".to_owned(),
+            map_digest: [0; 32],
+            catalog_digest: [0; 32],
+            plugins: Vec::new(),
+            players: vec![(Army(1), "UEF".to_owned())],
+            seed: 3,
+        },
+        commands: Vec::new(),
+        checkpoints: vec![(Tick(40), [0; 32]), (Tick(41), [0; 32])],
+    };
+    Play::new(state, replay, Meshes::default())
+}
+
+/// The loop notes the kinds of its state when it is built and after every
+/// step: a kind in the start state counts before any frame, a kind met once
+/// and gone at the next noting stays counted, a kind spawned between two
+/// steps is counted, and the summary line is made from the loop's counts.
+#[test]
+fn supercom_play_counts_each_unnamed_kind_once() {
+    let at = Pos {
+        x: 1.0,
+        y: 0.0,
+        z: 1.0,
+    };
+    let mut play = run_with_one_entity();
+    assert_eq!(
+        play.unnamed(),
+        1,
+        "the start state's kind, before any frame"
+    );
+
+    assert!(play.step_one().is_ok());
+    let second = play.state.spawn(Army(1), "second", at, Q::from_num(10));
+    assert!(play.step_one().is_ok());
+    assert_eq!(play.unnamed(), 2, "spawned between two steps");
+    play.state.entities.remove(&second);
+    assert!(play.step_one().is_ok());
+    assert_eq!(
+        play.unnamed(),
+        2,
+        "a kind gone at the next noting stays counted"
+    );
+
+    play.state.spawn(Army(1), "first", at, Q::from_num(10));
+    play.state.spawn(Army(1), "first", at, Q::from_num(10));
+    assert!(play.step_one().is_ok());
+    assert_eq!(
+        play.unnamed(),
+        2,
+        "one kind however many entities and steps"
+    );
+
+    play.state.spawn(Army(1), "third", at, Q::from_num(10));
+    assert!(play.step_one().is_ok());
+    assert_eq!(
+        play.summary(),
+        "replayed 5 ticks, 0 of 2 checkpoints matched, 0 frames held back, 3 kinds drawn as markers"
     );
 }

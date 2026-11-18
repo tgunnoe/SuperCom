@@ -178,8 +178,8 @@ fn read_vertex(record: &[u8]) -> Result<Vertex, Error> {
     let mut r = Reader::at(record, 0);
     Ok(Vertex {
         position: r.floats()?,
-        tangent: r.floats()?,
         normal: r.floats()?,
+        tangent: r.floats()?,
         binormal: r.floats()?,
         uv0: r.floats()?,
         uv1: r.floats()?,
@@ -243,18 +243,27 @@ pub struct Bone {
 /// One vertex of a mesh.
 ///
 /// On disk a vertex is a 68-byte record (importer line 281): sixteen `f32`
-/// (position, tangent, normal, binormal, two texture coordinate pairs) and
-/// four `u8` bone indices. The indices are stored as found; the parser does
-/// not check them against the skeleton.
+/// (position, then three direction vectors, then two texture coordinate
+/// pairs) and four `u8` bone indices. The indices are stored as found; the
+/// parser does not check them against the skeleton.
+///
+/// The importer names the three vectors tangent, normal, binormal in that
+/// order. Measured over the install's 1,938 version-5 meshes, the second
+/// stored vector is the surface normal: it has the greatest mean absolute
+/// cosine with the face normal in every mesh. The normal's place follows the
+/// measurement, not the importer; the third and fourth keep the importer's
+/// relative order as tangent and binormal, which is not measured.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Vertex {
     /// Position.
     pub position: [f32; 3],
-    /// Tangent.
-    pub tangent: [f32; 3],
-    /// Normal.
+    /// The second stored vector: the surface normal, by measurement.
     pub normal: [f32; 3],
-    /// Binormal.
+    /// The third stored vector, named normal by the importer; its mean
+    /// cosine with the face normal is below the second's in every mesh.
+    pub tangent: [f32; 3],
+    /// The fourth stored vector, named binormal by the importer; its mean
+    /// cosine with the face normal is below the second's in every mesh.
     pub binormal: [f32; 3],
     /// First texture coordinate set.
     pub uv0: [f32; 2],

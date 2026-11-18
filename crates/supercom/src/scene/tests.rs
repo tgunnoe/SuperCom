@@ -1,7 +1,8 @@
 use super::*;
 use crate::markers::{COMMANDER_MODEL, MOBILE_MODEL, PROJECTILE_MODEL, STATIC_MODEL};
+use crate::units::{Meshes, UnitMesh};
 use std::sync::Arc;
-use supercom_render::{Camera, Style};
+use supercom_render::{Camera, Model, Style};
 use supercom_scmap::{Heightmap, Map};
 use supercom_sim::{Layer, MotionType, Pos, Projectile, ProjectileId, Q, World};
 
@@ -546,4 +547,565 @@ fn supercom_scene_interpolates_a_projectile_by_its_id() {
         matches!(at, Some(t) if (t[0] - 25.0).abs() < 1e-4 && (t[1] - 20.0).abs() < 1e-4 && (t[2] - 40.0).abs() < 1e-4),
         "{at:?}"
     );
+}
+
+fn small_model(lowest: f32) -> Model {
+    Model {
+        positions: vec![[0.0, lowest, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]],
+        normals: vec![[0.0, 1.0, 0.0]; 3],
+        indices: vec![0, 1, 2],
+    }
+}
+
+/// Two resolved kinds, in sorted order: the commander's kind at scale 0.25
+/// and the mobile kind, whose model reaches 10.284 below its origin, at 0.5.
+fn unit_meshes() -> Meshes {
+    Meshes::new(vec![
+        UnitMesh {
+            kind: "commander1".to_owned(),
+            scale: 0.25,
+            model: small_model(0.0),
+        },
+        UnitMesh {
+            kind: "mobile1".to_owned(),
+            scale: 0.5,
+            model: small_model(-10.284),
+        },
+    ])
+}
+
+/// The world point a model-space point is placed at by a column-major
+/// transform.
+fn apply(t: &[[f32; 4]; 4], v: [f32; 3]) -> [f32; 3] {
+    [0, 1, 2].map(|r| t[0][r] * v[0] + t[1][r] * v[1] + t[2][r] * v[2] + t[3][r])
+}
+
+fn drawn(state: &State, kinds: &BTreeMap<String, UnitKind>, distance: f32) -> Vec<Instance> {
+    let list = scene_instances(
+        state,
+        &Kept::default(),
+        0.0,
+        kinds,
+        &unit_meshes(),
+        &ramp_mesh(),
+        distance,
+    );
+    assert!(list.is_ok(), "{:?}", list.as_ref().err());
+    list.unwrap_or_default()
+}
+
+/// The rule is a pure function of the camera's distance and the unit's own
+/// size: a mesh within 50 times its own size, a marker beyond, never both.
+#[test]
+fn supercom_mesh_or_marker_rule_cases() {
+    for (distance, own, want) in [
+        (8.0, 1.0, true),
+        (49.0, 1.0, true),
+        (50.0, 1.0, true),
+        (0.0, 1.0, true),
+        (0.0, 0.0, false),
+        (0.0, -1.0, false),
+        (0.0, f32::NAN, false),
+        (51.0, 1.0, false),
+        (309.02, 1.0, false),
+        (8.0, 3.0, true),
+        (149.0, 3.0, true),
+        (151.0, 3.0, false),
+        (309.02, 8.0, true),
+        (f32::NAN, 1.0, false),
+        (f32::INFINITY, 1.0, false),
+        (8.0, 0.0, false),
+        (8.0, f32::NAN, false),
+    ] {
+        assert_eq!(
+            draws_mesh(distance, own),
+            want,
+            "distance {distance}, size {own}"
+        );
+    }
+
+    // Over a sweep of distances every unit is exactly one instance, a lit
+    // mesh or a flat marker.
+    let kinds = kinds();
+    let mut state = state_of(&kinds);
+    state.spawn(Army(1), "mobile1", pos(8.0, 0.0, 8.0), hundred());
+    state.spawn(Army(2), "commander1", pos(32.0, 0.0, 32.0), hundred());
+    state.spawn(Army(3), "static1", pos(48.0, 0.0, 16.0), hundred());
+    for distance in [8.0, 20.0, 49.0, 51.0, 120.0, 151.0, 309.02] {
+        let list = drawn(&state, &kinds, distance);
+        assert_eq!(list.len(), 3, "one instance per unit at {distance}");
+        for instance in &list {
+            assert_eq!(
+                instance.style == Style::Lit,
+                instance.model >= 4,
+                "a lit instance is a mesh and a flat one a marker at {distance}"
+            );
+        }
+        assert_eq!(
+            list[0].style == Style::Lit,
+            distance <= 50.0,
+            "mobile at {distance}"
+        );
+        assert_eq!(
+            list[1].style == Style::Lit,
+            distance <= 150.0,
+            "commander at {distance}"
+        );
+        assert_eq!(
+            list[2].style,
+            Style::Flat,
+            "a kind not resolved is a marker"
+        );
+    }
+}
+
+/// A mesh at half a tick from a position 8 to 16 and a heading 6.2 to 0.1 is
+/// half way along x, its heading the shorter arc through the wrap, 6.2915926.
+fn mesh_between_ticks(kinds: &BTreeMap<String, UnitKind>) {
+    let mut before = state_of(kinds);
+    before.spawn(Army(1), "mobile1", pos(8.0, 0.0, 8.0), hundred());
+    if let Some(entity) = before.entities.values_mut().next() {
+        entity.heading = 6.2;
+    }
+    let mut now = state_of(kinds);
+    now.spawn(Army(1), "mobile1", pos(16.0, 0.0, 8.0), hundred());
+    if let Some(entity) = now.entities.values_mut().next() {
+        entity.heading = 0.1;
+    }
+    let blended = scene_instances(
+        &now,
+        &Kept::of(&before),
+        0.5,
+        kinds,
+        &unit_meshes(),
+        &ramp_mesh(),
+        8.0,
+    )
+    .unwrap_or_default();
+    assert_eq!(blended.len(), 1);
+    assert_eq!(blended[0].style, Style::Lit);
+    let t = blended[0].transform;
+    assert!(close3(at(&blended[0]), [12.0, 7.5, 8.0]), "{:?}", t[3]);
+    let forward = apply(&t, [0.0, 0.0, 1.0]);
+    assert!(
+        close3(
+            [
+                forward[0] - t[3][0],
+                forward[1] - t[3][1],
+                forward[2] - t[3][2]
+            ],
+            [0.499_982_33, 0.0, 0.004_203_624]
+        ),
+        "the heading along the shorter arc: {forward:?}"
+    );
+}
+
+/// A resolved unit near the camera is one lit instance of its mesh in its
+/// army's colour, dimmed as its marker is when unfinished; far away, or of a
+/// kind not resolved, it is its marker; a projectile is always its marker.
+#[test]
+fn supercom_scene_draws_meshes_and_markers() {
+    let kinds = kinds();
+    let mut state = state_of(&kinds);
+    let mobile = state.spawn(Army(1), "mobile1", pos(8.0, 0.0, 8.0), hundred());
+    state.spawn(Army(2), "commander1", pos(32.0, 0.0, 32.0), hundred());
+    state.spawn(Army(3), "static1", pos(48.0, 0.0, 16.0), hundred());
+    state.projectiles.insert(
+        ProjectileId(1),
+        Projectile {
+            id: ProjectileId(1),
+            army: Army(1),
+            source: mobile,
+            kind: None,
+            pos: pos(20.0, 30.0, 40.0),
+            vel: [0.0; 3],
+            target: None,
+            aim: pos(0.0, 0.0, 0.0),
+            damage: Q::ZERO,
+            damage_radius: 0.0,
+            damage_type: String::new(),
+            lifetime: None,
+        },
+    );
+    let near = drawn(&state, &kinds, 8.0);
+    assert_eq!(near.len(), 4, "three units and a projectile");
+    // models 4 and 5 are commander1 and mobile1 in sorted order
+    assert_eq!((near[0].model, near[0].style), (5, Style::Lit));
+    assert_eq!((near[1].model, near[1].style), (4, Style::Lit));
+    assert_eq!((near[2].model, near[2].style), (STATIC_MODEL, Style::Flat));
+    assert_eq!(
+        (near[3].model, near[3].style),
+        (PROJECTILE_MODEL, Style::Flat)
+    );
+    assert_eq!(near[0].color, colour_table()[0]);
+    assert_eq!(near[1].color, colour_table()[1]);
+    // The mesh is placed at the unit's drawn position (the ramp's height at
+    // x 8 is 5) with the blueprint's scale.
+    assert!(
+        close3(at(&near[0]), [8.0, 5.0, 8.0]),
+        "{:?}",
+        near[0].transform[3]
+    );
+    assert!(
+        close(near[0].transform[1][1], 0.5),
+        "{:?}",
+        near[0].transform
+    );
+    assert!(
+        close(near[1].transform[1][1], 0.25),
+        "{:?}",
+        near[1].transform
+    );
+
+    let far = drawn(&state, &kinds, 309.02);
+    let shapes: Vec<(usize, Style)> = far.iter().map(|i| (i.model, i.style)).collect();
+    assert_eq!(
+        shapes,
+        [
+            (MOBILE_MODEL, Style::Flat),
+            (COMMANDER_MODEL, Style::Flat),
+            (STATIC_MODEL, Style::Flat),
+            (PROJECTILE_MODEL, Style::Flat)
+        ],
+        "everything is a marker at the strategic view but the commander's mesh"
+    );
+
+    mesh_between_ticks(&kinds);
+
+    // Unfinished: half built, dimmed as the marker is.
+    if let Some(entity) = state.entities.get_mut(&mobile) {
+        entity.complete = false;
+        entity.built = Q::from_num(5);
+    }
+    let half = drawn(&state, &kinds, 8.0);
+    assert_eq!(half[0].style, Style::Lit);
+    assert!(
+        close3(half[0].color, [0.63, 0.07, 0.07]),
+        "{:?}",
+        half[0].color
+    );
+}
+
+/// The one forward yaw: a quarter turn that takes the mesh's +z to the
+/// heading, by a proper rotation and a positive scale, whatever the heading;
+/// the stored coordinates are placed as they are, so a vertex below the
+/// origin is drawn below it.
+#[test]
+fn supercom_unit_mesh_placement_cases() {
+    let kinds = kinds();
+    let mut state = state_of(&kinds);
+    let id = state.spawn(Army(1), "mobile1", pos(8.0, 0.0, 8.0), hundred());
+    for heading in [
+        0.0,
+        0.7,
+        std::f64::consts::FRAC_PI_2,
+        std::f64::consts::PI,
+        -2.0,
+        5.0,
+    ] {
+        if let Some(entity) = state.entities.get_mut(&id) {
+            entity.heading = heading;
+        }
+        let list = drawn(&state, &kinds, 8.0);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].style, Style::Lit, "heading {heading}");
+        let t = list[0].transform;
+        let origin = apply(&t, [0.0; 3]);
+        let forward = apply(&t, [0.0, 0.0, 1.0]);
+        let (sin, cos) = heading.sin_cos();
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "a test's expected value, f32 as the matrix"
+        )]
+        let want = [0.5 * cos as f32, 0.0, 0.5 * sin as f32];
+        assert!(
+            close3(
+                [
+                    forward[0] - origin[0],
+                    forward[1] - origin[1],
+                    forward[2] - origin[2]
+                ],
+                want
+            ),
+            "heading {heading}: +z goes to {forward:?} from {origin:?}"
+        );
+        // columns are orthogonal and as long as the scale, and the
+        // determinant is positive: a rotation, not a mirror.
+        let columns = [t[0], t[1], t[2]].map(|c| [c[0], c[1], c[2]]);
+        let dot3 = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        for (i, a) in columns.iter().enumerate() {
+            assert!(close(dot3(*a, *a).sqrt(), 0.5), "column {i} of {t:?}");
+            for b in &columns[i + 1..] {
+                assert!(dot3(*a, *b).abs() < 1e-4, "{t:?}");
+            }
+        }
+        let det = dot3(columns[0], cross(columns[1], columns[2]));
+        assert!(det > 0.0, "determinant {det} at heading {heading}");
+        // the vertex 10.284 below the origin is drawn 10.284 times the scale
+        // below it.
+        let low = apply(&t, [0.0, -10.284, 0.0]);
+        assert!(close(low[1], 5.0 - 10.284 * 0.5), "{low:?}");
+    }
+}
+
+fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+/// The kinds met that no resolved kind covers are counted once each by the
+/// blueprint name the entity carries, projectiles never, and a unit of such a
+/// kind is drawn as its marker at the near end of the zoom.
+#[test]
+fn supercom_unnamed_kinds_are_markers_and_counted() {
+    let kinds = kinds();
+    let meshes = unit_meshes();
+    let mut state = state_of(&kinds);
+    state.spawn(Army(1), "mobile1", pos(8.0, 0.0, 8.0), hundred());
+    assert!(
+        meshes.unnamed(&state).is_empty(),
+        "a resolved kind is named"
+    );
+    state.spawn(Army(2), "static1", pos(32.0, 0.0, 32.0), hundred());
+    state.spawn(Army(2), "static1", pos(40.0, 0.0, 32.0), hundred());
+    state.spawn(Army(3), "nosuchkind", pos(48.0, 0.0, 16.0), hundred());
+    let want: std::collections::BTreeSet<String> =
+        ["static1", "nosuchkind"].map(str::to_owned).into();
+    assert_eq!(meshes.unnamed(&state), want, "distinct, by blueprint name");
+    let near = drawn(&state, &kinds, 8.0);
+    assert_eq!(near.len(), 4);
+    assert_eq!(near[0].style, Style::Lit);
+    assert!(
+        near[1..]
+            .iter()
+            .all(|i| i.style == Style::Flat && i.model < 4),
+        "an unnamed kind is a marker at the near end"
+    );
+    assert!(
+        Meshes::default().unnamed(&state).len() == 3,
+        "with no kind named, all three"
+    );
+}
+
+/// The linear value of an sRGB-encoded 0-to-255 channel.
+fn decode_srgb(byte: u8) -> f64 {
+    let v = f64::from(byte) / 255.0;
+    if v <= 0.04045 {
+        v / 12.92
+    } else {
+        ((v + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// For `pixel`, the light factor L in 0 to 1 when the pixel is `colour`
+/// times L within 0.02 per linear channel, else `None`.
+fn light_of(pixel: [u8; 3], colour: [f32; 3]) -> Option<f64> {
+    let lin = pixel.map(decode_srgb);
+    let strongest = (0..3).max_by(|a, b| colour[*a].total_cmp(&colour[*b]))?;
+    let light = lin[strongest] / f64::from(colour[strongest]);
+    let fits = (0..3).all(|k| (lin[k] - f64::from(colour[k]) * light).abs() <= 0.02);
+    (fits && (0.0..=1.02).contains(&light)).then_some(light)
+}
+
+/// The lights of the pixels in a square window of `half` pixels around
+/// `(x, y)` that read as `colour` times a light.
+fn lights_around(
+    pixels: &[[u8; 3]],
+    size: u32,
+    (x, y): (u32, u32),
+    half: u32,
+    colour: [f32; 3],
+) -> Vec<f64> {
+    let mut lights = Vec::new();
+    for row in y.saturating_sub(half)..(y + half).min(size) {
+        for column in x.saturating_sub(half)..(x + half).min(size) {
+            let index = usize::try_from(row * size + column).unwrap_or(0);
+            if let Some(light) = pixels.get(index).and_then(|p| light_of(*p, colour)) {
+                lights.push(light);
+            }
+        }
+    }
+    lights
+}
+
+/// Whole path at the near end of the zoom: over the first commander of the
+/// committed log's start state, the frame shows its mesh lit in its army's
+/// colour: pixels of that colour times a light that varies across the mesh
+/// from the ambient share to full; the same frame with the commander drawn
+/// flat, or not at all, or in the other army's colour, shows no such thing.
+#[test]
+fn conformance_gpu_close_zoom_draws_the_commander_mesh_lit_in_its_army_colour() {
+    use crate::prepare::prepare_replay;
+    use supercom_render::wgpu::TextureFormat;
+    use supercom_render::{GpuGate, Renderer, WaterPlane, ZoomSpeed, gpu_gate};
+
+    let Some(fa) = supercom_testkit::require_game() else {
+        return;
+    };
+    let require = std::env::var("SUPERCOM_REQUIRE_GPU").is_ok_and(|value| value == "1");
+    let made = Renderer::new(TextureFormat::Rgba8UnormSrgb);
+    let found = !matches!(made, Err(supercom_render::Error::NoAdapter { .. }));
+    let gate = gpu_gate(found, require);
+    if let GpuGate::Skip(reason) = &gate {
+        eprintln!("SKIP: {reason}");
+        return;
+    }
+    assert_eq!(gate, GpuGate::Run, "an adapter is required");
+    let scratch = crate::testing::Scratch::new("close-zoom");
+    let prepared = prepare_replay(
+        Some(&fa),
+        &crate::testing::committed_log(),
+        scratch.cache_vars(),
+    );
+    assert!(prepared.is_ok(), "{:?}", prepared.as_ref().err());
+    let Ok(prepared) = prepared else { return };
+
+    let terrain = TerrainMesh::build(&prepared.map).expect("the map builds");
+    let mut camera = Camera::for_mesh(&terrain, 1.0).expect("the camera");
+    camera.zoom(-10_000.0, ZoomSpeed::Fast);
+    assert!(
+        close(camera.distance(), 8.0),
+        "the near end: {}",
+        camera.distance()
+    );
+    let list = scene_instances(
+        &prepared.state,
+        &Kept::default(),
+        0.0,
+        &prepared.state.world().units,
+        &prepared.meshes,
+        &terrain,
+        camera.distance(),
+    );
+    assert!(list.is_ok(), "{:?}", list.as_ref().err());
+    let list = list.unwrap_or_default();
+    assert_eq!(list.len(), 2, "two commanders stand at the start");
+    assert_eq!(
+        list.iter().map(|i| i.style).collect::<Vec<_>>(),
+        [Style::Lit, Style::Lit],
+        "both are meshes at the near end"
+    );
+
+    // Centre the camera on the first commander: the line of sight through
+    // the target reaches the commander's height south of the target by the
+    // drop over the tangent of the pitch.
+    let commander = at(&list[0]);
+    let drop = camera.target()[1] - commander[1];
+    let target = camera.target();
+    camera.pan(
+        commander[0] - target[0],
+        commander[2] - target[2] + drop / camera.pitch().tan(),
+    );
+
+    let size = 512;
+    let water = WaterPlane::from_map(&prepared.map);
+    let mut renderer = made.expect("the renderer is built on the adapter found");
+    renderer
+        .upload(&terrain, water.as_ref())
+        .expect("the terrain uploads");
+    renderer
+        .upload_models(&prepared.meshes.model_set())
+        .expect("the models upload");
+    let matrix = camera.view_projection();
+    let centre = pixel_of(
+        &matrix,
+        [commander[0], commander[1] + 0.8, commander[2]],
+        size,
+    );
+    let probe = Probe {
+        size,
+        centre,
+        colour: army_colour(Army(1)),
+    };
+    assert_lit_in_army_colour(&mut renderer, &camera, &list, &probe);
+}
+
+/// The assertions on the close-zoom frame: the commander is lit, and the
+/// controls (flat, absent, recoloured) show what the detector would miss.
+fn assert_lit_in_army_colour(
+    renderer: &mut supercom_render::Renderer,
+    camera: &Camera,
+    list: &[Instance],
+    probe: &Probe,
+) {
+    let lights = probe.lights(renderer, camera, list);
+    assert!(
+        lights.len() >= 150,
+        "the commander's pixels in its army's colour: {} near {:?}",
+        lights.len(),
+        probe.centre
+    );
+    let (low, high) = lights
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), l| {
+            (lo.min(*l), hi.max(*l))
+        });
+    assert!(low >= 0.28, "no pixel darker than the ambient share: {low}");
+    assert!(
+        high - low >= 0.15,
+        "the light varies across the mesh: {low} to {high}"
+    );
+    assert!(
+        lights.iter().filter(|l| **l < 0.95).count() >= 100,
+        "shaded pixels, not a flat colour"
+    );
+    let other = Probe {
+        colour: army_colour(Army(2)),
+        ..*probe
+    };
+    let strangers = other.lights(renderer, camera, list);
+    assert!(
+        strangers.len() * 20 < lights.len(),
+        "the other army's colour: {}",
+        strangers.len()
+    );
+
+    // The controls: flat, absent, and in the other army's colour.
+    let mut flat = list.to_vec();
+    flat[0].style = Style::Flat;
+    let flat_lights = probe.lights(renderer, camera, &flat);
+    assert!(
+        flat_lights.iter().filter(|l| **l < 0.95).count() < 20,
+        "a flat commander has no shading: {}",
+        flat_lights.len()
+    );
+    let absent = probe.lights(renderer, camera, &list[1..]);
+    assert!(
+        absent.len() < 20,
+        "no commander, no pixels: {}",
+        absent.len()
+    );
+    let mut recoloured = list.to_vec();
+    recoloured[0].color = army_colour(Army(2));
+    let wrong = probe.lights(renderer, camera, &recoloured);
+    assert!(wrong.len() < 20, "the other army's colour: {}", wrong.len());
+}
+
+/// What a frame is read for: the target's size, the pixel the commander is
+/// expected at, and the army colour looked for.
+#[derive(Clone, Copy)]
+struct Probe {
+    size: u32,
+    centre: (u32, u32),
+    colour: [f32; 3],
+}
+
+impl Probe {
+    /// Draws `instances` and returns the lights of the pixels around the
+    /// expected pixel that read as the colour times a light.
+    fn lights(
+        &self,
+        renderer: &mut supercom_render::Renderer,
+        camera: &Camera,
+        instances: &[Instance],
+    ) -> Vec<f64> {
+        renderer
+            .set_instances(instances)
+            .expect("the list is accepted");
+        let pixels = draw_square(renderer, camera, self.size);
+        lights_around(&pixels, self.size, self.centre, 48, self.colour)
+    }
 }

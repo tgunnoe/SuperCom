@@ -17,6 +17,7 @@
     reason = "this file is entirely test code; clippy.toml exempts only #[test] functions, not their helpers"
 )]
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use supercom_scd::Vfs;
@@ -128,6 +129,181 @@ fn each_animation(vfs: &Vfs, mut visit: impl FnMut(&str, &[u8], &Animation)) -> 
         visited += 1;
     }
     visited
+}
+
+/// What the three vectors after a vertex's position say about the triangles
+/// of one mesh, in the order the `Vertex` fields `normal`, `tangent`,
+/// `binormal` name them.
+struct VectorCensus {
+    /// Triangles whose face normal is not exactly zero.
+    live: u32,
+    /// Live triangles whose face normal has a positive dot product with the
+    /// sum of the three corners' vector.
+    agree: [u32; 3],
+    /// Sum of the absolute cosines over the live triangles whose sum is
+    /// not the zero vector.
+    cosine_sum: [f64; 3],
+    /// How many terms went into each `cosine_sum`.
+    cosine_terms: [u32; 3],
+    /// Vertices whose first vector is shorter than 1e-6.
+    short_first: u32,
+}
+
+impl VectorCensus {
+    fn share(&self, which: usize) -> f64 {
+        f64::from(self.agree[which]) / f64::from(self.live)
+    }
+
+    fn mean_cosine(&self, which: usize) -> f64 {
+        if self.cosine_terms[which] == 0 {
+            0.0
+        } else {
+            self.cosine_sum[which] / f64::from(self.cosine_terms[which])
+        }
+    }
+}
+
+fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+/// Counts, for each of the three vectors, the triangles it agrees with:
+/// the face normal of corners a, b, c is (b - a) x (c - a) in f64 from the
+/// stored f32 values, zero exactly for a degenerate triangle.
+fn vector_census(mesh: &Mesh) -> VectorCensus {
+    let mut census = VectorCensus {
+        live: 0,
+        agree: [0; 3],
+        cosine_sum: [0.0; 3],
+        cosine_terms: [0; 3],
+        short_first: 0,
+    };
+    let widen = |v: [f32; 3]| v.map(f64::from);
+    for corner in mesh.indices.chunks_exact(3) {
+        let vertices: Vec<_> = corner
+            .iter()
+            .filter_map(|&i| mesh.vertices.get(usize::from(i)))
+            .collect();
+        if vertices.len() != 3 {
+            continue;
+        }
+        let [origin, second, third] = [0, 1, 2].map(|k| widen(vertices[k].position));
+        let to_second = [0, 1, 2].map(|k| second[k] - origin[k]);
+        let to_third = [0, 1, 2].map(|k| third[k] - origin[k]);
+        let face = [
+            to_second[1] * to_third[2] - to_second[2] * to_third[1],
+            to_second[2] * to_third[0] - to_second[0] * to_third[2],
+            to_second[0] * to_third[1] - to_second[1] * to_third[0],
+        ];
+        let face_length = dot(face, face).sqrt();
+        if face_length == 0.0 {
+            continue;
+        }
+        census.live += 1;
+        for which in 0..3 {
+            let mut sum = [0.0; 3];
+            for vertex in &vertices {
+                let vector = widen([vertex.normal, vertex.tangent, vertex.binormal][which]);
+                for k in 0..3 {
+                    sum[k] += vector[k];
+                }
+            }
+            let along = dot(face, sum);
+            let sum_length = dot(sum, sum).sqrt();
+            if along > 0.0 {
+                census.agree[which] += 1;
+            }
+            if sum_length > 0.0 {
+                census.cosine_sum[which] += (along / (face_length * sum_length)).abs();
+                census.cosine_terms[which] += 1;
+            }
+        }
+    }
+    census.short_first = u32::try_from(
+        mesh.vertices
+            .iter()
+            .filter(|v| dot(v.normal.map(f64::from), v.normal.map(f64::from)).sqrt() < 1e-6)
+            .count(),
+    )
+    .unwrap_or(u32::MAX);
+    census
+}
+
+/// Pins the order of a vertex's vectors (FMT-060): over the install's 1,938
+/// version-5 meshes the second stored vector, which `Vertex::normal` holds,
+/// has the greatest mean absolute cosine with the face normal; 1,839 meshes
+/// agree with it on a share of at least 0.99 and 99 fall below (74 under
+/// `env`, 5 under `projectiles`, 20 under `units`), the lowest at 0.8800;
+/// nine vertices have it shorter than 1e-6, in three named meshes.
+#[test]
+fn conformance_scm_vertex_vectors_order() {
+    let Some(fa) = supercom_testkit::require_game() else {
+        return;
+    };
+    let vfs = mounted(&fa);
+
+    let (mut cosine_first, mut meshes, mut at_least, mut below) = (0, 0, 0, 0);
+    let mut by_directory: BTreeMap<String, u32> = BTreeMap::new();
+    let mut lowest = (f64::INFINITY, String::new());
+    let mut short: Vec<(String, u32)> = Vec::new();
+    each_v5_mesh(&vfs, |name, _, mesh| {
+        let census = vector_census(mesh);
+        if census.live == 0 {
+            return;
+        }
+        meshes += 1;
+        if census.mean_cosine(0) > census.mean_cosine(1)
+            && census.mean_cosine(0) > census.mean_cosine(2)
+        {
+            cosine_first += 1;
+        }
+        let share = census.share(0);
+        if share >= 0.99 {
+            at_least += 1;
+        } else {
+            below += 1;
+            let top = name.split('/').next().unwrap_or("").to_lowercase();
+            *by_directory.entry(top).or_insert(0) += 1;
+        }
+        if share < lowest.0 {
+            lowest = (share, name.to_owned());
+        }
+        if census.short_first > 0 {
+            short.push((name.to_owned(), census.short_first));
+        }
+    });
+
+    assert_eq!(
+        cosine_first, MESHES_V5,
+        "meshes whose second stored vector has the greatest mean cosine"
+    );
+    assert_eq!(meshes, MESHES_V5, "meshes with a non-degenerate triangle");
+    assert_eq!(at_least, 1839, "meshes agreeing on a share of 0.99 or more");
+    assert_eq!(below, 99, "meshes below a share of 0.99");
+    assert_eq!(
+        by_directory,
+        BTreeMap::from([
+            ("env".to_owned(), 74),
+            ("projectiles".to_owned(), 5),
+            ("units".to_owned(), 20),
+        ]),
+        "the meshes below 0.99, by top directory"
+    );
+    assert!(
+        (lowest.0 - 0.8800).abs() < 1e-4,
+        "lowest share {} is not 0.8800",
+        lowest.0
+    );
+    assert_eq!(lowest.1, "env/Evergreen/Props/Trees/Pine06_s2_lod1.scm");
+    assert_eq!(
+        short,
+        vec![
+            ("meshes/game/map-border_squ_cybran_a_lod0.scm".to_owned(), 3),
+            ("units/UXB0008/UXB0008_LOD0.scm".to_owned(), 2),
+            ("units/UXB0009/UXB0009_LOD0.scm".to_owned(), 4),
+        ],
+        "vertices whose second stored vector is shorter than 1e-6"
+    );
 }
 
 /// Pins `Mesh::parse` over the install: all 1,938 version-5 `.scm` members

@@ -12,7 +12,10 @@ version      = { workspace = true }
 workspace = true
 
 [dependencies]
+supercom-bp         = { path = "../bp", version = "0.0.1" }
 supercom-render     = { path = "../render", version = "0.0.1" }
+supercom-scd        = { path = "../scd", version = "0.0.1" }
+supercom-scm        = { path = "../scm", version = "0.0.1" }
 supercom-scmap      = { path = "../scmap", version = "0.0.1" }
 supercom-sim        = { path = "../sim", version = "0.0.1" }
 supercom-sim-ingest = { path = "../sim-ingest", version = "0.0.1" }

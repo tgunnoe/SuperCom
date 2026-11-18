@@ -1109,6 +1109,62 @@ fn render_model_check_refuses_each_malformed_model() {
     }
 }
 
+// REN-086
+#[test]
+fn render_model_check_refuses_a_short_normal() {
+    // Squared lengths of 0.98e-12 and 1.02e-12 around the bound of 1e-12.
+    let with_normal = |normal: [f32; 3]| {
+        let mut model = triangle();
+        model.normals[1] = normal;
+        model
+    };
+    assert_eq!(
+        check_model(7, &with_normal([0.99e-6, 0.0, 0.0])),
+        Err(Error::ModelShortNormal {
+            model: 7,
+            vertex: 1
+        })
+    );
+    assert_eq!(check_model(7, &with_normal([0.0, 1.01e-6, 0.0])), Ok(()));
+    assert_eq!(
+        check_model(2, &with_normal([0.0; 3])),
+        Err(Error::ModelShortNormal {
+            model: 2,
+            vertex: 1
+        }),
+        "a zero normal is the shortest"
+    );
+    // The refusal comes after every refusal of REN-043.
+    let mut ranged = with_normal([0.0; 3]);
+    ranged.indices = vec![0, 1, 3];
+    assert_eq!(
+        check_model(3, &ranged),
+        Err(Error::ModelIndexRange {
+            model: 3,
+            index: 3,
+            vertices: 3
+        })
+    );
+    let mut non_finite = with_normal([0.0; 3]);
+    non_finite.positions[2][0] = f32::NAN;
+    assert_eq!(
+        check_model(4, &non_finite),
+        Err(Error::ModelNonFinite {
+            model: 4,
+            vertex: 2
+        })
+    );
+    let text = Error::ModelShortNormal {
+        model: 7,
+        vertex: 1,
+    }
+    .to_string();
+    assert!(
+        text.contains("model 7") && text.contains("vertex 1"),
+        "{text}"
+    );
+}
+
 // REN-045
 #[test]
 fn render_model_and_instance_fit_is_a_pure_function_of_counts_and_limits() {

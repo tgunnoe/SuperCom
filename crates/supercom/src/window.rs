@@ -8,11 +8,12 @@ use crate::error::RunError;
 use crate::frame::{FramePlan, Progress, Step, frame_plan};
 use crate::input::{Flow, Input, apply_input, key_input, wheel_input};
 use crate::interp::Kept;
-use crate::markers::marker_models;
 use crate::pacing::{Pace, pace};
 use crate::prepare::Prepared;
-use crate::scene::instances;
+use crate::scene::scene_instances;
 use crate::stepping::{Verdict, may_step, summary_line, verdict};
+use crate::units::Meshes;
+use std::collections::BTreeSet;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Instant;
@@ -61,20 +62,57 @@ pub struct Play {
     ticks_run: u64,
     matched: usize,
     held_frames: u64,
+    meshes: Meshes,
+    unnamed: BTreeSet<String>,
 }
 
 impl Play {
-    /// A run at tick 0 of `state` over `replay`.
+    /// A run at tick 0 of `state` over `replay`, with `meshes` the kinds
+    /// the run resolved.
     #[must_use]
-    pub fn new(state: State, replay: Replay) -> Self {
-        Self {
+    pub fn new(state: State, replay: Replay, meshes: Meshes) -> Self {
+        let mut play = Self {
             state,
             replay,
             kept: Kept::default(),
             ticks_run: 0,
             matched: 0,
             held_frames: 0,
-        }
+            meshes,
+            unnamed: BTreeSet::new(),
+        };
+        play.note_unnamed();
+        play
+    }
+
+    /// Notes the kinds the state now holds that the run did not resolve.
+    fn note_unnamed(&mut self) {
+        self.unnamed.extend(self.meshes.unnamed(&self.state));
+    }
+
+    /// The kinds the run resolved.
+    #[must_use]
+    pub fn meshes(&self) -> &Meshes {
+        &self.meshes
+    }
+
+    /// The run's summary line, from the loop's own counts.
+    #[must_use]
+    pub fn summary(&self) -> String {
+        summary_line(
+            self.ticks_run,
+            self.matched,
+            self.replay.checkpoints.len(),
+            self.held_frames,
+            self.unnamed.len(),
+        )
+    }
+
+    /// How many distinct kinds met so far the run did not resolve.
+    #[cfg(test)]
+    #[must_use]
+    pub fn unnamed(&self) -> usize {
+        self.unnamed.len()
     }
 
     /// Steps one tick with the commands stamped for it, compares the digest
@@ -99,6 +137,7 @@ impl Play {
                 reason: error.to_string(),
             })?;
         self.ticks_run = self.ticks_run.saturating_add(1);
+        self.note_unnamed();
         match verdict(tick, &digest, &self.replay.checkpoints) {
             Verdict::Match => self.matched += 1,
             Verdict::NoCheckpoint => {}
@@ -152,18 +191,21 @@ impl Play {
     }
 
     /// The checkpoints matched so far.
+    #[cfg(test)]
     #[must_use]
     pub fn matched(&self) -> usize {
         self.matched
     }
 
     /// The checkpoints in the replay.
+    #[cfg(test)]
     #[must_use]
     pub fn total(&self) -> usize {
         self.replay.checkpoints.len()
     }
 
     /// The frames at which the cap held ticks back.
+    #[cfg(test)]
     #[must_use]
     pub fn held_frames(&self) -> u64 {
         self.held_frames
@@ -232,15 +274,7 @@ impl Replaying {
     fn report(&mut self) {
         if !self.reported {
             self.reported = true;
-            println!(
-                "{}",
-                summary_line(
-                    self.play.ticks_run(),
-                    self.play.matched(),
-                    self.play.total(),
-                    self.play.held_frames()
-                )
-            );
+            println!("{}", self.play.summary());
         }
     }
 }
@@ -294,7 +328,12 @@ pub fn run_replay(
     speed: f64,
     frames: Option<NonZeroU32>,
 ) -> Result<Outcome, RunError> {
-    let Prepared { map, replay, state } = prepared;
+    let Prepared {
+        map,
+        replay,
+        state,
+        meshes,
+    } = prepared;
     let mut app = App {
         map,
         progress: Progress::new(frames),
@@ -302,7 +341,7 @@ pub fn run_replay(
         shift: false,
         outcome: None,
         replay: Some(Replaying {
-            play: Play::new(state, replay),
+            play: Play::new(state, replay, meshes),
             speed,
             clock: None,
             fraction: 1.0,
@@ -316,11 +355,12 @@ pub fn run_replay(
 /// fraction of a tick it is drawn at.
 fn set_scene(replaying: &Replaying, gfx: &mut Gfx) -> Result<(), RunError> {
     let state = replaying.play.state();
-    let list = instances(
+    let list = scene_instances(
         state,
         replaying.play.kept(),
         replaying.fraction,
         &state.world().units,
+        replaying.play.meshes(),
         &gfx.mesh,
         gfx.camera.distance(),
     )?;
@@ -332,7 +372,11 @@ fn set_scene(replaying: &Replaying, gfx: &mut Gfx) -> Result<(), RunError> {
 /// run: the window, the renderer for its surface, the grid fit check against
 /// that renderer's device, the mesh, the water, the camera, the upload, and,
 /// for a replay, the marker models.
-fn build(event_loop: &ActiveEventLoop, map: &Map, markers: bool) -> Result<Gfx, RunError> {
+fn build(
+    event_loop: &ActiveEventLoop,
+    map: &Map,
+    meshes: Option<&Meshes>,
+) -> Result<Gfx, RunError> {
     let attributes = Window::default_attributes()
         .with_title("SuperCom")
         .with_inner_size(LogicalSize::new(1280.0, 720.0));
@@ -363,8 +407,8 @@ fn build(event_loop: &ActiveEventLoop, map: &Map, markers: bool) -> Result<Gfx, 
     let size = window.inner_size();
     let camera = Camera::for_mesh(&mesh, crate::frame::aspect((size.width, size.height)))?;
     surface.renderer.upload(&mesh, water.as_ref())?;
-    if markers {
-        surface.renderer.upload_models(&marker_models())?;
+    if let Some(meshes) = meshes {
+        surface.renderer.upload_models(&meshes.model_set())?;
     }
     Ok(Gfx {
         window,
@@ -515,7 +559,13 @@ impl ApplicationHandler for App {
         if self.gfx.is_some() {
             return;
         }
-        match build(event_loop, &self.map, self.replay.is_some()) {
+        match build(
+            event_loop,
+            &self.map,
+            self.replay
+                .as_ref()
+                .map(|replaying| replaying.play.meshes()),
+        ) {
             Ok(gfx) => {
                 if let Some(replaying) = self.replay.as_mut() {
                     replaying.clock = Some(Instant::now());

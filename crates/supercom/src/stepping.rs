@@ -40,11 +40,18 @@ pub fn may_step(tick: Tick, checkpoints: &[(Tick, Digest)]) -> bool {
 }
 
 /// The run's summary line: ticks run, checkpoints matched out of the log's,
-/// and the frames at which the pacing cap held ticks back.
+/// the frames at which the pacing cap held ticks back, and the unit kinds
+/// drawn as markers because the run did not resolve them.
 #[must_use]
-pub fn summary_line(ticks: u64, matched: usize, total: usize, held_frames: u64) -> String {
+pub fn summary_line(
+    ticks: u64,
+    matched: usize,
+    total: usize,
+    held_frames: u64,
+    unnamed_kinds: usize,
+) -> String {
     format!(
-        "replayed {ticks} ticks, {matched} of {total} checkpoints matched, {held_frames} frames held back"
+        "replayed {ticks} ticks, {matched} of {total} checkpoints matched, {held_frames} frames held back, {unnamed_kinds} kinds drawn as markers"
     )
 }
 

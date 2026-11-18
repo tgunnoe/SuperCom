@@ -4,8 +4,9 @@
 //! whether it exists. `supercom view` opens a window on an installed map and
 //! draws its terrain and water. `supercom replay <file>` plays a recorded
 //! match in a window: it loads the world, checks the replay against it,
-//! steps the simulation, compares every checkpoint, and draws every entity
-//! and projectile as a flat marker. The engine proper lands behind the
+//! steps the simulation, compares every checkpoint, and draws each unit as its
+//! lit mesh when the camera is near and as a flat marker otherwise, and every
+//! projectile as a flat marker. The engine proper lands behind the
 //! specification in `docs/specs/`.
 
 mod cache;
@@ -23,6 +24,7 @@ mod scene;
 mod stepping;
 #[cfg(test)]
 mod testing;
+mod units;
 mod window;
 
 use cache::CacheVars;
