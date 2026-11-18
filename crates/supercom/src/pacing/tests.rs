@@ -37,3 +37,16 @@ fn supercom_pacing_cases() {
         );
     }
 }
+
+/// REN-064: a negative time or speed owes nothing, at a value whose
+/// fraction after the floor is not zero (-2.5 ticks would leave 0.5).
+#[test]
+fn supercom_pacing_owes_nothing_for_a_negative_time_or_speed() {
+    for (elapsed, speed) in [(-0.25, 1.0), (1.0, -0.25)] {
+        assert_eq!(
+            pace(elapsed, speed, 0),
+            pace_of(0, 0, 0.0),
+            "({elapsed}, {speed})"
+        );
+    }
+}

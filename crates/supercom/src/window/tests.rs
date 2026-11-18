@@ -141,3 +141,50 @@ fn conformance_replay_loop_names_the_tick_of_a_wrong_checkpoint() {
     assert_eq!((play.ticks_run(), play.matched()), (100, 0));
     let _ = (CacheVars::default(), read_replay(&[]));
 }
+
+/// REN-076: a frame that held exactly one tick back is counted.
+#[test]
+fn supercom_play_counts_a_frame_that_held_one_tick_back() {
+    let (mut play, _) = empty_run();
+    assert!(play.frame(&pace_of(1, 1)).is_ok());
+    assert_eq!((play.ticks_run(), play.held_frames()), (1, 1));
+}
+
+/// REN-065: the kept values are those from before the last step of the
+/// frame, and a frame that steps nothing keeps them.
+#[test]
+fn conformance_play_keeps_the_values_from_before_the_last_step() {
+    let Some(fa) = supercom_testkit::require_game() else {
+        return;
+    };
+    let root = Scratch::new("play-kept");
+    let prepared = prepare_replay(Some(&fa), &committed_log(), root.cache_vars());
+    assert!(prepared.is_ok(), "{:?}", prepared.as_ref().err());
+    let Ok(prepared) = prepared else { return };
+    let mut play = Play::new(prepared.state.clone(), prepared.replay.clone());
+    let mut oracle = Play::new(prepared.state, prepared.replay);
+    let mut moved = false;
+    for _ in 0..1500 {
+        assert!(oracle.step_one().is_ok());
+        assert!(oracle.step_one().is_ok());
+        let before_last = Kept::of(oracle.state());
+        assert!(oracle.step_one().is_ok());
+        assert!(play.frame(&pace_of(3, 0)).is_ok());
+        assert_eq!(play.kept(), &before_last, "kept from before the last step");
+        if before_last != Kept::of(play.state()) {
+            moved = true;
+            break;
+        }
+    }
+    assert!(
+        moved,
+        "a last step moved something, so the comparison can fail"
+    );
+    let kept = play.kept().clone();
+    assert!(play.frame(&pace_of(0, 0)).is_ok());
+    assert_eq!(
+        play.kept(),
+        &kept,
+        "a frame that steps nothing keeps its values"
+    );
+}

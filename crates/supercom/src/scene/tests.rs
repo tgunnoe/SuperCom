@@ -493,3 +493,57 @@ fn conformance_gpu_replay_start_draws_each_commander_in_its_army_colour() {
     }
     assert_ne!(seen.first(), seen.get(1), "the two armies differ");
 }
+
+/// REN-066: a projectile is interpolated by its id: from (20, 30, 40) to
+/// (30, 10, 40) at one half is drawn at (25, 20, 40).
+#[test]
+fn supercom_scene_interpolates_a_projectile_by_its_id() {
+    let kinds = kinds();
+    let mesh = ramp_mesh();
+    let mut before = state_of(&kinds);
+    let source = before.spawn(Army(1), "static1", pos(8.0, 0.0, 8.0), hundred());
+    before.projectiles.insert(
+        ProjectileId(1),
+        Projectile {
+            id: ProjectileId(1),
+            army: Army(1),
+            source,
+            kind: None,
+            pos: pos(20.0, 30.0, 40.0),
+            vel: [0.0; 3],
+            target: None,
+            aim: pos(0.0, 0.0, 0.0),
+            damage: Q::ZERO,
+            damage_radius: 0.0,
+            damage_type: String::new(),
+            lifetime: None,
+        },
+    );
+    let kept = Kept::of(&before);
+    let mut state = state_of(&kinds);
+    let source = state.spawn(Army(1), "static1", pos(8.0, 0.0, 8.0), hundred());
+    state.projectiles.insert(
+        ProjectileId(1),
+        Projectile {
+            id: ProjectileId(1),
+            army: Army(1),
+            source,
+            kind: None,
+            pos: pos(30.0, 10.0, 40.0),
+            vel: [0.0; 3],
+            target: None,
+            aim: pos(0.0, 0.0, 0.0),
+            damage: Q::ZERO,
+            damage_radius: 0.0,
+            damage_type: String::new(),
+            lifetime: None,
+        },
+    );
+    let list = instances(&state, &kept, 0.5, &kinds, &mesh, 100.0);
+    assert!(list.is_ok(), "{:?}", list.as_ref().err());
+    let at = list.unwrap_or_default().last().map(|i| i.transform[3]);
+    assert!(
+        matches!(at, Some(t) if (t[0] - 25.0).abs() < 1e-4 && (t[1] - 20.0).abs() < 1e-4 && (t[2] - 40.0).abs() < 1e-4),
+        "{at:?}"
+    );
+}
