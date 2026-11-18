@@ -34,6 +34,17 @@ fn supercom_interpolation_cases() {
     assert!(close(whole, 3.783_185_307_179_586), "{whole}");
 }
 
+/// REN-065: a half turn is wrapped into the range that includes minus pi and
+/// excludes pi, so from 0 to pi, halfway is minus pi over 2, and from 0 to
+/// minus pi, halfway is the same.
+#[test]
+fn supercom_interpolation_takes_a_half_turn_toward_minus_pi() {
+    let half = blend_heading(0.0, std::f64::consts::PI, 0.5);
+    assert!(close(half, -std::f64::consts::FRAC_PI_2), "{half}");
+    let other = blend_heading(0.0, -std::f64::consts::PI, 0.5);
+    assert!(close(other, -std::f64::consts::FRAC_PI_2), "{other}");
+}
+
 /// The kept values are the state's, by id.
 #[test]
 fn supercom_interpolation_keeps_the_values_by_id() {
