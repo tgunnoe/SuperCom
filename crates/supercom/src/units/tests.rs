@@ -357,6 +357,90 @@ fn supercom_unit_kind_resolution_failures() {
         matches!(&junk, Some((kind, KindStep::MeshParse, _)) if kind == "ueb1103"),
         "{junk:?}"
     );
+
+    // Two defects at once: the earlier step's failure is the one given.
+    let both_absent = step_of(resolve_kind("ueb1103", &reader(None, None)));
+    assert!(
+        matches!(&both_absent, Some((_, KindStep::MeshRead, _))),
+        "both files absent: {both_absent:?}"
+    );
+    let unparsed_and_absent = step_of(resolve_kind("ueb1103", &reader(Some(b"not a mesh"), None)));
+    assert!(
+        matches!(&unparsed_and_absent, Some((_, KindStep::BlueprintRead, _))),
+        "a mesh that does not parse, a blueprint that is absent: {unparsed_and_absent:?}"
+    );
+    let neither_parses = step_of(resolve_kind(
+        "ueb1103",
+        &reader(Some(b"not a mesh"), Some(b"not a blueprint {{{")),
+    ));
+    assert!(
+        matches!(&neither_parses, Some((_, KindStep::MeshParse, _))),
+        "a mesh and a blueprint that both do not parse: {neither_parses:?}"
+    );
+}
+
+/// The text of a kind's failure holds the kind and the step's name as the
+/// clause lists them, one for each of the six steps, and the text of a
+/// mismatch holds its tick.
+#[test]
+fn supercom_unit_kind_failure_texts_name_the_step() {
+    let reader = |mesh: Option<&'static [u8]>, blueprint: Option<&'static [u8]>| {
+        move |path: &str| -> Result<Vec<u8>, String> {
+            let bytes = if path.ends_with("_lod0.scm") {
+                mesh
+            } else {
+                blueprint
+            };
+            bytes
+                .map(<[u8]>::to_vec)
+                .ok_or_else(|| format!("{path} is absent"))
+        }
+    };
+    let text = |result: Result<UnitMesh, RunError>| result.err().map(|error| error.to_string());
+    let mut short = quad_mesh();
+    short.vertices[1].normal = [0.0; 3];
+
+    let cases = [
+        (
+            "mesh read",
+            text(resolve_kind("uel0001", &reader(None, Some(GOOD_BLUEPRINT)))),
+        ),
+        (
+            "blueprint read",
+            text(resolve_kind("uel0001", &reader(Some(b"MODL"), None))),
+        ),
+        (
+            "mesh parse",
+            text(resolve_kind(
+                "uel0001",
+                &reader(Some(b"not a mesh"), Some(GOOD_BLUEPRINT)),
+            )),
+        ),
+        (
+            "blueprint parse",
+            text(build_kind("uel0001", &quad_mesh(), b"not a blueprint {{{")),
+        ),
+        (
+            "scale",
+            text(build_kind("uel0001", &quad_mesh(), &blueprint_with(""))),
+        ),
+        (
+            "model check",
+            text(build_kind("uel0001", &short, GOOD_BLUEPRINT)),
+        ),
+    ];
+    for (name, text) in cases {
+        let prefix = format!("unit kind uel0001: {name}: ");
+        assert!(
+            text.as_deref().is_some_and(|t| t.starts_with(&prefix)),
+            "{name}: {text:?}"
+        );
+    }
+
+    assert_eq!(
+        RunError::Mismatch { tick: 99 }.to_string(),
+        "replay: the digest at tick 99 differs from its checkpoint"
+    );
 }
 
 /// Against an install that holds nothing the archives do not mount, and the
