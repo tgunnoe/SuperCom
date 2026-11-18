@@ -28,8 +28,8 @@ pub use camera::{
 pub use error::Error;
 pub use gate::{GpuGate, gpu_gate};
 pub use model::{
-    INSTANCE_BYTES, Instance, MODEL_INDEX_BYTES, MODEL_VERTEX_BYTES, Model, Style, check_instances,
-    check_model, instances_fit, model_fits, placement, shade_lit,
+    INSTANCE_BYTES, Instance, Model, Style, check_instances, check_model, instances_fit,
+    model_fits, placement, shade_lit,
 };
 pub use model_shader::model_shader_source;
 pub use renderer::{Renderer, SurfaceRenderer, surface_format};

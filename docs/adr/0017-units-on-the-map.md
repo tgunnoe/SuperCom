@@ -233,8 +233,10 @@ frames`, and succeeds, as `view` does. Ground: the line is the run's evidence
 
 - The renderer's public surface grows by one model type, one instance type,
   one style type, six pure functions, the model shader's source function,
-  three constants for the byte counts, and two operations on the renderer; the
-  draw function and the terrain upload are unchanged.
+  one constant for an instance's byte count, one method of the terrain mesh
+  that gives the drawn height under a point, and two operations on the
+  renderer; the draw function and the terrain upload are unchanged. A model's
+  vertex and index byte counts are the terrain's own constants.
 - The binary can place anything it can describe as a model, in a colour,
   without the renderer changing. Models from the installed game's meshes, the
   team colours, and what the binary draws arrive with their own records.

@@ -3,14 +3,7 @@
 //! is a model's index in the uploaded set, a transform, a colour, and a
 //! style. The renderer learns nothing of what a model depicts.
 
-use crate::{AMBIENT, Error, LIGHT_DIRECTION};
-
-/// Bytes of one model vertex as the renderer uploads it: position and
-/// normal, six `f32`, the terrain's own layout.
-pub const MODEL_VERTEX_BYTES: u64 = crate::VERTEX_BYTES;
-
-/// Bytes of one 32-bit model index.
-pub const MODEL_INDEX_BYTES: u64 = crate::INDEX_BYTES;
+use crate::{AMBIENT, Error, INDEX_BYTES, LIGHT_DIRECTION, VERTEX_BYTES};
 
 /// Bytes of one instance as the renderer uploads it: the transform's sixteen
 /// `f32` and the colour's three.
@@ -117,8 +110,8 @@ fn widen(n: usize) -> u128 {
 
 /// Whether a model of `vertices` vertices and `indices` indices fits a
 /// device whose largest buffer is `max_buffer_size` bytes: the vertex buffer
-/// ([`MODEL_VERTEX_BYTES`] per vertex) and the index buffer
-/// ([`MODEL_INDEX_BYTES`] per index) must each fit. Pure, so a caller runs
+/// ([`VERTEX_BYTES`] per vertex) and the index buffer
+/// ([`INDEX_BYTES`] per index) must each fit. Pure, so a caller runs
 /// it before creating any buffer.
 ///
 /// # Errors
@@ -128,11 +121,11 @@ pub fn model_fits(vertices: usize, indices: usize, max_buffer_size: u64) -> Resu
     for (buffer, bytes) in [
         (
             "vertex",
-            widen(vertices).saturating_mul(u128::from(MODEL_VERTEX_BYTES)),
+            widen(vertices).saturating_mul(u128::from(VERTEX_BYTES)),
         ),
         (
             "index",
-            widen(indices).saturating_mul(u128::from(MODEL_INDEX_BYTES)),
+            widen(indices).saturating_mul(u128::from(INDEX_BYTES)),
         ),
     ] {
         if bytes > u128::from(max_buffer_size) {
