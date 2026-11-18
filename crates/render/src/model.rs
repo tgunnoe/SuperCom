@@ -49,6 +49,18 @@ fn finite3(v: [f32; 3]) -> bool {
     v.iter().all(|c| c.is_finite())
 }
 
+/// Whether a normal's squared length, in `f64`, is below [`MIN_NORMAL_SQUARED`].
+fn short(normal: [f32; 3]) -> bool {
+    normal
+        .iter()
+        .map(|c| f64::from(*c) * f64::from(*c))
+        .sum::<f64>()
+        < MIN_NORMAL_SQUARED
+}
+
+/// The least squared length of a normal [`check_model`] accepts.
+const MIN_NORMAL_SQUARED: f64 = 1e-12;
+
 /// Checks `model`, the `index`th of a set, without touching a device.
 ///
 /// # Errors
@@ -56,7 +68,9 @@ fn finite3(v: [f32; 3]) -> bool {
 /// for unequal position and normal counts, [`Error::ModelIndexCount`] for an
 /// index count that is not a multiple of three, [`Error::ModelIndexRange`]
 /// for an index at or past the vertex count, and [`Error::ModelNonFinite`]
-/// for a position or a normal that is not finite, checked in that order.
+/// for a position or a normal that is not finite, and
+/// [`Error::ModelShortNormal`] for a normal whose squared length is below
+/// 1e-12, checked in that order.
 pub fn check_model(index: usize, model: &Model) -> Result<(), Error> {
     let vertices = model.positions.len();
     if vertices == 0 || model.indices.is_empty() {
@@ -91,8 +105,14 @@ pub fn check_model(index: usize, model: &Model) -> Result<(), Error> {
         .iter()
         .zip(&model.normals)
         .position(|(p, n)| !(finite3(*p) && finite3(*n)));
-    match vertex {
-        Some(vertex) => Err(Error::ModelNonFinite {
+    if let Some(vertex) = vertex {
+        return Err(Error::ModelNonFinite {
+            model: index,
+            vertex,
+        });
+    }
+    match model.normals.iter().position(|n| short(*n)) {
+        Some(vertex) => Err(Error::ModelShortNormal {
             model: index,
             vertex,
         }),
