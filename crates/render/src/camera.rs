@@ -13,7 +13,7 @@ use std::f32::consts::FRAC_PI_2;
 pub const FOV_Y_RADIANS: f32 = std::f32::consts::FRAC_PI_4;
 /// Near end of the zoom range: the closest eye-to-target distance, in world
 /// units.
-pub const NEAR_DISTANCE: f32 = 40.0;
+pub const NEAR_DISTANCE: f32 = 8.0;
 /// Pitch at the near end of the zoom range in radians (35 degrees); the
 /// pitch is the angle of the view direction below the horizontal.
 pub const NEAR_PITCH_RADIANS: f32 = 0.610_865_24;
