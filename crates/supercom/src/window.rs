@@ -71,7 +71,7 @@ impl Play {
     /// the run resolved.
     #[must_use]
     pub fn new(state: State, replay: Replay, meshes: Meshes) -> Self {
-        Self {
+        let mut play = Self {
             state,
             replay,
             kept: Kept::default(),
@@ -80,11 +80,13 @@ impl Play {
             held_frames: 0,
             meshes,
             unnamed: BTreeSet::new(),
-        }
+        };
+        play.note_unnamed();
+        play
     }
 
     /// Notes the kinds the state now holds that the run did not resolve.
-    pub fn note_unnamed(&mut self) {
+    fn note_unnamed(&mut self) {
         self.unnamed.extend(self.meshes.unnamed(&self.state));
     }
 
@@ -135,6 +137,7 @@ impl Play {
                 reason: error.to_string(),
             })?;
         self.ticks_run = self.ticks_run.saturating_add(1);
+        self.note_unnamed();
         match verdict(tick, &digest, &self.replay.checkpoints) {
             Verdict::Match => self.matched += 1,
             Verdict::NoCheckpoint => {}
@@ -255,7 +258,6 @@ impl Replaying {
                 self.play.ticks_run(),
             );
             self.play.frame(&owed)?;
-            self.play.note_unnamed();
             self.fraction = if self.play.finished() {
                 1.0
             } else {

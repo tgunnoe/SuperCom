@@ -1,4 +1,4 @@
-//! The unit kinds a replay names and their meshes: which kinds, how a mesh
+//! The unit kinds a run resolves and their meshes: which kinds, how a mesh
 //! becomes a renderer model, and the resolving of each kind to a mesh and a
 //! scale before the window. Pure but for [`resolve_kinds`], which reads the
 //! install.
@@ -11,7 +11,7 @@ use supercom_bp::Blueprint;
 use supercom_render::{Model, check_model};
 use supercom_scd::Vfs;
 use supercom_scm::Mesh;
-use supercom_sim::{Faction, Order, Replay, State};
+use supercom_sim::{Order, Replay, State};
 
 /// One resolved kind: its lower-case id, the blueprint's uniform scale, and
 /// the model built from its lod0 mesh.
@@ -25,7 +25,7 @@ pub struct UnitMesh {
     pub model: Model,
 }
 
-/// The resolved kinds of a replay, in the sorted order of their ids.
+/// The resolved kinds of a run, in the sorted order of their ids.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Meshes {
     meshes: Vec<UnitMesh>,
@@ -83,31 +83,16 @@ pub fn model_of_mesh(mesh: &Mesh) -> Model {
     }
 }
 
-/// The faction a replay header's player string names. The simulation's own
-/// parse of the string is private; the start state has already refused a
-/// header whose string is none of these four (DET-030), so a string that is
-/// not one of them names nothing here.
-fn faction(name: &str) -> Option<Faction> {
-    match name {
-        "UEF" => Some(Faction::UEF),
-        "Aeon" => Some(Faction::Aeon),
-        "Cybran" => Some(Faction::Cybran),
-        "Seraphim" => Some(Faction::Seraphim),
-        _ => None,
-    }
-}
-
-/// The lower-case, sorted, distinct ids of the kinds a run resolves.
+/// The lower-case, sorted, distinct ids of the kinds a run resolves: the
+/// blueprint of every entity of the start state and of every build order,
+/// mobile or factory.
 #[must_use]
 pub fn run_kinds(state: &State, replay: &Replay) -> Vec<String> {
-    let _ = state;
-    let commanders = replay
-        .header
-        .players
-        .iter()
-        .filter_map(|(_, name)| faction(name))
-        .map(|faction| faction.commander().to_owned());
-    let built = replay
+    let placed = state
+        .entities
+        .values()
+        .map(|entity| entity.blueprint.to_ascii_lowercase());
+    let ordered = replay
         .commands
         .iter()
         .filter_map(|command| match &command.order {
@@ -116,8 +101,8 @@ pub fn run_kinds(state: &State, replay: &Replay) -> Vec<String> {
             }
             _ => None,
         });
-    commanders
-        .chain(built)
+    placed
+        .chain(ordered)
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()

@@ -21,7 +21,7 @@ pub struct Prepared {
     pub replay: Replay,
     /// The state at tick 0 of the skirmish the replay's header names.
     pub state: State,
-    /// The unit kinds the replay names, resolved to meshes and scales.
+    /// The unit kinds of the run, resolved to meshes and scales.
     pub meshes: Meshes,
 }
 

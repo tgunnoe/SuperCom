@@ -116,7 +116,7 @@ pub enum RunError {
         /// What the archive layer reported.
         reason: String,
     },
-    /// A unit kind the replay names could not be resolved to a mesh and a
+    /// A unit kind the run resolves could not be resolved to a mesh and a
     /// scale.
     UnitKind {
         /// The kind's lower-case id.

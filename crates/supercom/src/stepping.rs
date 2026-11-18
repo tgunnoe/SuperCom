@@ -41,7 +41,7 @@ pub fn may_step(tick: Tick, checkpoints: &[(Tick, Digest)]) -> bool {
 
 /// The run's summary line: ticks run, checkpoints matched out of the log's,
 /// the frames at which the pacing cap held ticks back, and the unit kinds
-/// drawn as markers because the replay did not name them.
+/// drawn as markers because the run did not resolve them.
 #[must_use]
 pub fn summary_line(
     ticks: u64,
