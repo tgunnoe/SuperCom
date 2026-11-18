@@ -200,13 +200,15 @@ REN-056); this record is the source each names.
   importer FMT-027 cites names a vertex's three vectors tangent, normal,
   binormal at its line 281. A census of the install's 1,938 version-5 meshes
   found the second stored vector to be the surface normal in every one: it has
-  the greatest mean absolute cosine with the face normal, and 1,839 meshes
-  agree with it on a share of at least 0.99. `crates/scm` therefore reads the
-  second stored vector into `normal` and the third into `tangent`, and says
-  what was departed from. Ground: the draw takes its normals from this field,
-  and a normal read from the third vector would light every mesh wrongly; the
-  conformance test asserts the census's counts exactly, so a loader that
-  followed the importer again fails it.
+  the greatest mean absolute cosine with the face normal, and 1,839 meshes agree
+  with it on a share of at least 0.99. `crates/scm` therefore reads the second
+  stored vector into `normal` and the third into `tangent`, and says what was
+  departed from. The third and fourth keep the importer's relative order as
+  tangent and binormal, which is not measured, and nothing here reads them.
+  Ground: the draw takes its normals from this field, and a normal read from the
+  third vector would light every mesh wrongly; the conformance test asserts the
+  census's counts exactly, so a loader that followed the importer again fails
+  it.
 - **A mesh is drawn from its stored coordinates with one forward yaw (REN-077,
   REN-078, REN-079, REN-080, REN-081).** The only fix-up between a stored mesh
   and what is drawn is a yaw of a quarter turn at placement, which takes a
