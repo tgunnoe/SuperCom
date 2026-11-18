@@ -50,9 +50,8 @@ pub fn summary_line(
     held_frames: u64,
     unnamed_kinds: usize,
 ) -> String {
-    let _ = unnamed_kinds;
     format!(
-        "replayed {ticks} ticks, {matched} of {total} checkpoints matched, {held_frames} frames held back"
+        "replayed {ticks} ticks, {matched} of {total} checkpoints matched, {held_frames} frames held back, {unnamed_kinds} kinds drawn as markers"
     )
 }
 
