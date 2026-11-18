@@ -1,8 +1,17 @@
 use super::*;
+use std::path::PathBuf;
 
 fn view(folder: &str, frames: Option<u32>) -> Command {
     Command::View(ViewArgs {
         folder: folder.to_owned(),
+        frames: frames.and_then(NonZeroU32::new),
+    })
+}
+
+fn replay(file: &str, speed: f64, frames: Option<u32>) -> Command {
+    Command::Replay(ReplayArgs {
+        file: PathBuf::from(file),
+        speed,
         frames: frames.and_then(NonZeroU32::new),
     })
 }
@@ -33,6 +42,67 @@ fn supercom_parse_args_cases() {
         parse_args(["view", "--frames", "007"]),
         Ok(view("SCMP_012", Some(7)))
     );
+    replay_cases();
+}
+
+/// `replay`: the accepted forms in every order, the bounds of the speed,
+/// and the lists it rejects; REN-032's test runs it.
+fn replay_cases() {
+    assert_eq!(
+        parse_args(["replay", "a.replay"]),
+        Ok(replay("a.replay", 1.0, None))
+    );
+    assert_eq!(
+        parse_args(["replay", "dir/b.replay", "--speed", "2.5"]),
+        Ok(replay("dir/b.replay", 2.5, None))
+    );
+    assert_eq!(
+        parse_args(["replay", "--speed", "0.1", "a.replay"]),
+        Ok(replay("a.replay", 0.1, None))
+    );
+    assert_eq!(
+        parse_args(["replay", "--speed", "10", "--frames", "3", "a"]),
+        Ok(replay("a", 10.0, Some(3)))
+    );
+    assert_eq!(
+        parse_args(["replay", "--frames", "12", "a", "--speed", "007.50"]),
+        Ok(replay("a", 7.5, Some(12)))
+    );
+    assert_eq!(
+        parse_args(["replay", "a", "--frames", "1"]),
+        Ok(replay("a", 1.0, Some(1)))
+    );
+    for args in [
+        &["replay"][..],
+        &["replay", "--speed", "2"],
+        &["replay", "-x"],
+        &["replay", "a", "b"],
+        &["replay", ""],
+        &["replay", "a", "--speed"],
+        &["replay", "a", "--frames"],
+        &["replay", "a", "--speed", "0.09"],
+        &["replay", "a", "--speed", "10.01"],
+        &["replay", "a", "--speed", "0"],
+        &["replay", "a", "--speed", "-1"],
+        &["replay", "a", "--speed", "+1"],
+        &["replay", "a", "--speed", "1e1"],
+        &["replay", "a", "--speed", "1.2.3"],
+        &["replay", "a", "--speed", ""],
+        &["replay", "a", "--speed", "."],
+        &["replay", "a", "--speed", ".5"],
+        &["replay", "a", "--speed", "5."],
+        &["replay", "a", "--speed", "NaN"],
+        &["replay", "a", "--speed", "inf"],
+        &["replay", "a", "--speed", "1", "--speed", "2"],
+        &["replay", "a", "--frames", "0"],
+        &["replay", "a", "--frames", "2", "--frames", "3"],
+        &["replay", "a", "--unknown"],
+        &["replay", "--speed", "-", "a"],
+    ] {
+        assert!(is_usage(args), "{args:?} was accepted");
+    }
+    assert!(is_usage(&["REPLAY", "a"]));
+    assert!(is_usage(&["view", "--speed", "2"]));
 }
 
 /// Every other list is a usage error, with the usage in its text.

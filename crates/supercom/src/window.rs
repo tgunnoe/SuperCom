@@ -1,13 +1,21 @@
 //! The window loop: converts the window system's events into inputs, calls
 //! the pure functions of the other modules, and hands each frame to the
-//! renderer's one draw function. It holds no arithmetic of its own, and no
-//! headless test reaches it.
+//! renderer's one draw function. It holds no arithmetic of its own; the one
+//! owner of a replay's state is here, [`Play`], and its stepping is tested
+//! without a window.
 
 use crate::error::RunError;
 use crate::frame::{FramePlan, Progress, Step, frame_plan};
 use crate::input::{Flow, Input, apply_input, key_input, wheel_input};
+use crate::interp::Kept;
+use crate::markers::marker_models;
+use crate::pacing::{Pace, pace};
+use crate::prepare::Prepared;
+use crate::scene::instances;
+use crate::stepping::{Verdict, may_step, summary_line, verdict};
 use std::num::NonZeroU32;
 use std::sync::Arc;
+use std::time::Instant;
 use supercom_render::wgpu::CurrentSurfaceTexture;
 use supercom_render::wgpu::wgt::WgpuHasDisplayHandle;
 use supercom_render::wgpu::{
@@ -16,6 +24,7 @@ use supercom_render::wgpu::{
 };
 use supercom_render::{Camera, Renderer, SurfaceRenderer, TerrainMesh, WaterPlane, grid_fits};
 use supercom_scmap::Map;
+use supercom_sim::{Digest, Replay, State, commands_at};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, WindowEvent};
@@ -32,6 +41,135 @@ pub enum Outcome {
     Closed,
 }
 
+/// What one step of a replay came to.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Stepped {
+    /// The step ran and returned this digest, which matched its checkpoint
+    /// or had none.
+    Digest(Digest),
+    /// The step at the last checkpoint's tick has run; nothing more is
+    /// stepped.
+    Stopped,
+}
+
+/// The one owner of a replay's state, with the values kept from before the
+/// last step and the run's counters.
+pub struct Play {
+    state: State,
+    replay: Replay,
+    kept: Kept,
+    ticks_run: u64,
+    matched: usize,
+    held_frames: u64,
+}
+
+impl Play {
+    /// A run at tick 0 of `state` over `replay`.
+    #[must_use]
+    pub fn new(state: State, replay: Replay) -> Self {
+        Self {
+            state,
+            replay,
+            kept: Kept::default(),
+            ticks_run: 0,
+            matched: 0,
+            held_frames: 0,
+        }
+    }
+
+    /// Steps one tick with the commands stamped for it, compares the digest
+    /// with the replay's checkpoint, and keeps the values from before the
+    /// step.
+    ///
+    /// # Errors
+    /// [`RunError::Mismatch`] naming the tick when the digest differs from
+    /// its checkpoint, and [`RunError::Step`] when the simulation refuses
+    /// the step.
+    pub fn step_one(&mut self) -> Result<Stepped, RunError> {
+        let tick = self.state.tick;
+        if !may_step(tick, &self.replay.checkpoints) {
+            return Ok(Stepped::Stopped);
+        }
+        self.kept = Kept::of(&self.state);
+        let digest = self
+            .state
+            .step(commands_at(&self.replay, tick))
+            .map_err(|error| RunError::Step {
+                tick: tick.0,
+                reason: error.to_string(),
+            })?;
+        self.ticks_run = self.ticks_run.saturating_add(1);
+        match verdict(tick, &digest, &self.replay.checkpoints) {
+            Verdict::Match => self.matched += 1,
+            Verdict::NoCheckpoint => {}
+            Verdict::Mismatch { tick } => return Err(RunError::Mismatch { tick: tick.0 }),
+        }
+        Ok(Stepped::Digest(digest))
+    }
+
+    /// Steps the ticks `pace` says are due, and counts the frame once when
+    /// the cap held ticks back while stepping had not stopped.
+    ///
+    /// # Errors
+    /// As [`Play::step_one`].
+    pub fn frame(&mut self, pace: &Pace) -> Result<(), RunError> {
+        if self.finished() {
+            return Ok(());
+        }
+        if pace.held_back > 0 {
+            self.held_frames = self.held_frames.saturating_add(1);
+        }
+        for _ in 0..pace.due {
+            if self.step_one()? == Stepped::Stopped {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether stepping has stopped.
+    #[must_use]
+    pub fn finished(&self) -> bool {
+        !may_step(self.state.tick, &self.replay.checkpoints)
+    }
+
+    /// The state, for drawing.
+    #[must_use]
+    pub fn state(&self) -> &State {
+        &self.state
+    }
+
+    /// The values kept from before the last step.
+    #[must_use]
+    pub fn kept(&self) -> &Kept {
+        &self.kept
+    }
+
+    /// The ticks stepped so far.
+    #[must_use]
+    pub fn ticks_run(&self) -> u64 {
+        self.ticks_run
+    }
+
+    /// The checkpoints matched so far.
+    #[must_use]
+    pub fn matched(&self) -> usize {
+        self.matched
+    }
+
+    /// The checkpoints in the replay.
+    #[must_use]
+    pub fn total(&self) -> usize {
+        self.replay.checkpoints.len()
+    }
+
+    /// The frames at which the cap held ticks back.
+    #[must_use]
+    pub fn held_frames(&self) -> u64 {
+        self.held_frames
+    }
+}
+
 /// What acquiring the frame's texture came to.
 enum Acquired {
     Frame(SurfaceTexture, TextureView),
@@ -45,8 +183,66 @@ struct Gfx {
     window: Arc<Window>,
     surface: SurfaceRenderer,
     camera: Camera,
+    mesh: TerrainMesh,
     configured: Option<(u32, u32)>,
     aspect_reported: bool,
+}
+
+/// A replay's run inside the window: the owner of the state, the clock,
+/// and whether the summary line has been written.
+struct Replaying {
+    play: Play,
+    speed: f64,
+    /// Started once the window and the renderer are built, so the time
+    /// they take is never owed as ticks.
+    clock: Option<Instant>,
+    fraction: f64,
+    reported: bool,
+}
+
+impl Replaying {
+    /// Steps what the clock says is due and sets the fraction to draw at;
+    /// writes the summary line when stepping has just stopped.
+    fn advance(&mut self) -> Result<(), RunError> {
+        let Some(start) = self.clock else {
+            return Ok(());
+        };
+        if self.play.finished() {
+            self.fraction = 1.0;
+        } else {
+            let owed = pace(
+                start.elapsed().as_secs_f64(),
+                self.speed,
+                self.play.ticks_run(),
+            );
+            self.play.frame(&owed)?;
+            self.fraction = if self.play.finished() {
+                1.0
+            } else {
+                owed.fraction
+            };
+        }
+        if self.play.finished() {
+            self.report();
+        }
+        Ok(())
+    }
+
+    /// Writes the summary line to stdout, once.
+    fn report(&mut self) {
+        if !self.reported {
+            self.reported = true;
+            println!(
+                "{}",
+                summary_line(
+                    self.play.ticks_run(),
+                    self.play.matched(),
+                    self.play.total(),
+                    self.play.held_frames()
+                )
+            );
+        }
+    }
 }
 
 struct App {
@@ -55,6 +251,7 @@ struct App {
     gfx: Option<Gfx>,
     shift: bool,
     outcome: Option<Result<Outcome, RunError>>,
+    replay: Option<Replaying>,
 }
 
 /// Opens a window on `map` and runs until it closes, `frames` frames have
@@ -73,19 +270,69 @@ pub fn run(
         gfx: None,
         shift: false,
         outcome: None,
+        replay: None,
     };
-    event_loop
-        .run_app(&mut app)
-        .map_err(|error| RunError::Window {
-            reason: error.to_string(),
-        })?;
-    app.outcome.unwrap_or(Ok(Outcome::Closed))
+    drive(event_loop, &mut app)
+}
+
+/// Runs `app` in `event_loop` until it finishes.
+fn drive(event_loop: EventLoop<()>, app: &mut App) -> Result<Outcome, RunError> {
+    event_loop.run_app(app).map_err(|error| RunError::Window {
+        reason: error.to_string(),
+    })?;
+    app.outcome.take().unwrap_or(Ok(Outcome::Closed))
+}
+
+/// Plays `prepared` in a window at `speed` times real time until the window
+/// closes, `frames` frames have been presented, or a step fails.
+///
+/// # Errors
+/// [`RunError`] for the first step that fails.
+pub fn run_replay(
+    event_loop: EventLoop<()>,
+    prepared: Prepared,
+    speed: f64,
+    frames: Option<NonZeroU32>,
+) -> Result<Outcome, RunError> {
+    let Prepared { map, replay, state } = prepared;
+    let mut app = App {
+        map,
+        progress: Progress::new(frames),
+        gfx: None,
+        shift: false,
+        outcome: None,
+        replay: Some(Replaying {
+            play: Play::new(state, replay),
+            speed,
+            clock: None,
+            fraction: 1.0,
+            reported: false,
+        }),
+    };
+    drive(event_loop, &mut app)
+}
+
+/// Hands the renderer the instance list of the replay's state at the
+/// fraction of a tick it is drawn at.
+fn set_scene(replaying: &Replaying, gfx: &mut Gfx) -> Result<(), RunError> {
+    let state = replaying.play.state();
+    let list = instances(
+        state,
+        replaying.play.kept(),
+        replaying.fraction,
+        &state.world().units,
+        &gfx.mesh,
+        gfx.camera.distance(),
+    )?;
+    gfx.surface.renderer.set_instances(&list)?;
+    Ok(())
 }
 
 /// Everything between the window and the first frame, in the order of the
 /// run: the window, the renderer for its surface, the grid fit check against
-/// that renderer's device, the mesh, the water, the camera, the upload.
-fn build(event_loop: &ActiveEventLoop, map: &Map) -> Result<Gfx, RunError> {
+/// that renderer's device, the mesh, the water, the camera, the upload, and,
+/// for a replay, the marker models.
+fn build(event_loop: &ActiveEventLoop, map: &Map, markers: bool) -> Result<Gfx, RunError> {
     let attributes = Window::default_attributes()
         .with_title("SuperCom")
         .with_inner_size(LogicalSize::new(1280.0, 720.0));
@@ -116,10 +363,14 @@ fn build(event_loop: &ActiveEventLoop, map: &Map) -> Result<Gfx, RunError> {
     let size = window.inner_size();
     let camera = Camera::for_mesh(&mesh, crate::frame::aspect((size.width, size.height)))?;
     surface.renderer.upload(&mesh, water.as_ref())?;
+    if markers {
+        surface.renderer.upload_models(&marker_models())?;
+    }
     Ok(Gfx {
         window,
         surface,
         camera,
+        mesh,
         configured: None,
         aspect_reported: false,
     })
@@ -127,6 +378,11 @@ fn build(event_loop: &ActiveEventLoop, map: &Map) -> Result<Gfx, RunError> {
 
 impl App {
     fn finish(&mut self, event_loop: &ActiveEventLoop, result: Result<Outcome, RunError>) {
+        if result.is_ok()
+            && let Some(replaying) = self.replay.as_mut()
+        {
+            replaying.report();
+        }
         if self.outcome.is_none() {
             self.outcome = Some(result);
         }
@@ -198,6 +454,11 @@ impl App {
                 Err(error) => return self.finish(event_loop, Err(error.into())),
             }
         }
+        if let Some(replaying) = self.replay.as_mut()
+            && let Err(error) = replaying.advance()
+        {
+            return self.finish(event_loop, Err(error));
+        }
         let surface = &gfx.surface;
         let acquired = surface.renderer.guarded("frame acquisition", || {
             match surface.surface.get_current_texture() {
@@ -222,6 +483,11 @@ impl App {
                 self.stall(event_loop);
             }
             Ok(Acquired::Frame(frame, view)) => {
+                if let Some(replaying) = &self.replay
+                    && let Err(error) = set_scene(replaying, gfx)
+                {
+                    return self.finish(event_loop, Err(error));
+                }
                 let drawn = gfx.surface.renderer.draw(&gfx.camera, &view, size);
                 let surface = &gfx.surface;
                 let shown = drawn.and_then(|()| {
@@ -249,8 +515,11 @@ impl ApplicationHandler for App {
         if self.gfx.is_some() {
             return;
         }
-        match build(event_loop, &self.map) {
+        match build(event_loop, &self.map, self.replay.is_some()) {
             Ok(gfx) => {
+                if let Some(replaying) = self.replay.as_mut() {
+                    replaying.clock = Some(Instant::now());
+                }
                 gfx.window.request_redraw();
                 self.gfx = Some(gfx);
             }
@@ -284,3 +553,6 @@ impl ApplicationHandler for App {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

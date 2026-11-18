@@ -13,7 +13,11 @@ pipeline's one draw function; its decisions are pure functions of the
 binary, tested without a window. Its fourth part is the models and instances
 the same pipeline draws over the terrain and the water: plain data placed by
 the caller, specified from the checks that refuse them to the pixels they
-leave; what the binary draws with them arrives with its code. Its camera and
+leave. Its fifth part is the replay run, the `replay` subcommand of the same
+binary, which plays a recorded match in the window: the steps before the
+window, the stepping and its comparison with the log's checkpoints, the
+pacing and the interpolation, and what is drawn, every entity and projectile
+as a flat marker over the terrain. Its camera and
 shading are decisions of this project, recorded in
 docs/adr/0016-first-light-renderer.md (the near end of the zoom range in
 docs/adr/0017-units-on-the-map.md): a search of the installed data finds
@@ -34,8 +38,10 @@ fit check before the mesh and REN-040's last, are reached by no test (issue 78
 of https://github.com/tgunnoe/SuperCom); the three installed maps of 4096
 cells a side are refused and not drawn (issue 69); terrain splatting, decals,
 shadows, water effects, fog of war, strategic icons, and
-post-processing are later slices, and the models and instances are specified
-below while what the binary draws with them arrives with its code; and the vertical reading of REN-001 awaits
+post-processing are later slices, and so are unit meshes: the replay run
+draws markers; the frame the replay run's window draws is tried in a nested
+compositor and by a person, while its stepping, its pacing, and its instance
+list are pure and tested without a window; and the vertical reading of REN-001 awaits
 a comparison with the running original, the first look at the result, on
 SCMP_012 and SCMP_016, having raised no mismatch.
 
@@ -199,13 +205,14 @@ The terrain upload MUST leave the model set and the instance list as they were, 
 
 ## The windowed mode
 
-The `supercom` binary gains one subcommand, `view`. Its decisions are pure
-functions in the binary, tested without a window; the one test that opens a
-window runs only when `SUPERCOM_REQUIRE_DISPLAY=1` is set. The names below
-are those of docs/adr/0016-first-light-renderer.md.
+The `supercom` binary gains two subcommands, `view` and, in the replay run
+below, `replay`. Their decisions are pure functions in the binary, tested
+without a window; the tests that open a window run only when
+`SUPERCOM_REQUIRE_DISPLAY=1` is set. The names below are those of
+docs/adr/0016-first-light-renderer.md.
 
 **REN-032** `design` `test:supercom_parse_args_cases`
-The command line MUST be parsed by a pure function of the argument list, before anything else is done, so a usage error is reported whatever the display or the install. No argument MUST be the bare run, which prints the version line and whether the game data was found, exactly as before the windowed mode. `view` MUST take an optional map folder, `SCMP_012` when none is given, and an optional `--frames <n>` with n a positive integer of ASCII digits that fits 32 bits, in either order. The map folder MUST be a single non-empty path component: it contains no `/` or `\` and is neither `.` nor `..`. An argument that begins with `-` is an option, so a map folder never begins with `-`. Any other argument list MUST print the usage to stderr and return the failure code before the install is read. The test parses each accepted form, with the empty list parsing to the bare run, and the rejected ones, among them an unknown option, a repeated `--frames`, two folders, a zero, signed, fractional, or oversized count, and folders with a separator or a dot component (docs/adr/0016-first-light-renderer.md).
+The command line MUST be parsed by a pure function of the argument list, before anything else is done, so a usage error is reported whatever the display or the install. No argument MUST be the bare run, which prints the version line and whether the game data was found, exactly as before the windowed mode. `view` MUST take an optional map folder, `SCMP_012` when none is given, and an optional `--frames <n>` with n a positive integer of ASCII digits that fits 32 bits, in either order. The map folder MUST be a single non-empty path component: it contains no `/` or `\` and is neither `.` nor `..`. An argument that begins with `-` is an option, so a map folder never begins with `-`. `replay` MUST take one file path, required, and an optional `--speed <x>` and an optional `--frames <n>` as for `view`, in any order; the path is a non-empty argument that does not begin with `-`; the speed is written as one or more ASCII digits, optionally followed by a point and one or more ASCII digits, with no sign and no exponent, and lies from 0.1 to 10 inclusive, and is 1 when absent. An option given twice, a second path, a missing path, a missing value, or a speed outside the bounds is a usage error. Any other argument list MUST print the usage to stderr and return the failure code before the install is read. Every argument list accepted before `replay` was added parses as before, and every list rejected before still fails unless it begins with `replay`. The test parses each accepted form, with the empty list parsing to the bare run, and the rejected ones, among them an unknown option, a repeated `--frames`, two folders, a zero, signed, fractional, or oversized count, and folders with a separator or a dot component; for `replay` it parses the forms in each order, the speeds 0.1 and 10 as the bounds, and rejects 0.09 and 10.01 as just past them, a signed, exponent, empty, or doubly pointed speed, and each of the usage errors above (docs/adr/0016-first-light-renderer.md and docs/adr/0017-units-on-the-map.md).
 
 **REN-033** `design` `test:supercom_view_without_display_fails_cleanly`
 `view` MUST create the window system's event loop first, before the install is read. Where no display exists the creation fails, and the binary MUST then print to stderr a message that says no display is available and names `WAYLAND_DISPLAY`, `WAYLAND_SOCKET`, and `DISPLAY`, the variables the window system reads, and return the failure code without panicking. On Linux, the one platform where a display is found only through those variables, the test runs the built binary with `view` and those three variables removed from its environment and expects exit code 1, the message, and no mention of the install, which it points at a path that does not exist (docs/adr/0016-first-light-renderer.md).
@@ -236,3 +243,75 @@ The renderer MUST offer a public way to run a caller's wgpu calls inside its val
 
 **REN-042** `design` `test:render_steep_terrain_is_an_error`
 Building the terrain MUST return an error value, and MUST NOT panic, for a map whose slope leaves a vertex normal that is not a finite vector of unit length, either because an elevation difference is so large that its square overflows or because the cell is so small that the slope does. The test builds one map of each kind and a gentle map that still builds (docs/adr/0016-first-light-renderer.md).
+
+## The replay run
+
+The `supercom` binary's second subcommand, `replay <file>`, plays a recorded
+match in the window. It loads the world the log's header names, checks the log
+against it, steps the simulation at ten ticks a second of wall time times the
+speed, compares every checkpoint as it goes, and draws every entity and
+projectile each frame as a flat marker over the terrain. Unit meshes are the
+next slice: here everything is a marker. The binary reads the simulation
+through its public surface only. The decisions are pure functions in the
+binary, each tested without a window, except the clauses that name a display.
+The record is docs/adr/0017-units-on-the-map.md.
+
+**REN-057** `design` `test:supercom_prepare_replay_failures`
+A run of `replay` MUST proceed in this order: the display (REN-058), the install, resolved as the bare run resolves it, the replay file and its parse, the map folder the replay's header names, held to REN-032's single-component rule, the cache directory (REN-059), the world, loaded from the install into that directory, the content check and the start state, which are the check the simulation's replay start makes of the header's content digests against the world and the skirmish it then starts, the map file and its parse as REN-035 has them for `view`, and then the window, what `view` builds, the marker models (REN-071), and the loop. A replay with no checkpoint MUST be refused after its parse, since the run would have no end. Every step before the window MUST be one function of the install directory, the file, and the cache variables, returning the parsed map, the replay, and the start state or an error value whose text names the failing step, and each failure MUST end the run with its text on stderr and the failure code. The test creates directories under the system's temporary directory, removes them, and expects the failure of each step that needs no installed game: an unresolved install, a missing install, an unreadable file, a file that does not parse, a replay with no checkpoint, a header map folder that is not a single component, an unresolved cache directory, a relative one, and a world that cannot be loaded from an install holding nothing (docs/adr/0017-units-on-the-map.md).
+
+**REN-058** `design` `test:supercom_replay_without_display_fails_cleanly`
+`replay` MUST create the window system's event loop first, as REN-033 has it for `view`, after the command line is parsed and before the install or the replay file is read. Where no display exists it MUST print the message of REN-033 to stderr and return the failure code without panicking, and a usage error MUST be reported whatever the display. On Linux the test runs the built binary with `replay` and a path that does not exist, the install pointed at a path that does not exist, and the three display variables removed, and expects exit code 1, the message naming the three variables, and no mention of either path; and runs it with a speed past the bound and expects the usage and no display message (docs/adr/0017-units-on-the-map.md).
+
+**REN-059** `design` `test:supercom_cache_dir_cases`
+The directory the world's importer caches into MUST be a pure function of three environment values, each of which counts as unset when it is empty: `SUPERCOM_CACHE_DIR`, which names the directory itself; else `XDG_CACHE_HOME` joined with `supercom`; else the home directory joined with `.cache/supercom`. A directory that is not an absolute path from any of them MUST be refused, and so MUST an environment that names none; nothing falls back to the working directory. The binary does not create the directory: the importer does when it is missing. The test passes each case and expects the literal path, the first rule winning over the others and an empty value falling through, and expects the refusal of a relative path from each of the three and of an environment with none (docs/adr/0017-units-on-the-map.md).
+
+**REN-060** `design` `test:supercom_checkpoint_verdict_cases`
+The comparison of a step with the log MUST be a pure function of a tick, the digest the step run at that tick returned, and the checkpoint list, under the committed rule: the checkpoint at tick t is compared with the digest returned by the step run while the state's tick was t, the t-th digest of the simulation's own replay run. It MUST answer a match, no checkpoint at this tick, or a mismatch naming the tick. The test expects each answer on a list of three checkpoints, a digest differing in its last byte, and ticks before, between, and after the checkpoints (docs/adr/0017-units-on-the-map.md).
+
+**REN-061** `design` `test:supercom_stop_rule_ends_at_the_last_checkpoint`
+Stepping MUST stop after the step run at the last checkpoint's tick: a step is taken at tick t only when t is not past that tick, so a log whose last checkpoint is at tick L takes L + 1 steps, and a log with no checkpoint takes none. The test expects the answer at the ticks 0, L - 1, L, and L + 1 and on an empty list (docs/adr/0017-units-on-the-map.md).
+
+**REN-062** `design` `test:conformance_replay_loop_matches_the_committed_log`
+The binary's own stepping loop, one owner of the state, MUST over the committed log crates/replay-harness/fixtures/skirmish_scmp_012.replay take 4,600 steps, match all 46 of its checkpoints, and return digests equal to those the simulation's replay run returns for the same log, so that their first divergence is none. The test reads the log by a path built from `CARGO_MANIFEST_DIR`, imports the world into a fresh directory under the system's temporary directory, and needs the install (docs/adr/0017-units-on-the-map.md).
+
+**REN-063** `design` `test:conformance_replay_loop_names_the_tick_of_a_wrong_checkpoint`
+A digest that differs from its checkpoint MUST end the stepping at once with an error value naming the tick and ending the run with the failure code, with no step after it and no summary line (REN-073). The test changes the digest of the checkpoint at tick 99 of the committed log, steps, and expects the error naming tick 99 on the hundredth step and no checkpoint matched before it (docs/adr/0017-units-on-the-map.md).
+
+**REN-064** `design` `test:supercom_pacing_cases`
+Pacing MUST be a pure function of the elapsed wall time in seconds since the run's clock started, the speed, and the ticks already run. The ticks owed are floor(elapsed times speed times 10) less the ticks run, never below zero; the ticks due in a frame are the owed ticks capped at 10; the ticks held back are the owed ticks less the due ones; and the fraction is the part of elapsed times speed times 10 after its floor. A time or a speed that is not finite or is negative owes nothing. Ticks held back stay owed and are stepped on later frames: the clock is never re-based. The speed's bounds, 0.1 to 10, are REN-032's. The test pins literals: nothing owed at time 0; 0.25 s at speed 1 gives 2 due and a fraction of 0.5; 1 s at speed 2 gives 10 due and 10 held back; the same with 10 ticks run gives 10 due and none held back; a speed of 0.1 over 10 s gives 10 due and none held; and a NaN, an infinite, and a negative time or speed owe nothing (docs/adr/0017-units-on-the-map.md).
+
+**REN-065** `design` `test:supercom_interpolation_cases`
+Interpolation MUST span exactly one tick: a drawn position is the kept position plus the difference between the current and the kept position times the fraction of REN-064, componentwise, and a drawn heading is the kept heading plus the difference taken the short way round, the difference wrapped into the half-open range from minus pi to pi, times the fraction. The kept values are those of every entity and projectile as they were before the last step taken in the frame; a frame that steps no tick keeps the values it had while the fraction advances; an entity or a projectile with no kept value is drawn at its current values. The test pins a position blend, a heading blend across the wrap with the literal 3.0 to -2.5 at one half giving 3.391592653589793, a blend with no wrap, and the keeping of a state's values by id (docs/adr/0017-units-on-the-map.md).
+
+**REN-066** `design` `test:supercom_scene_instances_cases`
+What is drawn MUST be one pure function of the state, the kept values, the fraction, the world's kinds, the terrain mesh, and the camera's distance, returning the instance list: one instance for every entity in the state, in id order, then one for every projectile, in id order, each flat, placed by the renderer's placement function at its interpolated position and heading with a yaw of 0 and the scale of REN-068, in the colour of REN-067. An entity the state no longer holds is not drawn; a projectile is interpolated by its id under the same rule as an entity. The marker model of an entity is the commander's when its kind's categories hold the string `COMMAND`, else the mobile one when its kind's motion is not none, else the static one; a blueprint the world does not know is drawn as a complete kind that does not move and is 1 world unit across; a projectile uses the projectile model. Nothing is drawn lit. The test builds a state of known kinds and expects the model, the colour, the transform, and the order of each instance, a removed entity absent, and an unknown blueprint (docs/adr/0017-units-on-the-map.md).
+
+**REN-067** `design` `test:supercom_scene_colours_and_dimming`
+Each army's colour MUST be an entry of a table of eight linear colours, every channel from 0 to 1: (0.9, 0.1, 0.1), (0.1, 0.3, 0.9), (0.1, 0.7, 0.2), (0.9, 0.8, 0.1), (0.6, 0.1, 0.8), (0.1, 0.8, 0.8), (0.9, 0.5, 0.1), and (0.9, 0.9, 0.9); army n takes entry (n - 1) mod 8, and army 0 takes the first. An entity that is not complete, of a kind the world knows, MUST be drawn in its army's colour times 0.4 plus 0.6 times its build progress, the progress being the simulation's, from 0 to 1; a complete entity is not dimmed. A projectile is drawn in the colour (1.0, 0.95, 0.5), undimmed. The test pins the table's entries, the repeat of army 9 as army 1, army 0, and the dimming at progress 0, one half, and a complete entity (docs/adr/0017-units-on-the-map.md).
+
+**REN-068** `design` `test:supercom_marker_size_cases`
+A marker's size in world units MUST be the larger of the unit's own size and 0.02 times the camera's distance, so that a marker does not shrink below a share of the view at the strategic zoom; the unit's own size is the larger side of the kind's footprint, with a missing footprint read as 1. A projectile's marker is 0.5 world units across at every distance. The test pins literals at both ends of the zoom range of REN-010, 8 and 309.02, the far end for a square map 256 units a side at an aspect of 1 (128 divided by the tangent of 22.5 degrees), for a footprint of 1 and of 8 (docs/adr/0017-units-on-the-map.md).
+
+**REN-069** `design` `test:render_terrain_height_follows_the_split_of_a_cell`
+The renderer MUST give the height of the drawn terrain under a point as a pure function of the terrain mesh, a method of the mesh: the height of the surface of the two triangles of the cell holding the point, split as REN-003 has it from the north-east vertex to the south-west one, interpolated linearly within the triangle, and no height for a point outside the extent from 0 to the mesh's width along x and from 0 to its height along z, edges included, or for a coordinate that is not finite. The test pins literals on a sloped cell on each side of the diagonal, on the diagonal, at a vertex, on the far edge, and outside (docs/adr/0017-units-on-the-map.md).
+
+**REN-070** `design` `test:supercom_scene_height_by_layer`
+An entity on the land or the seabed layer MUST be drawn at the height of the drawn terrain under its interpolated x and z (REN-069); every other entity, and an entity outside the terrain's extent, at its interpolated y from the simulation; a projectile at its interpolated y. This departs from the simulation's y for the land and the seabed by design: the simulation's y is the height of the cell the entity stands in, while the drawn surface is the triangles of the mesh, which an entity's marker must not sink into or hover over. The test pins one entity of each layer on a sloped cell (docs/adr/0017-units-on-the-map.md).
+
+**REN-071** `design` `test:supercom_marker_models_cases`
+The binary MUST build four marker models by pure functions: a static one, a mobile one, a commander's, and a projectile's, in this order as models 0 to 3. Each lies in the plane y = 0, has the normal (0, 1, 0) at every vertex, is wound counter-clockwise seen from above, and passes the renderer's model check; they differ from one another; the mobile model, a triangle, and the commander's, a dart, point along the model's +x, their farthest vertex lying on the +x axis, so that a placement with yaw 0 shows the heading; the static one is a square and the projectile's a narrow rhombus. The test pins the vertex counts and the pointed vertex and checks the winding of every triangle (docs/adr/0017-units-on-the-map.md).
+
+**REN-072** `design` `test:supercom_summary_line_text`
+The run's summary line MUST be a pure function of the ticks run, the checkpoints matched, the checkpoints in the log, and the count of frames at which the cap of REN-064 held ticks back, and read `replayed <ticks> ticks, <matched> of <total> checkpoints matched, <held> frames held back`. The test pins the text for the committed log's end, 4600, 46 of 46, and 0, and for a run cut short (docs/adr/0017-units-on-the-map.md).
+
+**REN-073** `design` `test:conformance_window_replay_prints_summary_then_frames`
+When the step run at the last checkpoint's tick has run, stepping MUST stop and the window stay open on the final state, and the summary line of REN-072 MUST be written once to stdout, at that moment; a run that ends sooner, by the window's closing or by `--frames <n>`, MUST write it once at its end, as far as it got. With `--frames <n>` the run MUST present n frames, whether or not the log has finished, write the summary line, then `presented <n> frames`, and return the success code. A mismatch (REN-063) ends the run with the failure code and writes no summary line. The test runs the built binary on the committed log with `--frames 3` and a fresh cache directory, only when `SUPERCOM_REQUIRE_DISPLAY=1` is set, with the environment it inherits, so it is run only inside a nested compositor that shows nothing; without the flag it prints `SKIP: <reason>` and passes; with the flag and no install it fails; it waits at most two minutes and then kills the binary and fails. It expects one summary line, immediately before the line `presented 3 frames` which is the last (docs/adr/0017-units-on-the-map.md).
+
+**REN-074** `design` `test:conformance_gpu_replay_start_draws_each_commander_in_its_army_colour`
+At the start state of the committed log, with the instance list of REN-066 at the strategic view, the camera the renderer builds for the map's terrain at an aspect of 1, the frame drawn offscreen into a square target, the pixel each commander's drawn position projects to MUST hold its army's colour of REN-067, encoded with the target's transfer function, within 2 in 255 per channel, and the two commanders' pixels MUST differ. The test needs an adapter and the install, and expects the projected positions from the camera's own matrix, which is not under test (docs/adr/0017-units-on-the-map.md).
+
+**REN-075** `design` `test:conformance_prepare_replay_checks_content_then_starts`
+The steps before the window MUST succeed on the committed log and the installed game, returning the start state at tick 0 with the two commanders the log's two players start with, the replay with its 46 checkpoints, and the parsed map of 256 by 256 cells; and MUST refuse a log whose header's map digest differs, as an error value whose text names the content check and the start state, before the map file is parsed. The test imports into a fresh directory under the system's temporary directory (docs/adr/0017-units-on-the-map.md).
+
+**REN-076** `design` `test:supercom_play_counts_held_frames_and_stops_at_the_last_checkpoint`
+The one owner of the state MUST, each frame, take the ticks REN-064 says are due, in order, one step each, stop after the last checkpoint's tick, and count each frame at which the cap held ticks back, once, while stepping has not stopped; it reports the ticks run, the checkpoints matched, and that count. Ticks held back are stepped by later frames. The test steps a state of an empty world whose checkpoints it computed from its own copy of the state, over frames of 3 due and 2 held back, and expects the counts after each frame and after the last (docs/adr/0017-units-on-the-map.md).

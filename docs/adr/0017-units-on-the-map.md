@@ -92,6 +92,110 @@ REN-056); this record is the source each names.
   +x lies to the right of the frame at heading 0 and toward its bottom at
   heading pi/2, which ties the placement's sign to what a person sees.
 
+- **The replay run as its own subcommand, and the order of its steps (REN-032,
+  REN-057, REN-058).** `supercom replay <file> [--speed <x>] [--frames <n>]`
+  plays a recorded match; `view` is unchanged. The run is the display first, as
+  `view` has it, then the install, the replay file and its parse, the map folder
+  the header names, the cache directory, the world, the content check and the
+  start state, the map file and its parse, and then the window. Ground: each
+  step needs the one before it; the cheap checks go first, and the display
+  before any file is read keeps a headless host's failure free of everything
+  else, as for `view`. The header's map folder is held to REN-032's
+  single-component rule because the header is read from a file that a person
+  supplied, and an unchecked folder name would walk out of the install's `maps`
+  directory. A replay with no checkpoint is refused, since the stop rule would
+  give it no end. Every step before the window is one function whose failures
+  are error values naming the step, so a headless test reaches all of them but
+  the last two.
+- **The cache directory's rule (REN-059).** The importer's cache is
+  `SUPERCOM_CACHE_DIR` itself, else `XDG_CACHE_HOME` joined with `supercom`,
+  else the home directory joined with `.cache/supercom`; an empty value counts
+  as unset, a relative result is refused, and an environment that names none is
+  refused. Ground: a cache directory chosen from the working directory would
+  write inside whatever repository the person ran the binary from, and a cache
+  is state the person never asked to see; the rule is a pure function of three
+  values so a test passes the values and never touches the real environment. The
+  importer creates a missing directory, so the binary does not.
+- **One owner of the state, and the comparison by the committed rule (REN-060,
+  REN-061, REN-062, REN-063, REN-075, REN-076).** Exactly one module of the
+  binary, the window's, holds a mutable state, with the kept values and the
+  counters beside it; every other module reads the state through a shared
+  reference. The comparison is a pure function of a tick, the digest of the step
+  run at that tick, and the checkpoint list, under the rule the committed log is
+  held to: the checkpoint at tick t is the t-th digest of the simulation's own
+  replay run. The stop rule takes exactly the log's last checkpoint tick plus
+  one steps. Ground: two oracles for the stepping, the committed rule and the
+  simulation's own run, which the conformance test sets against each other; a
+  second place that could step the state would be a second place for the two to
+  diverge. A mismatch stops the run at once with the tick named, because every
+  later digest chains from the wrong one.
+- **Pacing that keeps held ticks due and counts the frames that held them
+  (REN-064, REN-076).** The ticks owed are the whole ticks of the elapsed wall
+  time times the speed times ten, less the ticks already run; a frame steps at
+  most 10 of them, and the rest stay owed for later frames. The clock is never
+  re-based, so a slow frame is never forgiven: the run's last line counts the
+  frames at which ticks were held back. Ground: a pacing that dropped the ticks
+  it could not step would hide a machine that cannot hold the tick behind a run
+  that looks smooth, and holding the tick is the one timing fact the run
+  reports. The cap bounds one frame's work to a second of match time at speed 1,
+  so a stalled window cannot make the next frame step minutes of match time
+  before drawing. The speed's bounds are 0.1 to 10,
+  this project's choice: below 0.1 a tick lasts a second or more of wall
+  time, and at 10 a frame owes a tick and two thirds at 60 frames a second,
+  so the cap holds ticks back only on a frame slower than a tenth of a second.
+- **Interpolation over one tick (REN-065).** A frame draws between the values
+  before the last step taken in it and the values after it, by the fraction of a
+  tick left over; headings take the short arc. An entity with no value from
+  before is drawn where it is, and a frame that steps nothing keeps its values,
+  so an entity that has just been created does not swing in from the origin.
+  Ground: at 10 ticks a second, a marker that jumps once a tick looks like a
+  stutter at 60 frames a second, and interpolating over one tick adds no latency
+  beyond it.
+- **Markers as flat instances, and what tells the four shapes apart (REN-066,
+  REN-068, REN-071).** Every entity and projectile is one flat instance of one
+  of four models: a square for a kind that does not move, a triangle for a
+  mobile unit, a dart for a commander, and a narrow rhombus for a projectile,
+  the triangle and the dart pointing along the model's +x so that a heading
+  shows. Ground: the flat style is never hidden by terrain, which a marker
+  standing for a unit must not be (REN-048); four silhouettes tell the classes
+  apart with no colour, so a colour-blind person reads them too. A marker is at
+  least 0.02 of the camera's distance across, so a unit one world unit across is
+  not lost at the strategic zoom, where the distance is 309.02 on a square map
+  256 units a side and a kind's own size is under 1 percent of the view.
+- **The colours and the dimming (REN-067).** Army n takes entry n minus one of a
+  table of eight linear colours and the table repeats; an unfinished entity is
+  dimmed by 0.4 plus 0.6 times its build progress. Ground: the colours are
+  chosen to stay apart on the terrain's ramp and on water, not to match the
+  original's team colours, which arrive with the unit shading; dimming by
+  progress shows a building going up at no cost, and the floor of 0.4 keeps a
+  just-begun unit visible.
+- **The drawn height from the terrain's surface, and why it departs from the
+  simulation's y (REN-069, REN-070).** An entity on the land or the seabed is
+  drawn at the height of the drawn terrain under it, which the renderer gives as
+  a pure function of its mesh, using the mesh's own split of a cell; every other
+  entity is drawn at the simulation's y. Ground: the simulation's y for a ground
+  unit is the height of the cell it stands in, a step function of the position,
+  while the drawn surface is the mesh's triangles; a marker at the cell's height
+  would sink into a slope or hover over it by up to the slope's rise across a
+  cell. The renderer holds the split, so the binary does not restate it. An
+  entity outside the extent keeps the simulation's y.
+- **The end of a run (REN-072, REN-073).** When the step at the last
+  checkpoint's tick has run, stepping stops and the window stays open on the
+  final state; the summary line gives the ticks run, the checkpoints matched out
+  of how many, and the frames that held ticks back, and is written once, when
+  stepping stops or, if the run ends sooner, when it ends. With `--frames <n>`
+  the run ends after n frames, writes the summary, prints
+  `presented <n> frames`, and succeeds, as `view` does. Ground: the line is
+  the run's evidence for a person and for a script; writing it at the moment
+  stepping stops puts it in front of a person watching the window.
+- **One pixel test of the whole path (REN-074).** The start state of the
+  committed log, the instance list at the strategic view, drawn offscreen, and
+  the pixel of each commander's drawn position read back. Ground: every pure
+  function of the unit is tested alone, and the frame is the one place their
+  composition shows; two armies' colours at two projected points catch a swapped
+  colour, a wrong model index, and a transform in the wrong space, none of which
+  a test of one function sees.
+
 ## Extensions of the first-light record
 
 - **The near end of the zoom range is 8 world units where
@@ -113,12 +217,30 @@ REN-056); this record is the source each names.
   valid, and REN-023's fixture is adapted so that the east and the west still
   differ at the nearer end.
 
+- **REN-032's command line gains `replay`.** The first-light record's command
+  line, `view` with a folder and `--frames`, is extended by `replay <file>` with
+  `--speed <x>` and `--frames <n>`; every list accepted before parses as before,
+  and every list rejected before still fails unless it begins with `replay`.
+- **The binary now depends on the simulation's crates.** The first-light record
+  says the binary depends on no loader or simulation crate (REN-034's ground).
+  The replay run needs the simulation and the ingest that builds its world, so
+  the binary's manifest gains `supercom-sim` and `supercom-sim-ingest` and
+  nothing else; the rest of that record's ground for the map file's rule stands,
+  since `view` still re-implements the lookup. Through `supercom-sim-ingest`
+  the binary now also builds `supercom-scd`, `supercom-bp`,
+  `supercom-bp-import`, `supercom-data`, and the Nickel evaluator
+  `nickel-lang-core`. The binary never names the archive, mesh, or blueprint
+  loaders in this unit, and never depends on the replay harness or the
+  plugin host.
+
 ## Consequences
 
 - The renderer's public surface grows by one model type, one instance type,
   one style type, six pure functions, the model shader's source function,
-  three constants for the byte counts, and two operations on the renderer; the
-  draw function and the terrain upload are unchanged.
+  one constant for an instance's byte count, one method of the terrain mesh
+  that gives the drawn height under a point, and two operations on the
+  renderer; the draw function and the terrain upload are unchanged. A model's
+  vertex and index byte counts are the terrain's own constants.
 - The binary can place anything it can describe as a model, in a colour,
   without the renderer changing. Models from the installed game's meshes, the
   team colours, and what the binary draws arrive with their own records.

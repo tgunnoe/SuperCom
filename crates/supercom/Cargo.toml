@@ -12,9 +12,11 @@ version      = { workspace = true }
 workspace = true
 
 [dependencies]
-supercom-render = { path = "../render", version = "0.0.1" }
-supercom-scmap  = { path = "../scmap", version = "0.0.1" }
-winit           = "0.30"
+supercom-render     = { path = "../render", version = "0.0.1" }
+supercom-scmap      = { path = "../scmap", version = "0.0.1" }
+supercom-sim        = { path = "../sim", version = "0.0.1" }
+supercom-sim-ingest = { path = "../sim-ingest", version = "0.0.1" }
+winit               = "0.30"
 
 [dev-dependencies]
 supercom-testkit = { path = "../testkit", version = "0.0.1" }
