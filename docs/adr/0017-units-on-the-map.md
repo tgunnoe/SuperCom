@@ -213,38 +213,44 @@ REN-056); this record is the source each names.
   mesh's +z to the unit's heading, with the blueprint's `Display.UniformScale`
   and no other change: no mirror, axis swap, winding reversal, rest transform,
   bone, `rest_pose_inverse`, tangent, or binormal. This is this project's
-  choice. The measurements of the five kinds in the committed log (+y up,
-  winding counter-clockwise from outside, the Muzzle bones forward at +z, and
-  the vertices nearer their bones' places than the origin) are consistent with
-  it, and the stored positions are drawn as the rest pose as this project's
-  reading of them. No record states a side of a unit or a handedness.
-- **The kinds a replay names are resolved before the window (REN-082, REN-083,
-  REN-084, REN-085).** Each header player's commander and every build order's
-  blueprint, keyed in ASCII lower case, give the kinds; each is read through
-  `supercom-scd`, `supercom-scm`, and `supercom-bp` and refused with an error
-  value naming the kind and the step. Ground: a mesh that fails to load must not
-  appear as a blank unit minutes into a run, and the model set is uploaded once,
-  so every kind must be known before the loop. The simulation's own parse of a
-  faction's name is private, so the binary matches the four names itself; the
-  start state has refused any other.
-- **The renderer refuses a normal shorter than 1e-6 (REN-086).** The meshes
-  of UXB0008 and UXB0009 hold vertices whose normal is shorter than that, so a
-  run that names either ends at the model check. Mending installed normals is
-  not done here. Ground: a zero normal lights as black or as noise, and a
+  choice. Of the five kinds in the committed log, all five have +y up and their
+  triangles wound counter-clockwise from outside;
+  the three with a Muzzle bone have it forward, at +z; and
+  of the 50 bones counted for the rest pose, 48 have their vertices nearer the
+  bone's place than the origin (19 of 19, 18 of 18, 9 of 11, and 2 of 2, none
+  counted in urb1101). These are consistent with it, and the stored positions
+  are drawn as the rest pose as this project's reading of them. No record states
+  a side of a unit or a handedness.
+- **The kinds of the start state and the build orders are resolved before the
+  window (REN-082, REN-083, REN-084, REN-085).** The kinds are the blueprints of
+  the start state's entities and of every build order, keyed in ASCII lower
+  case. Each kind's mesh and scale are read through `supercom-scd`,
+  `supercom-scm`, and `supercom-bp`, and a kind that fails to resolve ends the
+  run with an error value naming the kind and the step. Ground: a mesh that
+  fails to load must not appear as a blank unit minutes into a run, and the
+  model set is uploaded once, so every kind must be known before the loop.
+  Taking the kinds from the start state
+  leaves the faction's name to the simulation, which alone parses it, and covers
+  whatever the start state places.
+- **The renderer refuses a normal shorter than 1e-6 (REN-086).** The meshes of
+  UXB0008 and UXB0009 hold vertices whose normal is shorter than that, so a run
+  whose kinds include either ends at the model check. Mending installed normals
+  is not done here. Ground: a zero normal lights as black or as noise, and a
   refusal at the check is a value, where the shader would hide it.
 - **Mesh or marker by one pure rule (REN-087, REN-088, REN-090).** A unit is
   drawn as its lit mesh when the camera is at most 50 times its own size away,
-  and as its marker otherwise, never both. Ground: the marker's size floor is
-  2 per cent of the camera's distance (REN-068), so beyond 50 times its size a
-  unit is already drawn larger than itself; the mesh takes over where it would
-  be at least as large as the marker. The close-zoom pixel test shows the
+  and as its marker otherwise, never both. Ground: the marker's size floor is 2
+  per cent of the camera's distance (REN-068), so beyond 50 times its size a
+  unit is already drawn larger than itself; within 50 times its own size the
+  floor does not bind, and the mesh takes over at the distance
+  where the marker stops being enlarged. The close-zoom pixel test shows the
   mesh lit by the other frames it must not equal: flat, absent, recoloured.
-- **Kinds met but not named are markers, and are counted (REN-089, REN-091,
-  REN-072).** A unit of a kind the replay did not name is drawn as its marker
-  at every zoom, and the run's last line counts such kinds. The committed log
-  names five kinds and meets no other, so its line ends `0 kinds drawn as
-markers`. The windowed test plays it at ten times the speed and expects one
-  summary line, which answers the lead maintainer's question on that line.
+- **Kinds met but not resolved are markers, and are counted (REN-089, REN-091,
+  REN-072).** A unit of a kind the run did not resolve is drawn as its marker at
+  every zoom, and the run's last line counts such kinds. The committed log names
+  five kinds and meets no other, so its summary line ends
+  `0 kinds drawn as markers`. The windowed test plays it at ten times the speed
+  and expects exactly one summary line.
 - **The census is this choice's known limit.** Of the 230 unit meshes with a
   Muzzle bone, the counts with a mean z above 0.5, below -0.5, and within 0.5 of
   zero are, by class, land 65, 4, 8; air 27, 6, 5; structure 50, 20, 12; sea 14,
@@ -252,8 +258,10 @@ markers`. The windowed test plays it at ten times the speed and expects one
   mean x is positive and the Right bones' negative in 30, the reverse in 45, and
   neither in 3, so the side names do not say which side is the unit's own; a
   bone's name is matched with regard to case, Muzzle anywhere in it, Left or
-  Right at its start. These are measurements of 2026-11-17 that the suite does
-  not re-run; the suite pins only the five kinds of the committed log.
+  Right at its start. These bone counts are measurements of 2026-11-17 that the
+  suite does not re-run; it pins the bones only for the five kinds of the
+  committed log, while FMT-060's test re-runs the census of the vectors over
+  every mesh.
 
 ## Extensions of the first-light record
 
