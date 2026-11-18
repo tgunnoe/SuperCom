@@ -10,8 +10,13 @@ through wgpu; it needs an adapter but no window, and its tests draw
 offscreen. Its third part is the windowed mode, the `view` subcommand of the
 `supercom` binary, which opens a window on an installed map and calls the
 pipeline's one draw function; its decisions are pure functions of the
-binary, tested without a window. Its camera and shading are decisions of this project, recorded
-in docs/adr/0016-first-light-renderer.md: a search of the installed data finds
+binary, tested without a window. Its fourth part is the models and instances
+the same pipeline draws over the terrain and the water: plain data placed by
+the caller, specified from the checks that refuse them to the pixels they
+leave; what the binary draws with them arrives with its code. Its camera and
+shading are decisions of this project, recorded in
+docs/adr/0016-first-light-renderer.md (the near end of the zoom range in
+docs/adr/0017-units-on-the-map.md): a search of the installed data finds
 no number for a world camera's field of view, clip planes, or zoom limits, so
 no clause below says how the original behaves.
 
@@ -28,8 +33,9 @@ https://github.com/tgunnoe/SuperCom); two sentences, REN-035's order of the
 fit check before the mesh and REN-040's last, are reached by no test (issue 78
 of https://github.com/tgunnoe/SuperCom); the three installed maps of 4096
 cells a side are refused and not drawn (issue 69); terrain splatting, decals,
-shadows, water effects, units, fog of war, strategic icons, and
-post-processing are later slices; and the vertical reading of REN-001 awaits
+shadows, water effects, fog of war, strategic icons, and
+post-processing are later slices, and the models and instances are specified
+below while what the binary draws with them arrives with its code; and the vertical reading of REN-001 awaits
 a comparison with the running original, the first look at the result, on
 SCMP_012 and SCMP_016, having raised no mismatch.
 
@@ -67,7 +73,7 @@ The water plane MUST be one quad, facing up, at the stored surface elevation, sp
 The camera's view-projection MUST project the camera's target to the centre of the screen; the target MUST lie on the horizontal plane at the map's highest vertex elevation, and the eye MUST never be below that plane. The vertical field of view is 45 degrees, a choice of this project (docs/adr/0016-first-light-renderer.md).
 
 **REN-010** `design` `test:render_zoom_range_far_end_is_the_strategic_view`
-The zoom range MUST be a distance interval, serving the continuous tactical-to-strategic zoom HUD-011 of docs/specs/ui.md requires. Its far end MUST be the smallest distance at which, looking straight down with the target at the map's centre, the whole map extent on the target's plane is inside the view for the given aspect ratio (the strategic view); inside the view means clip-space x and y no larger than w in magnitude, compared with a relative tolerance of 1e-4, because at the far end the extent's corners lie on the screen's edge by construction. Its near end MUST be 40 world units. Zooming MUST clamp to the range, the distance MUST be continuous within it, and one step MUST move the distance by 0.02 of the range at normal speed and 0.08 at fast speed, a positive number of steps zooming toward the strategic end and a fractional number zooming by that fraction of a step (docs/adr/0016-first-light-renderer.md).
+The zoom range MUST be a distance interval, serving the continuous tactical-to-strategic zoom HUD-011 of docs/specs/ui.md requires. Its far end MUST be the smallest distance at which, looking straight down with the target at the map's centre, the whole map extent on the target's plane is inside the view for the given aspect ratio (the strategic view); inside the view means clip-space x and y no larger than w in magnitude, compared with a relative tolerance of 1e-4, because at the far end the extent's corners lie on the screen's edge by construction. Its near end MUST be 8 world units. Zooming MUST clamp to the range, the distance MUST be continuous within it, and one step MUST move the distance by 0.02 of the range at normal speed and 0.08 at fast speed, a positive number of steps zooming toward the strategic end and a fractional number zooming by that fraction of a step (docs/adr/0016-first-light-renderer.md, docs/adr/0017-units-on-the-map.md).
 
 **REN-011** `design` `test:render_zoom_out_from_a_corner_shows_the_whole_extent`
 At the far end of the zoom range the whole extent MUST be in view, whatever the target was before zooming out, so HUD-011 of docs/specs/ui.md always has its strategic view. The target's clamp narrows with the distance (REN-013) and is the map's centre at the far end, so zooming out moves a target toward the centre. The test zooms out by steps from a target at each corner to the far end and expects the extent's four corners, at the highest vertex elevation, to project inside the screen, and expects that at a distance one percent smaller, with the target at the centre, at least one corner does not (docs/adr/0016-first-light-renderer.md).
@@ -141,6 +147,55 @@ At the strategic view of the installed map SCMP_012, drawn into a square target,
 
 **REN-031** `game-data` `test:conformance_gpu_installed_wet_map_shows_its_water_share`
 At the strategic view of the installed map SCMP_016, drawn into a square target, the water's colour MUST cover a fraction of the pixels that are not the clear colour within 0.03 of 0.095. The heightmap's share of samples at or below the stored water elevation 17.5 is 0.0954, and only 17 of its 66,049 samples sit exactly at that elevation, so ties in depth do not move the fraction.
+
+## Models and instances
+
+The renderer draws models: plain positions, normals, and triangle indices, and
+instances of them, each a model's index in the uploaded set, a transform, a
+colour, and a style. It knows nothing of what a model depicts. The names are
+those of docs/adr/0017-units-on-the-map.md.
+
+**REN-043** `design` `test:render_model_check_refuses_each_malformed_model`
+A model MUST be positions and normals of equal count and 32-bit triangle indices, three to a triangle, in the terrain's own vertex layout (REN-024: a position then a normal, 24 bytes). The pure check of a model, made before any buffer exists, MUST return an error value, each its own and each naming the model's index in its set, for a model with no vertex or no index, for unequal position and normal counts, for an index count that is not a multiple of three, for an index at or past the vertex count, and for a position or a normal that is not finite, checked in that order. The test checks one model of each kind and a well-formed one (docs/adr/0017-units-on-the-map.md).
+
+**REN-044** `design` `test:conformance_gpu_model_upload_replaces_the_set_and_a_refusal_changes_nothing`
+Uploading a set of models MUST run the check of REN-043 and the fit of REN-045 on every model before it creates any buffer. A set that uploads MUST replace the set before it and empty the instance list; a set that is refused MUST leave the set and the list as they were. The test uploads a set and a list and draws, then uploads sets with one malformed model of each kind and expects each error, the same frame, and the same set, then uploads a good set and expects the list empty (docs/adr/0017-units-on-the-map.md).
+
+**REN-045** `design` `test:render_model_and_instance_fit_is_a_pure_function_of_counts_and_limits`
+Whether a model's buffers, and an instance list's buffer, fit a device MUST be a pure function of the counts and the device's maximum buffer size given as an integer, computed without overflow and used before any buffer exists, as REN-024 is for the grid. A model's vertex buffer MUST take 24 bytes per vertex and its index buffer 4 bytes per index, and an instance list's buffer 76 bytes per instance, sixteen 32-bit floats of transform and three of colour; a buffer over the size MUST be an error value naming it, the vertex buffer before the index buffer. The test pins each byte count and the boundary at its exact size, and a count that would overflow (docs/adr/0017-units-on-the-map.md).
+
+**REN-046** `design` `test:render_instance_check_refuses_each_bad_instance`
+An instance MUST be a model named by its index in the uploaded set, a column-major transform in the convention of REN-008 taking model space to world space, a linear RGB colour, and a style, lit or flat. Setting the instance list MUST refuse, each as its own error value naming the instance's position in the list, an instance that names no model of the set, a transform with a value that is not finite, and a colour channel that is not finite or lies outside 0 to 1, the first offender in list order; a pure check of a list against the set's model count makes these decisions without a device. The test checks each refusal, the channels 0 and 1 as valid, and the order (docs/adr/0017-units-on-the-map.md).
+
+**REN-047** `design` `test:conformance_gpu_instance_list_stays_until_replaced`
+An empty instance list MUST be valid, and a list MUST stay, drawn by every frame, until another list is set or a set of models is uploaded; a list that is refused MUST leave the list as it was, and with no model set every non-empty list is refused. The test sets a list, draws twice, sets lists that are refused and draws, sets an empty list and draws, and sets a new list and draws (docs/adr/0017-units-on-the-map.md).
+
+**REN-048** `design` `test:conformance_gpu_flat_is_never_hidden_and_lit_is_hidden_by_nearer_terrain`
+The one draw function of REN-019, its signature unchanged, MUST draw the terrain, the water, then the lit instances, then the flat instances. A lit instance MUST be drawn with the depth test Less and depth writes, back faces culled and counter-clockwise faces in front, so terrain nearer than it hides it and a face turned from the eye is not drawn. A flat instance MUST be drawn with no depth test, no depth write, and no culling, in the colour as given, so it is never hidden by terrain, by a lit instance, or by its own back face. The test draws lit and flat instances above and below flat ground and with a down-facing model, and samples each (docs/adr/0017-units-on-the-map.md).
+
+**REN-049** `design` `test:conformance_gpu_an_empty_instance_list_leaves_the_picture_unchanged`
+A frame drawn with no model set, and one drawn with a model set and an empty instance list, MUST be equal pixel for pixel for the same scene, camera, and size, and so MUST a frame drawn after a list is emptied. The test draws a scene with water at the strategic view and at the near end, compares the frames, and first expects a one-instance list to change the picture, so that the comparison can fail (docs/adr/0017-units-on-the-map.md).
+
+**REN-050** `design` `test:render_placement_scales_then_turns_then_translates`
+The placement transform MUST be a pure function of a position, a heading, a uniform scale, and the model's own forward yaw that scales, then turns about the y axis, then translates. Headings and yaws are measured as the simulation measures a heading, 0 along +x and increasing toward +z, and the turn MUST take the model's forward direction onto (cos h, 0, sin h) for heading h; with f the model's forward yaw, it takes every horizontal direction (cos a, 0, sin a) to (cos(a + h - f), 0, sin(a + h - f)) and leaves the y axis alone. Because +z is south and y is up, this is the opposite of the usual positive turn about +y by that angle. The test pins the sign with literals: with yaw 0, heading 0 leaves the model's +x along +x and heading pi/2 takes it to +z, and with yaw pi/2 and heading 0 the model's +z lies along +x; and pins the order with one composite: the model point (1, 0, 0) under scale 2, heading pi/2, yaw 0, and position (10, 5, 20) maps to (10, 5, 22) within 1e-5 (docs/adr/0017-units-on-the-map.md).
+
+**REN-051** `design` `test:render_placement_refuses_what_could_reverse_a_winding`
+The placement transform MUST return an error value, not a matrix, when the scale is not finite and positive, or when the heading, the yaw, or a coordinate of the position is not finite, so that no transform it returns reverses a triangle's winding. The test refuses each input in turn with NaN and both infinities, a zero scale, and a negative scale, and expects a positive determinant of the upper-left three by three of what it does return (docs/adr/0017-units-on-the-map.md).
+
+**REN-052** `design` `test:render_lit_shading_is_ambient_plus_the_light_share`
+The lit shading function MUST map an instance's linear colour and a unit normal to the colour times (AMBIENT + (1 - AMBIENT) * max(n . L, 0)), with the terrain's own light direction (-0.36, 0.8, -0.48) and ambient share 0.3 (REN-015). The test pins it with literals for the colour (0.5, 0.5, 0.5): along the light direction the colour is unchanged, at (0.8, 0, -0.6), perpendicular to the light, it is multiplied by 0.3, and at (0.36, -0.8, 0.48), facing away, it is also multiplied by 0.3 (docs/adr/0017-units-on-the-map.md).
+
+**REN-053** `design` `test:conformance_gpu_lit_pixels_match_the_lit_shading_function`
+A lit instance's normal MUST be the model's normal turned by the upper-left three by three part of its transform and then renormalized, which is exact for the transforms of REN-050. A lit pixel MUST equal the colour of REN-052's function for its face, encoded with the target's transfer function, within 2 in 255 per channel, and a flat pixel MUST equal the instance's colour, encoded the same way. The test places a tilted model with a uniform scale of 0.25 and a heading of pi/2, where an unturned or an unrenormalized normal gives another colour, and compares a lit and a flat pixel with literals worked out from the clauses (docs/adr/0017-units-on-the-map.md).
+
+**REN-054** `design` `test:render_model_shader_source_is_a_second_module_assembled_from_the_constants`
+The model shader's source MUST be returned by a pure function of its own, a second module apart from the source of REN-021 and REN-029, which stays the terrain and water module with its four entry points. It MUST write the light direction and the ambient share from the crate's Rust constants, so that no shading number is typed in both languages, and MUST name its four entry points, `vs_lit`, `fs_lit`, `vs_flat`, and `fs_flat`. The lit and flat pipelines MUST read the camera's view-projection matrix as given, as REN-019 requires of the shader's uniform. The test parses and validates the source with naga's WGSL front end, reached through wgpu's re-export, checks the layout of its uniform struct as REN-029's test does, and checks that neither module names the other's entry points (docs/adr/0017-units-on-the-map.md).
+
+**REN-055** `design` `test:conformance_gpu_model_heading_points_right_at_zero_and_down_at_a_quarter_turn`
+At the strategic view, with north up on the screen (REN-023), a model that extends along its own +x and is placed with yaw 0 MUST extend toward the right of the frame at heading 0 and toward the bottom at heading pi/2. The test draws an asymmetric flat model at both headings and samples a point along its tip and the point as far behind its base (docs/adr/0017-units-on-the-map.md).
+
+**REN-056** `design` `test:conformance_gpu_terrain_upload_leaves_the_models_and_the_list`
+The terrain upload MUST leave the model set and the instance list as they were, and a model set and a list MAY be set before or after the terrain is uploaded; a draw with no terrain uploaded stays REN-027's error whatever else is set. The test sets a model set and a list, draws and expects the error, uploads the terrain, draws and expects the instance's colour at its projected pixel, then uploads the terrain again, draws, and expects that pixel again (docs/adr/0017-units-on-the-map.md).
 
 ## The windowed mode
 

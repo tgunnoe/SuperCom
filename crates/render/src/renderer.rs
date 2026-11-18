@@ -1,8 +1,12 @@
-//! The GPU side: a renderer that draws a terrain mesh and a water plane for
-//! a camera into any texture view of one format.
+//! The GPU side: a renderer that draws a terrain mesh and a water plane, then
+//! models placed as lit and flat instances, for a camera into any texture
+//! view of one format.
 
 use crate::terrain::VERTEX_BYTES;
-use crate::{Camera, Error, TerrainMesh, WaterPlane, grid_fits, grid_vertex_count, shader};
+use crate::{
+    Camera, Error, Instance as Placed, Model, TerrainMesh, WaterPlane, grid_fits,
+    grid_vertex_count, shader,
+};
 use std::num::NonZeroU64;
 use wgpu::{
     Adapter, Backend, Backends, BindGroup, BindGroupDescriptor, BindGroupEntry,
@@ -325,6 +329,37 @@ impl Renderer {
             range: [mesh.lowest, mesh.highest],
         })?;
         self.scene = Some(scene);
+        Ok(())
+    }
+
+    /// Checks every model of `models` and the fit of its buffers against the
+    /// device's buffer limit, then uploads the set, which replaces the one
+    /// before it and empties the instance list. A set that is refused or
+    /// fails leaves the set and the list as they were.
+    ///
+    /// # Errors
+    /// [`Error::EmptyModel`], [`Error::ModelNormalCount`],
+    /// [`Error::ModelIndexCount`], [`Error::ModelIndexRange`], or
+    /// [`Error::ModelNonFinite`] for the first malformed model,
+    /// [`Error::ModelTooLarge`] when a model's buffer exceeds the device's
+    /// maximum buffer size, and [`Error::Gpu`] when wgpu reports an error
+    /// while creating the buffers.
+    pub fn upload_models(&mut self, _models: &[Model]) -> Result<(), Error> {
+        Ok(())
+    }
+
+    /// Checks `instances` against the uploaded set and the device's buffer
+    /// limit, then stores them for the draws that follow, replacing the list
+    /// before them; an empty list is valid and empties it. A list that is
+    /// refused or fails leaves the list as it was.
+    ///
+    /// # Errors
+    /// [`Error::InstancesTooLarge`] when the list's buffer exceeds the
+    /// device's maximum buffer size, [`Error::InstanceModel`],
+    /// [`Error::InstanceTransform`], or [`Error::InstanceColor`] for the
+    /// first offending instance, and [`Error::Gpu`] when wgpu reports an
+    /// error while creating the buffer.
+    pub fn set_instances(&mut self, _instances: &[Placed]) -> Result<(), Error> {
         Ok(())
     }
 

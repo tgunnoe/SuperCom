@@ -10,8 +10,9 @@ use common::{
     peak_mesh, projects_inside, set_distance, sub, to_usize, unit, with_water,
 };
 use supercom_render::{
-    Camera, Error, LIGHT_DIRECTION, TerrainMesh, WaterPlane, ZoomSpeed, grid_vertex_count,
-    normalize_height, shade, surface_format,
+    Camera, Error, Instance, LIGHT_DIRECTION, Model, Style, TerrainMesh, WaterPlane, ZoomSpeed,
+    check_instances, check_model, grid_vertex_count, instances_fit, model_fits, normalize_height,
+    placement, shade, shade_lit, surface_format,
 };
 
 /// The relative tolerance the camera clauses state for inside-the-view tests.
@@ -387,7 +388,7 @@ fn render_zoom_range_far_end_is_the_strategic_view() {
     for aspect in [1.0_f32, 16.0 / 9.0, 0.5] {
         let camera = ok(Camera::new(512.0, 256.0, 0.0, 50.0, aspect));
         let (near, far) = camera.zoom_range();
-        assert!(close(near, 40.0, 1e-6), "near end {near}");
+        assert!(close(near, 8.0, 1e-6), "near end {near}");
         let want = (256.0 / (tan * aspect)).max(128.0 / tan);
         assert!(close(far, want, want * 1e-4), "far end {far}, want {want}");
         assert!(
@@ -664,7 +665,10 @@ fn render_clip_planes_bound_every_visible_vertex() {
     ridge_camera.zoom(100.0, ZoomSpeed::Normal);
     let wanted = [
         (77.254_83, 38.627_42, 138.291_5),
-        (40.0, 12.566_3, 140.361_7),
+        // At the near end the pitch is 35 degrees: near = 8 sin p / (sin p +
+        // tan 22.5 cos p) / 2 = 2.51326 and far = 1.1 hypot(90.5097 + 8 cos p,
+        // 8 sin p + 10) = 107.9684.
+        (8.0, 2.513_26, 107.968_4),
     ];
     for (k, (distance, want_near, want_far)) in wanted.into_iter().enumerate() {
         if k == 1 {
@@ -802,7 +806,7 @@ fn render_aspect_change_recomputes_range_and_reclamps() {
         "a wider screen needs a shorter far end"
     );
     assert!(close(far_wide, far_at(4.0), far_wide * 1e-4));
-    assert!(close(near, 40.0, 1e-6));
+    assert!(close(near, 8.0, 1e-6));
     assert!(
         close(camera.distance(), far_wide, far_wide * 1e-5),
         "distance re-clamped to the new far end"
@@ -835,9 +839,9 @@ fn render_aspect_change_recomputes_range_and_reclamps() {
     );
 
     // An aspect at which the strategic view would be no farther than the
-    // near end is refused and leaves the camera as it was: 24.14 at aspect
-    // 100 against 618.04 at aspect 1.
-    let mut tall = ok(Camera::new(512.0, 20.0, 0.0, 0.0, 1.0));
+    // near end (8) is refused and leaves the camera as it was: 7.24 at aspect
+    // 100 (3 / tan 22.5 degrees) against 618.04 at aspect 1.
+    let mut tall = ok(Camera::new(512.0, 6.0, 0.0, 0.0, 1.0));
     let kept = tall;
     assert!(matches!(
         tall.set_aspect(100.0),
@@ -911,13 +915,18 @@ fn render_camera_rejects_bad_inputs() {
         (512.0, 256.0, 0.0, 1.0, 0.0),
         (512.0, 256.0, 0.0, 1.0, nan),
         (512.0, 256.0, 0.0, 1.0, -2.0),
-        (10.0, 10.0, 0.0, 1.0, 1.0),
+        // A strategic view of 3 / tan 22.5 = 7.24 is no farther than 8.
+        (6.0, 6.0, 0.0, 1.0, 1.0),
     ] {
         assert!(
             Camera::new(w, h, lo, hi, a).is_err(),
             "accepted extent {w} by {h}, elevations {lo}..{hi}, aspect {a}"
         );
     }
+    assert!(
+        Camera::new(10.0, 10.0, 0.0, 1.0, 1.0).is_ok(),
+        "a strategic view of 5 / tan 22.5 = 12.07 is farther than the near end 8"
+    );
     assert!(matches!(
         Camera::new(512.0, 256.0, 5.0, 4.0, 1.0),
         Err(Error::BadElevationRange { .. })
@@ -1003,4 +1012,345 @@ fn render_steep_terrain_is_an_error() {
         TerrainMesh::build(&mild).is_ok(),
         "a gentle map still builds"
     );
+}
+
+// ---- models and instances ----------------------------------------------
+
+/// One up-facing triangle: a model that passes every check.
+fn triangle() -> Model {
+    Model {
+        positions: vec![[0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]],
+        normals: vec![[0.0, 1.0, 0.0]; 3],
+        indices: vec![0, 1, 2],
+    }
+}
+
+// REN-043
+#[test]
+fn render_model_check_refuses_each_malformed_model() {
+    assert_eq!(check_model(0, &triangle()), Ok(()));
+    let no_vertices = Model {
+        positions: Vec::new(),
+        normals: Vec::new(),
+        indices: Vec::new(),
+    };
+    assert_eq!(
+        check_model(4, &no_vertices),
+        Err(Error::EmptyModel { model: 4 })
+    );
+    let no_indices = Model {
+        indices: Vec::new(),
+        ..triangle()
+    };
+    assert_eq!(
+        check_model(5, &no_indices),
+        Err(Error::EmptyModel { model: 5 })
+    );
+    let mut unequal = triangle();
+    unequal.normals.pop();
+    assert_eq!(
+        check_model(1, &unequal),
+        Err(Error::ModelNormalCount {
+            model: 1,
+            positions: 3,
+            normals: 2
+        })
+    );
+    for count in [2_usize, 4] {
+        let ragged = Model {
+            indices: [0, 1, 2, 0].into_iter().take(count).collect(),
+            ..triangle()
+        };
+        assert_eq!(
+            check_model(2, &ragged),
+            Err(Error::ModelIndexCount {
+                model: 2,
+                indices: count
+            }),
+            "{count} indices"
+        );
+    }
+    for bad in [3, u32::MAX] {
+        let wild = Model {
+            indices: vec![0, 1, bad],
+            ..triangle()
+        };
+        assert_eq!(
+            check_model(3, &wild),
+            Err(Error::ModelIndexRange {
+                model: 3,
+                index: bad,
+                vertices: 3
+            }),
+            "index {bad}"
+        );
+    }
+    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        let mut position = triangle();
+        position.positions[1][2] = bad;
+        assert_eq!(
+            check_model(6, &position),
+            Err(Error::ModelNonFinite {
+                model: 6,
+                vertex: 1
+            }),
+            "position {bad}"
+        );
+        let mut normal = triangle();
+        normal.normals[2][0] = bad;
+        assert_eq!(
+            check_model(6, &normal),
+            Err(Error::ModelNonFinite {
+                model: 6,
+                vertex: 2
+            }),
+            "normal {bad}"
+        );
+    }
+}
+
+// REN-045
+#[test]
+fn render_model_and_instance_fit_is_a_pure_function_of_counts_and_limits() {
+    // Four vertices of 24 bytes and six indices of 4: 96 and 24 bytes.
+    assert!(model_fits(4, 6, 96).is_ok());
+    assert!(matches!(
+        model_fits(4, 6, 95),
+        Err(Error::ModelTooLarge {
+            vertices: 4,
+            indices: 6,
+            buffer: "vertex",
+            bytes: 96,
+            limit: 95
+        })
+    ));
+    assert!(model_fits(1, 6, 24).is_ok());
+    assert!(matches!(
+        model_fits(1, 7, 24),
+        Err(Error::ModelTooLarge {
+            buffer: "index",
+            bytes: 28,
+            limit: 24,
+            ..
+        })
+    ));
+    assert!(model_fits(usize::MAX, 3, u64::MAX).is_err());
+    assert!(model_fits(3, usize::MAX, u64::MAX).is_err());
+    // One instance is 76 bytes: sixteen floats of transform, three of colour.
+    assert!(instances_fit(0, 0).is_ok());
+    assert!(instances_fit(1, 76).is_ok());
+    assert!(matches!(
+        instances_fit(1, 75),
+        Err(Error::InstancesTooLarge {
+            count: 1,
+            bytes: 76,
+            limit: 75
+        })
+    ));
+    assert!(instances_fit(3, 228).is_ok());
+    assert!(instances_fit(3, 227).is_err());
+    assert!(instances_fit(usize::MAX, u64::MAX).is_err());
+}
+
+fn identity() -> [[f32; 4]; 4] {
+    [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+}
+
+fn placed(model: usize) -> Instance {
+    Instance {
+        model,
+        transform: identity(),
+        color: [0.5, 0.25, 1.0],
+        style: Style::Lit,
+    }
+}
+
+// REN-046
+#[test]
+fn render_instance_check_refuses_each_bad_instance() {
+    assert_eq!(check_instances(&[], 0), Ok(()));
+    assert_eq!(check_instances(&[placed(0), placed(1)], 2), Ok(()));
+    assert_eq!(
+        check_instances(&[placed(0), placed(2)], 2),
+        Err(Error::InstanceModel {
+            instance: 1,
+            model: 2,
+            models: 2
+        })
+    );
+    assert_eq!(
+        check_instances(&[placed(0)], 0),
+        Err(Error::InstanceModel {
+            instance: 0,
+            model: 0,
+            models: 0
+        })
+    );
+    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        let mut skewed = placed(0);
+        skewed.transform[3][1] = bad;
+        assert_eq!(
+            check_instances(&[placed(0), skewed], 1),
+            Err(Error::InstanceTransform { instance: 1 }),
+            "transform entry {bad}"
+        );
+    }
+    for bad in [f32::NAN, f32::INFINITY, -0.1, 1.1, -1.0e-30] {
+        let mut tinted = placed(0);
+        tinted.color[2] = bad;
+        assert_eq!(
+            check_instances(&[tinted], 1),
+            Err(Error::InstanceColor { instance: 0 }),
+            "colour channel {bad}"
+        );
+    }
+    let mut edge = placed(0);
+    edge.color = [0.0, 1.0, 0.0];
+    assert_eq!(check_instances(&[edge], 1), Ok(()), "0 and 1 are in range");
+    let mut first = placed(0);
+    first.color[0] = 2.0;
+    let mut second = placed(0);
+    second.color[0] = -2.0;
+    assert_eq!(
+        check_instances(&[placed(0), first, second], 1),
+        Err(Error::InstanceColor { instance: 1 }),
+        "the first offender in list order is reported"
+    );
+}
+
+/// A point under a column-major matrix, written here and not read from the
+/// crate: the sum of its columns scaled by the point's coordinates.
+fn transformed(m: &[[f32; 4]; 4], p: [f32; 3]) -> [f32; 3] {
+    let mut out = [0.0; 3];
+    for (r, slot) in out.iter_mut().enumerate() {
+        *slot = m[0][r] * p[0] + m[1][r] * p[1] + m[2][r] * p[2] + m[3][r];
+    }
+    out
+}
+
+fn assert_point(got: [f32; 3], want: [f32; 3], what: &str) {
+    assert!(
+        got.iter().zip(want).all(|(g, w)| close(*g, w, 1e-5)),
+        "{what}: {got:?}, want {want:?}"
+    );
+}
+
+// REN-050
+#[test]
+fn render_placement_scales_then_turns_then_translates() {
+    use std::f32::consts::FRAC_PI_2;
+    // Heading 0 leaves the model's +x along +x; a quarter turn takes it to
+    // +z; with a forward yaw of a quarter turn the model's +z lies along +x.
+    let origin = [0.0, 0.0, 0.0];
+    let at = |heading, yaw| ok(placement(origin, heading, 1.0, yaw));
+    assert_point(
+        transformed(&at(0.0, 0.0), [1.0, 0.0, 0.0]),
+        [1.0, 0.0, 0.0],
+        "yaw 0, heading 0: +x",
+    );
+    assert_point(
+        transformed(&at(FRAC_PI_2, 0.0), [1.0, 0.0, 0.0]),
+        [0.0, 0.0, 1.0],
+        "yaw 0, heading a quarter turn: +x",
+    );
+    assert_point(
+        transformed(&at(0.0, FRAC_PI_2), [0.0, 0.0, 1.0]),
+        [1.0, 0.0, 0.0],
+        "yaw a quarter turn, heading 0: +z",
+    );
+    assert_point(
+        transformed(&at(FRAC_PI_2, 0.0), [0.0, 3.0, 0.0]),
+        [0.0, 3.0, 0.0],
+        "the y axis is left alone",
+    );
+    // The model point (1, 0, 0) under scale 2, a quarter turn, and position
+    // (10, 5, 20): scaled to (2, 0, 0), turned to (0, 0, 2), moved.
+    let composite = ok(placement([10.0, 5.0, 20.0], FRAC_PI_2, 2.0, 0.0));
+    assert_point(
+        transformed(&composite, [1.0, 0.0, 0.0]),
+        [10.0, 5.0, 22.0],
+        "scale, then turn, then translate",
+    );
+}
+
+// REN-051
+#[test]
+fn render_placement_refuses_what_could_reverse_a_winding() {
+    let good = [1.0, 2.0, 3.0];
+    assert!(placement(good, 0.5, 1.0, 0.25).is_ok());
+    for scale in [0.0, -1.0, -0.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        assert!(
+            matches!(
+                placement(good, 0.0, scale, 0.0),
+                Err(Error::BadPlacement { what: "scale" })
+            ),
+            "scale {scale}"
+        );
+    }
+    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        assert!(
+            matches!(
+                placement(good, bad, 1.0, 0.0),
+                Err(Error::BadPlacement { what: "heading" })
+            ),
+            "heading {bad}"
+        );
+        assert!(
+            matches!(
+                placement(good, 0.0, 1.0, bad),
+                Err(Error::BadPlacement { what: "yaw" })
+            ),
+            "yaw {bad}"
+        );
+        for axis in 0..3 {
+            let mut position = good;
+            position[axis] = bad;
+            assert!(
+                matches!(
+                    placement(position, 0.0, 1.0, 0.0),
+                    Err(Error::BadPlacement { what: "position" })
+                ),
+                "position {position:?}"
+            );
+        }
+    }
+    // What it does return keeps winding: the determinant of the upper-left
+    // three by three, worked out by cofactors here, is positive.
+    for (heading, scale, yaw) in [(0.0, 1.0, 0.0), (2.5, 0.25, -1.0), (-7.0, 40.0, 3.0)] {
+        let m = ok(placement(good, heading, scale, yaw));
+        let det = m[0][0] * (m[1][1] * m[2][2] - m[2][1] * m[1][2])
+            - m[1][0] * (m[0][1] * m[2][2] - m[2][1] * m[0][2])
+            + m[2][0] * (m[0][1] * m[1][2] - m[1][1] * m[0][2]);
+        assert!(det > 0.0, "determinant {det} for {heading}, {scale}, {yaw}");
+    }
+}
+
+// REN-052
+#[test]
+fn render_lit_shading_is_ambient_plus_the_light_share() {
+    let half = [0.5; 3];
+    // The light direction is (-0.36, 0.8, -0.48), a unit vector, and the
+    // ambient share is 0.3: a normal along the light keeps the colour; a
+    // normal perpendicular to it, or turned away from it, gets 0.3 of it.
+    for (normal, share) in [
+        ([-0.36, 0.8, -0.48], 1.0),
+        ([0.8, 0.0, -0.6], 0.3),
+        ([0.36, -0.8, 0.48], 0.3),
+    ] {
+        for channel in shade_lit(half, normal) {
+            assert!(
+                close(channel, 0.5 * share, 1e-6),
+                "normal {normal:?}: {channel}, want {}",
+                0.5 * share
+            );
+        }
+    }
+    // Straight up: 0.3 + 0.7 * 0.8 = 0.86 of each channel.
+    let up = shade_lit([1.0, 0.5, 0.0], [0.0, 1.0, 0.0]);
+    assert_point(up, [0.86, 0.43, 0.0], "a normal straight up");
 }
