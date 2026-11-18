@@ -108,7 +108,7 @@ impl Play {
         )
     }
 
-    /// How many distinct kinds met so far were not named by the replay.
+    /// How many distinct kinds met so far the run did not resolve.
     #[cfg(test)]
     #[must_use]
     pub fn unnamed(&self) -> usize {

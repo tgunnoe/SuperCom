@@ -250,8 +250,9 @@ pub struct Bone {
 /// The importer names the three vectors tangent, normal, binormal in that
 /// order. Measured over the install's 1,938 version-5 meshes, the second
 /// stored vector is the surface normal: it has the greatest mean absolute
-/// cosine with the face normal in every mesh. The fields follow the
-/// measured order, not the importer's.
+/// cosine with the face normal in every mesh. The normal's place follows the
+/// measurement, not the importer; the third and fourth keep the importer's
+/// relative order as tangent and binormal, which is not measured.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Vertex {
     /// Position.
