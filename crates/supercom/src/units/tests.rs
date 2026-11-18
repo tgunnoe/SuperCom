@@ -357,21 +357,46 @@ fn supercom_unit_kind_resolution_failures() {
         matches!(&junk, Some((kind, KindStep::MeshParse, _)) if kind == "ueb1103"),
         "{junk:?}"
     );
+}
 
-    // Two defects at once: the earlier step's failure is the one given.
-    let both_absent = step_of(resolve_kind("ueb1103", &reader(None, None)));
+/// A reader of fixed answers: the mesh's bytes for a mesh path and the
+/// blueprint's for any other, or an error naming the path when absent.
+fn fixed_reader(
+    mesh: Option<&'static [u8]>,
+    blueprint: Option<&'static [u8]>,
+) -> impl Fn(&str) -> Result<Vec<u8>, String> {
+    move |path: &str| {
+        let bytes = if path.ends_with("_lod0.scm") {
+            mesh
+        } else {
+            blueprint
+        };
+        bytes
+            .map(<[u8]>::to_vec)
+            .ok_or_else(|| format!("{path} is absent"))
+    }
+}
+
+/// Two defects at once give the earlier step's failure, in the order of
+/// REN-084.
+#[test]
+fn supercom_unit_kind_resolution_reports_the_earlier_of_two_failures() {
+    let both_absent = step_of(resolve_kind("ueb1103", &fixed_reader(None, None)));
     assert!(
         matches!(&both_absent, Some((_, KindStep::MeshRead, _))),
         "both files absent: {both_absent:?}"
     );
-    let unparsed_and_absent = step_of(resolve_kind("ueb1103", &reader(Some(b"not a mesh"), None)));
+    let unparsed_and_absent = step_of(resolve_kind(
+        "ueb1103",
+        &fixed_reader(Some(b"not a mesh"), None),
+    ));
     assert!(
         matches!(&unparsed_and_absent, Some((_, KindStep::BlueprintRead, _))),
         "a mesh that does not parse, a blueprint that is absent: {unparsed_and_absent:?}"
     );
     let neither_parses = step_of(resolve_kind(
         "ueb1103",
-        &reader(Some(b"not a mesh"), Some(b"not a blueprint {{{")),
+        &fixed_reader(Some(b"not a mesh"), Some(b"not a blueprint {{{")),
     ));
     assert!(
         matches!(&neither_parses, Some((_, KindStep::MeshParse, _))),
@@ -384,18 +409,6 @@ fn supercom_unit_kind_resolution_failures() {
 /// mismatch holds its tick.
 #[test]
 fn supercom_unit_kind_failure_texts_name_the_step() {
-    let reader = |mesh: Option<&'static [u8]>, blueprint: Option<&'static [u8]>| {
-        move |path: &str| -> Result<Vec<u8>, String> {
-            let bytes = if path.ends_with("_lod0.scm") {
-                mesh
-            } else {
-                blueprint
-            };
-            bytes
-                .map(<[u8]>::to_vec)
-                .ok_or_else(|| format!("{path} is absent"))
-        }
-    };
     let text = |result: Result<UnitMesh, RunError>| result.err().map(|error| error.to_string());
     let mut short = quad_mesh();
     short.vertices[1].normal = [0.0; 3];
@@ -403,17 +416,20 @@ fn supercom_unit_kind_failure_texts_name_the_step() {
     let cases = [
         (
             "mesh read",
-            text(resolve_kind("uel0001", &reader(None, Some(GOOD_BLUEPRINT)))),
+            text(resolve_kind(
+                "uel0001",
+                &fixed_reader(None, Some(GOOD_BLUEPRINT)),
+            )),
         ),
         (
             "blueprint read",
-            text(resolve_kind("uel0001", &reader(Some(b"MODL"), None))),
+            text(resolve_kind("uel0001", &fixed_reader(Some(b"MODL"), None))),
         ),
         (
             "mesh parse",
             text(resolve_kind(
                 "uel0001",
-                &reader(Some(b"not a mesh"), Some(GOOD_BLUEPRINT)),
+                &fixed_reader(Some(b"not a mesh"), Some(GOOD_BLUEPRINT)),
             )),
         ),
         (

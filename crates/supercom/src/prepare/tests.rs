@@ -122,7 +122,30 @@ fn supercom_prepare_replay_failures() {
         "{relative:?}"
     );
 
-    // Two defects at once: the earlier step's failure is the one given.
+    let world = error_text(prepare_replay(Some(root.path()), &good, vars));
+    assert!(
+        matches!(&world, Some((RunError::World { .. }, text)) if text.starts_with("world:")),
+        "an install holding nothing gives no world: {world:?}"
+    );
+
+    // The step after the map file: an install whose archives do not mount.
+    let mounted = crate::units::resolve_kinds(root.path(), &["uel0001".to_owned()]);
+    assert!(
+        matches!(&mounted, Err(RunError::UnitArchives { .. })),
+        "an install holding nothing mounts no archives: {mounted:?}"
+    );
+}
+
+/// Two defects at once give the earlier step's failure, in the order of
+/// REN-057.
+#[test]
+fn supercom_prepare_replay_reports_the_earlier_of_two_failures() {
+    let root = Scratch::new("prepare-order");
+    let slash = write(
+        root.path(),
+        "slash.replay",
+        &bytes("a/b", vec![(Tick(99), [1; 32])]),
+    );
     let no_install = root.path().join("no-such-install");
     let missing_and_unreadable = error_text(prepare_replay(
         Some(&no_install),
@@ -155,19 +178,6 @@ fn supercom_prepare_replay_failures() {
         matches!(&slash_and_no_cache, Some((RunError::ReplayMapFolder { folder }, _))
             if folder == "a/b"),
         "the map folder is checked before the cache directory: {slash_and_no_cache:?}"
-    );
-
-    let world = error_text(prepare_replay(Some(root.path()), &good, vars));
-    assert!(
-        matches!(&world, Some((RunError::World { .. }, text)) if text.starts_with("world:")),
-        "an install holding nothing gives no world: {world:?}"
-    );
-
-    // The step after the map file: an install whose archives do not mount.
-    let mounted = crate::units::resolve_kinds(root.path(), &["uel0001".to_owned()]);
-    assert!(
-        matches!(&mounted, Err(RunError::UnitArchives { .. })),
-        "an install holding nothing mounts no archives: {mounted:?}"
     );
 }
 
