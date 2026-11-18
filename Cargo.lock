@@ -2935,6 +2935,8 @@ version = "0.0.1"
 dependencies = [
  "supercom-render",
  "supercom-scmap",
+ "supercom-sim",
+ "supercom-sim-ingest",
  "supercom-testkit",
  "winit",
 ]

@@ -406,3 +406,7 @@ the head had not seen it when ratifying.
 - **Extended on 2026-11-17:** the near end of the zoom range is changed to 8
   world units by docs/adr/0017-units-on-the-map.md, which is proposed and
   awaiting ratification.
+- **Extended on 2026-11-17:** the sentence that the binary depends on no
+  loader or simulation crate is extended by
+  docs/adr/0017-units-on-the-map.md, which is proposed and awaiting
+  ratification: the replay run needs the simulation's crates.

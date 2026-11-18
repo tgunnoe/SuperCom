@@ -1,25 +1,45 @@
 //! The command line: a pure function from the arguments to a command.
 
+#![expect(
+    dead_code,
+    reason = "the replay run is wired by the code that follows its tests"
+)]
+
 use std::ffi::OsString;
 use std::fmt;
 use std::num::NonZeroU32;
+use std::path::PathBuf;
 
 /// The map folder `view` opens when none is named.
 pub const DEFAULT_MAP: &str = "SCMP_012";
 
+/// The slowest speed `replay` accepts, inclusive.
+pub const MIN_SPEED: f64 = 0.1;
+
+/// The fastest speed `replay` accepts, inclusive.
+pub const MAX_SPEED: f64 = 10.0;
+
+/// The speed of a replay when none is given.
+pub const DEFAULT_SPEED: f64 = 1.0;
+
 /// What the binary prints, after a reason, when its arguments are wrong.
-pub const USAGE: &str = "usage: supercom\n       supercom view [<map folder>] [--frames <n>]\n\n\
+pub const USAGE: &str = "usage: supercom\n       supercom view [<map folder>] [--frames <n>]\n       \
+    supercom replay <file> [--speed <x>] [--frames <n>]\n\n\
     With no argument, reports whether the game data is found.\n\
     view opens a window on an installed map (default folder SCMP_012);\n\
+    replay plays a recorded match in a window, at <x> times real time\n\
+    (0.1 to 10, default 1);\n\
     --frames <n> presents n frames, prints the count, and exits.";
 
 /// What the arguments ask for.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     /// No argument: report whether the game data is found.
     Bare,
     /// Open a window on a map.
     View(ViewArgs),
+    /// Play a recorded match in a window.
+    Replay(ReplayArgs),
 }
 
 /// The arguments of `view`.
@@ -27,6 +47,17 @@ pub enum Command {
 pub struct ViewArgs {
     /// The map folder under the install's `maps` directory.
     pub folder: String,
+    /// The number of frames to present before exiting, if limited.
+    pub frames: Option<NonZeroU32>,
+}
+
+/// The arguments of `replay`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReplayArgs {
+    /// The recorded match.
+    pub file: PathBuf,
+    /// Times real time, from [`MIN_SPEED`] to [`MAX_SPEED`].
+    pub speed: f64,
     /// The number of frames to present before exiting, if limited.
     pub frames: Option<NonZeroU32>,
 }

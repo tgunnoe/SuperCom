@@ -1,11 +1,20 @@
 //! The window loop: converts the window system's events into inputs, calls
 //! the pure functions of the other modules, and hands each frame to the
-//! renderer's one draw function. It holds no arithmetic of its own, and no
-//! headless test reaches it.
+//! renderer's one draw function. It holds no arithmetic of its own; the one
+//! owner of a replay's state is here, [`Play`], and its stepping is tested
+//! without a window.
+
+#![expect(
+    dead_code,
+    reason = "the replay run is wired by the code that follows its tests"
+)]
 
 use crate::error::RunError;
 use crate::frame::{FramePlan, Progress, Step, frame_plan};
 use crate::input::{Flow, Input, apply_input, key_input, wheel_input};
+use crate::interp::Kept;
+use crate::pacing::Pace;
+use crate::prepare::Prepared;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use supercom_render::wgpu::CurrentSurfaceTexture;
@@ -16,6 +25,7 @@ use supercom_render::wgpu::{
 };
 use supercom_render::{Camera, Renderer, SurfaceRenderer, TerrainMesh, WaterPlane, grid_fits};
 use supercom_scmap::Map;
+use supercom_sim::{Digest, Replay, State};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, WindowEvent};
@@ -30,6 +40,121 @@ pub enum Outcome {
     Presented(u32),
     /// The window was closed.
     Closed,
+}
+
+/// What one step of a replay came to.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Stepped {
+    /// The step ran and returned this digest, which matched its checkpoint
+    /// or had none.
+    Digest(Digest),
+    /// The step at the last checkpoint's tick has run; nothing more is
+    /// stepped.
+    Stopped,
+}
+
+/// The one owner of a replay's state, with the values kept from before the
+/// last step and the run's counters.
+pub struct Play {
+    state: State,
+    replay: Replay,
+    kept: Kept,
+    ticks_run: u64,
+    matched: usize,
+    held_frames: u64,
+}
+
+impl Play {
+    /// A run at tick 0 of `state` over `replay`.
+    #[must_use]
+    pub fn new(state: State, replay: Replay) -> Self {
+        Self {
+            state,
+            replay,
+            kept: Kept::default(),
+            ticks_run: 0,
+            matched: 0,
+            held_frames: 0,
+        }
+    }
+
+    /// Steps one tick with the commands stamped for it, compares the digest
+    /// with the replay's checkpoint, and keeps the values from before the
+    /// step.
+    ///
+    /// # Errors
+    /// [`RunError::Mismatch`] naming the tick when the digest differs from
+    /// its checkpoint, and [`RunError::Step`] when the simulation refuses
+    /// the step.
+    #[expect(
+        clippy::unused_self,
+        clippy::unnecessary_wraps,
+        reason = "a seam that returns the wrong answer; the behaviour that follows reads self and can fail"
+    )]
+    pub fn step_one(&mut self) -> Result<Stepped, RunError> {
+        Ok(Stepped::Stopped)
+    }
+
+    /// Steps the ticks `pace` says are due, and counts the frame once when
+    /// the cap held ticks back while stepping had not stopped.
+    ///
+    /// # Errors
+    /// As [`Play::step_one`].
+    #[expect(
+        clippy::unused_self,
+        clippy::unnecessary_wraps,
+        reason = "a seam that returns the wrong answer; the behaviour that follows reads self and can fail"
+    )]
+    pub fn frame(&mut self, pace: &Pace) -> Result<(), RunError> {
+        let _ = pace;
+        Ok(())
+    }
+
+    /// Whether stepping has stopped.
+    #[must_use]
+    #[expect(
+        clippy::unused_self,
+        reason = "a seam that returns the wrong answer; the behaviour that follows reads self"
+    )]
+    pub fn finished(&self) -> bool {
+        true
+    }
+
+    /// The state, for drawing.
+    #[must_use]
+    pub fn state(&self) -> &State {
+        &self.state
+    }
+
+    /// The values kept from before the last step.
+    #[must_use]
+    pub fn kept(&self) -> &Kept {
+        &self.kept
+    }
+
+    /// The ticks stepped so far.
+    #[must_use]
+    pub fn ticks_run(&self) -> u64 {
+        self.ticks_run
+    }
+
+    /// The checkpoints matched so far.
+    #[must_use]
+    pub fn matched(&self) -> usize {
+        self.matched
+    }
+
+    /// The checkpoints in the replay.
+    #[must_use]
+    pub fn total(&self) -> usize {
+        self.replay.checkpoints.len()
+    }
+
+    /// The frames at which the cap held ticks back.
+    #[must_use]
+    pub fn held_frames(&self) -> u64 {
+        self.held_frames
+    }
 }
 
 /// What acquiring the frame's texture came to.
@@ -80,6 +205,25 @@ pub fn run(
             reason: error.to_string(),
         })?;
     app.outcome.unwrap_or(Ok(Outcome::Closed))
+}
+
+/// Plays `prepared` in a window at `speed` times real time until the window
+/// closes, `frames` frames have been presented, or a step fails.
+///
+/// # Errors
+/// [`RunError`] for the first step that fails.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "a seam that does nothing; the behaviour that follows can fail"
+)]
+pub fn run_replay(
+    event_loop: EventLoop<()>,
+    prepared: Prepared,
+    speed: f64,
+    frames: Option<NonZeroU32>,
+) -> Result<Outcome, RunError> {
+    let _ = (event_loop, prepared, speed, frames);
+    Ok(Outcome::Closed)
 }
 
 /// Everything between the window and the first frame, in the order of the
@@ -284,3 +428,6 @@ impl ApplicationHandler for App {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -2,18 +2,31 @@
 //!
 //! With no argument the binary resolves the game data directory and reports
 //! whether it exists. `supercom view` opens a window on an installed map and
-//! draws its terrain and water. The engine proper lands behind the
+//! draws its terrain and water. `supercom replay <file>` plays a recorded
+//! match in a window: it loads the world, checks the replay against it,
+//! steps the simulation, compares every checkpoint, and draws every entity
+//! and projectile as a flat marker. The engine proper lands behind the
 //! specification in `docs/specs/`.
 
+mod cache;
 mod cli;
 mod error;
 mod frame;
 mod input;
+mod interp;
 mod mapfile;
+mod markers;
+mod pacing;
 mod plan;
+mod prepare;
+mod scene;
+mod stepping;
+#[cfg(test)]
+mod testing;
 mod window;
 
-use cli::{Command, ViewArgs};
+use cache::CacheVars;
+use cli::{Command, ReplayArgs, ViewArgs};
 use error::RunError;
 use std::env;
 use std::ffi::OsString;
@@ -45,7 +58,38 @@ fn main() -> ExitCode {
         }
         Ok(Command::Bare) => bare(),
         Ok(Command::View(args)) => view(&args),
+        Ok(Command::Replay(args)) => replay(&args),
     }
+}
+
+/// `replay`: the display first, then the steps before the window, then the
+/// window.
+fn replay(args: &ReplayArgs) -> ExitCode {
+    match run_replay(args) {
+        Ok(Outcome::Presented(frames)) => {
+            println!("presented {frames} frames");
+            ExitCode::SUCCESS
+        }
+        Ok(Outcome::Closed) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("supercom: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_replay(args: &ReplayArgs) -> Result<Outcome, RunError> {
+    let event_loop = EventLoop::new().map_err(|error| RunError::NoDisplay {
+        reason: error.to_string(),
+    })?;
+    let game_dir = resolve_game_dir(env::var_os(GAME_DIR_VAR), env::var_os("HOME"));
+    let cache = CacheVars {
+        override_dir: env::var_os("SUPERCOM_CACHE_DIR"),
+        xdg_cache_home: env::var_os("XDG_CACHE_HOME"),
+        home: env::var_os("HOME"),
+    };
+    let prepared = prepare::prepare_replay(game_dir.as_deref(), &args.file, cache)?;
+    window::run_replay(event_loop, prepared, args.speed, args.frames)
 }
 
 /// `view`: the display first, then the install and the map, then the window.

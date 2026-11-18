@@ -165,6 +165,21 @@ impl TerrainMesh {
     }
 }
 
+impl TerrainMesh {
+    /// The height of the drawn surface under `(x, z)`: the surface of the
+    /// two triangles of the cell that holds the point, split from the
+    /// cell's north-east vertex to its south-west one as the indices are,
+    /// interpolated linearly within the triangle. `None` for a point
+    /// outside the extent from 0 to [`TerrainMesh::width`] along x and from
+    /// 0 to [`TerrainMesh::height`] along z, edges included, and for a
+    /// coordinate that is not finite.
+    #[must_use]
+    pub fn height_at(&self, x: f32, z: f32) -> Option<f32> {
+        let _ = (x, z);
+        None
+    }
+}
+
 /// The cell counts of a grid whose vertex count already fits 32 bits.
 #[derive(Clone, Copy)]
 struct Grid {

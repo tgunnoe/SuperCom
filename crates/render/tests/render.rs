@@ -1427,3 +1427,50 @@ fn render_model_check_and_fit_refuse_in_their_stated_order() {
         })
     ));
 }
+
+// REN-069
+#[test]
+fn render_terrain_height_follows_the_split_of_a_cell() {
+    // Two by two cells of 4 by 4 world units. The first cell's corners are
+    // north-west 0, north-east 4, south-west 8, and south-east 20, which no
+    // plane holds, so the split decides every height inside it.
+    let map = grid_map(2, 2, 8.0, 8.0, 1.0, |i, j| match (i, j) {
+        (1, 0) => 4,
+        (0, 1) => 8,
+        (1, 1) => 20,
+        _ => 0,
+    });
+    let mesh = ok(TerrainMesh::build(&map));
+    let expect = |x: f32, z: f32, want: f32| {
+        let got = mesh.height_at(x, z);
+        assert!(
+            got.is_some_and(|h| close(h, want, 1e-4)),
+            "height at ({x}, {z}) is {got:?}, expected {want}"
+        );
+    };
+    // North-west of the diagonal: 4u + 8v with u and v the cell fractions.
+    expect(1.0, 1.0, 3.0);
+    expect(1.0, 2.0, 5.0);
+    // South-east of it: 20 - 12(1 - u) - 16(1 - v).
+    expect(3.0, 3.0, 13.0);
+    expect(3.0, 2.0, 9.0);
+    // On the diagonal both triangles agree.
+    expect(2.0, 2.0, 6.0);
+    // At a vertex, on the far edges, and at the corner of the extent.
+    expect(0.0, 0.0, 0.0);
+    expect(4.0, 4.0, 20.0);
+    expect(8.0, 0.0, 0.0);
+    expect(8.0, 8.0, 0.0);
+    // Outside the extent, or not finite, there is no height.
+    for (x, z) in [
+        (-0.1, 1.0),
+        (1.0, -0.1),
+        (8.1, 1.0),
+        (1.0, 8.1),
+        (f32::NAN, 1.0),
+        (1.0, f32::INFINITY),
+        (f32::NEG_INFINITY, 1.0),
+    ] {
+        assert_eq!(mesh.height_at(x, z), None, "({x}, {z}) is outside");
+    }
+}
