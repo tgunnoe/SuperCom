@@ -1933,4 +1933,14 @@ fn render_model_shader_source_is_a_second_module_assembled_from_the_constants() 
             "the source writes {number:?} from the Rust constant"
         );
     }
+    // REN-053's numbers, worked out here and not read from the crate.
+    for declaration in [
+        "const LIGHT: vec3<f32> = vec3<f32>(-0.36, 0.8, -0.48);",
+        "const AMBIENT: f32 = 0.3;",
+    ] {
+        assert!(
+            source.lines().any(|line| line == declaration),
+            "the source declares {declaration:?} on a line of its own"
+        );
+    }
 }

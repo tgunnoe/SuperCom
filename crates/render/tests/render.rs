@@ -1248,13 +1248,17 @@ fn render_instance_check_refuses_each_bad_instance() {
         })
     );
     for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-        let mut skewed = placed(0);
-        skewed.transform[3][1] = bad;
-        assert_eq!(
-            check_instances(&[placed(0), skewed], 1),
-            Err(Error::InstanceTransform { instance: 1 }),
-            "transform entry {bad}"
-        );
+        for column in 0..4 {
+            for row in 0..4 {
+                let mut skewed = placed(0);
+                skewed.transform[column][row] = bad;
+                assert_eq!(
+                    check_instances(&[placed(0), skewed], 1),
+                    Err(Error::InstanceTransform { instance: 1 }),
+                    "transform entry [{column}][{row}] is {bad}"
+                );
+            }
+        }
     }
     for bad in [f32::NAN, f32::INFINITY, -0.1, 1.1, -1.0e-30] {
         let mut tinted = placed(0);
