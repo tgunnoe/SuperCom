@@ -1,10 +1,5 @@
 //! The command line: a pure function from the arguments to a command.
 
-#![expect(
-    dead_code,
-    reason = "the replay run is wired by the code that follows its tests"
-)]
-
 use std::ffi::OsString;
 use std::fmt;
 use std::num::NonZeroU32;
@@ -87,8 +82,9 @@ impl std::error::Error for UsageError {}
 /// Parses the arguments after the program name.
 ///
 /// # Errors
-/// [`UsageError`] for any argument list other than none, or `view` with an
-/// optional single-component map folder and an optional `--frames <n>`.
+/// [`UsageError`] for any argument list other than none, `view` with an
+/// optional single-component map folder and an optional `--frames <n>`, or
+/// `replay` with one file and an optional `--speed <x>` and `--frames <n>`.
 pub fn parse_args<I>(args: I) -> Result<Command, UsageError>
 where
     I: IntoIterator,
@@ -98,12 +94,35 @@ where
     let Some(first) = args.next() else {
         return Ok(Command::Bare);
     };
-    if first != "view" {
-        return Err(UsageError::new(&format!(
+    if first == "view" {
+        parse_view(args)
+    } else if first == "replay" {
+        parse_replay(args)
+    } else {
+        Err(UsageError::new(&format!(
             "unknown argument {}",
             first.to_string_lossy()
-        )));
+        )))
     }
+}
+
+/// The value of `--frames`: the next argument as a positive count.
+fn frames_value(
+    args: &mut impl Iterator<Item = OsString>,
+    frames: &mut Option<NonZeroU32>,
+) -> Result<(), UsageError> {
+    if frames.is_some() {
+        return Err(UsageError::new("--frames is given twice"));
+    }
+    let count = args
+        .next()
+        .and_then(|value| value.into_string().ok())
+        .and_then(|value| parse_count(&value));
+    *frames = Some(count.ok_or_else(|| UsageError::new("--frames takes a positive integer"))?);
+    Ok(())
+}
+
+fn parse_view(mut args: impl Iterator<Item = OsString>) -> Result<Command, UsageError> {
     let mut folder: Option<String> = None;
     let mut frames: Option<NonZeroU32> = None;
     while let Some(arg) = args.next() {
@@ -111,15 +130,7 @@ where
             return Err(UsageError::new("an argument is not valid UTF-8"));
         };
         if text == "--frames" {
-            if frames.is_some() {
-                return Err(UsageError::new("--frames is given twice"));
-            }
-            let count = args
-                .next()
-                .and_then(|value| value.into_string().ok())
-                .and_then(|value| parse_count(&value));
-            frames =
-                Some(count.ok_or_else(|| UsageError::new("--frames takes a positive integer"))?);
+            frames_value(&mut args, &mut frames)?;
         } else if text.starts_with('-') {
             return Err(UsageError::new(&format!("unknown option {text}")));
         } else if folder.is_some() {
@@ -138,6 +149,61 @@ where
     }))
 }
 
+fn parse_replay(mut args: impl Iterator<Item = OsString>) -> Result<Command, UsageError> {
+    let mut file: Option<PathBuf> = None;
+    let mut speed: Option<f64> = None;
+    let mut frames: Option<NonZeroU32> = None;
+    while let Some(arg) = args.next() {
+        if arg == "--frames" {
+            frames_value(&mut args, &mut frames)?;
+        } else if arg == "--speed" {
+            if speed.is_some() {
+                return Err(UsageError::new("--speed is given twice"));
+            }
+            let value = args
+                .next()
+                .and_then(|value| value.into_string().ok())
+                .and_then(|value| parse_speed(&value));
+            speed = Some(value.ok_or_else(|| {
+                UsageError::new("--speed takes a decimal from 0.1 to 10 in ASCII digits")
+            })?);
+        } else if arg.as_encoded_bytes().first() == Some(&b'-') {
+            return Err(UsageError::new(&format!(
+                "unknown option {}",
+                arg.to_string_lossy()
+            )));
+        } else if file.is_some() {
+            return Err(UsageError::new("replay takes exactly one file"));
+        } else if arg.is_empty() {
+            return Err(UsageError::new("the replay file is an empty argument"));
+        } else {
+            file = Some(PathBuf::from(arg));
+        }
+    }
+    let file = file.ok_or_else(|| UsageError::new("replay takes a file"))?;
+    Ok(Command::Replay(ReplayArgs {
+        file,
+        speed: speed.unwrap_or(DEFAULT_SPEED),
+        frames,
+    }))
+}
+
+/// A speed written as ASCII digits, optionally a point and more digits, from
+/// [`MIN_SPEED`] to [`MAX_SPEED`] inclusive.
+fn parse_speed(text: &str) -> Option<f64> {
+    let (whole, fraction) = match text.split_once('.') {
+        Some((whole, fraction)) => (whole, Some(fraction)),
+        None => (text, None),
+    };
+    let digits = |part: &str| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
+    if !digits(whole) || fraction.is_some_and(|part| !digits(part)) {
+        return None;
+    }
+    text.parse::<f64>()
+        .ok()
+        .filter(|speed| (MIN_SPEED..=MAX_SPEED).contains(speed))
+}
+
 /// A positive integer of ASCII digits that fits 32 bits.
 fn parse_count(text: &str) -> Option<NonZeroU32> {
     if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -149,7 +215,7 @@ fn parse_count(text: &str) -> Option<NonZeroU32> {
 /// Whether `text` is one non-empty path component: no separator, and
 /// neither `.` nor `..`. A backslash is refused as well, so the rule is the
 /// same on every platform.
-fn is_single_component(text: &str) -> bool {
+pub fn is_single_component(text: &str) -> bool {
     !text.is_empty() && text != "." && text != ".." && !text.contains(['/', '\\', '\0'])
 }
 

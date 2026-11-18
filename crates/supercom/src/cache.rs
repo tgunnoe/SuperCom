@@ -1,8 +1,6 @@
 //! The directory the world's importer caches into: a pure function of three
 //! environment values.
 
-#![expect(dead_code, reason = "wired by the code that follows the tests")]
-
 use std::ffi::OsString;
 use std::fmt;
 use std::path::PathBuf;
@@ -56,8 +54,21 @@ impl std::error::Error for CacheDirError {}
 /// [`CacheDirError::Relative`] when the directory the rule gives is not
 /// absolute; nothing falls back to the working directory.
 pub fn cache_dir(vars: &CacheVars) -> Result<PathBuf, CacheDirError> {
-    let _ = vars;
-    Err(CacheDirError::Unresolved)
+    let set = |value: &Option<OsString>| value.clone().filter(|value| !value.is_empty());
+    let chosen = if let Some(dir) = set(&vars.override_dir) {
+        PathBuf::from(dir)
+    } else if let Some(xdg) = set(&vars.xdg_cache_home) {
+        PathBuf::from(xdg).join("supercom")
+    } else if let Some(home) = set(&vars.home) {
+        PathBuf::from(home).join(".cache/supercom")
+    } else {
+        return Err(CacheDirError::Unresolved);
+    };
+    if chosen.is_absolute() {
+        Ok(chosen)
+    } else {
+        Err(CacheDirError::Relative { path: chosen })
+    }
 }
 
 #[cfg(test)]

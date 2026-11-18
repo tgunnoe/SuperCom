@@ -1,9 +1,21 @@
 //! Pacing: how many ticks a frame owes the wall clock, as a pure function.
 
-#![expect(dead_code, reason = "wired by the code that follows the tests")]
-
 /// The most ticks one frame steps; the rest stay owed.
 pub const MAX_TICKS_PER_FRAME: u64 = 10;
+
+/// The ticks a second of wall time owes at speed 1.
+const TICKS_PER_SECOND: f64 = 10.0;
+
+/// A whole, non-negative `f64` as a tick count; a count past `u64::MAX`
+/// saturates, which the cap on a frame makes harmless.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the value is a floor of a non-negative number, and the cast saturates"
+)]
+fn to_ticks(whole: f64) -> u64 {
+    whole as u64
+}
 
 /// What the clock says a frame owes.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -21,11 +33,23 @@ pub struct Pace {
 /// or a speed that is not finite or is negative owes nothing.
 #[must_use]
 pub fn pace(elapsed_seconds: f64, speed: f64, ticks_run: u64) -> Pace {
-    let _ = (elapsed_seconds, speed, ticks_run);
-    Pace {
+    let nothing = Pace {
         due: 0,
         held_back: 0,
         fraction: 0.0,
+    };
+    let usable = |value: f64| value.is_finite() && value >= 0.0;
+    if !(usable(elapsed_seconds) && usable(speed)) {
+        return nothing;
+    }
+    let ticks = elapsed_seconds * speed * TICKS_PER_SECOND;
+    let whole = ticks.floor();
+    let owed = to_ticks(whole).saturating_sub(ticks_run);
+    let due = owed.min(MAX_TICKS_PER_FRAME);
+    Pace {
+        due,
+        held_back: owed - due,
+        fraction: ticks - whole,
     }
 }
 
