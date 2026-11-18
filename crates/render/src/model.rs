@@ -3,7 +3,7 @@
 //! is a model's index in the uploaded set, a transform, a colour, and a
 //! style. The renderer learns nothing of what a model depicts.
 
-use crate::Error;
+use crate::{AMBIENT, Error, LIGHT_DIRECTION};
 
 /// Bytes of one model vertex as the renderer uploads it: position and
 /// normal, six `f32`, the terrain's own layout.
@@ -52,6 +52,10 @@ pub struct Instance {
     pub style: Style,
 }
 
+fn finite3(v: [f32; 3]) -> bool {
+    v.iter().all(|c| c.is_finite())
+}
+
 /// Checks `model`, the `index`th of a set, without touching a device.
 ///
 /// # Errors
@@ -60,8 +64,55 @@ pub struct Instance {
 /// index count that is not a multiple of three, [`Error::ModelIndexRange`]
 /// for an index at or past the vertex count, and [`Error::ModelNonFinite`]
 /// for a position or a normal that is not finite, checked in that order.
-pub fn check_model(_index: usize, _model: &Model) -> Result<(), Error> {
-    Ok(())
+pub fn check_model(index: usize, model: &Model) -> Result<(), Error> {
+    let vertices = model.positions.len();
+    if vertices == 0 || model.indices.is_empty() {
+        return Err(Error::EmptyModel { model: index });
+    }
+    if model.normals.len() != vertices {
+        return Err(Error::ModelNormalCount {
+            model: index,
+            positions: vertices,
+            normals: model.normals.len(),
+        });
+    }
+    if model.indices.len() % 3 != 0 {
+        return Err(Error::ModelIndexCount {
+            model: index,
+            indices: model.indices.len(),
+        });
+    }
+    if let Some(&bad) = model
+        .indices
+        .iter()
+        .find(|&&i| !usize::try_from(i).is_ok_and(|i| i < vertices))
+    {
+        return Err(Error::ModelIndexRange {
+            model: index,
+            index: bad,
+            vertices,
+        });
+    }
+    let vertex = model
+        .positions
+        .iter()
+        .zip(&model.normals)
+        .position(|(p, n)| !(finite3(*p) && finite3(*n)));
+    match vertex {
+        Some(vertex) => Err(Error::ModelNonFinite {
+            model: index,
+            vertex,
+        }),
+        None => Ok(()),
+    }
+}
+
+fn saturating(bytes: u128) -> u64 {
+    u64::try_from(bytes).unwrap_or(u64::MAX)
+}
+
+fn widen(n: usize) -> u128 {
+    u128::try_from(n).unwrap_or(u128::MAX)
 }
 
 /// Whether a model of `vertices` vertices and `indices` indices fits a
@@ -73,7 +124,27 @@ pub fn check_model(_index: usize, _model: &Model) -> Result<(), Error> {
 /// # Errors
 /// [`Error::ModelTooLarge`] naming the first buffer that would exceed the
 /// limit, the vertex buffer before the index buffer.
-pub fn model_fits(_vertices: usize, _indices: usize, _max_buffer_size: u64) -> Result<(), Error> {
+pub fn model_fits(vertices: usize, indices: usize, max_buffer_size: u64) -> Result<(), Error> {
+    for (buffer, bytes) in [
+        (
+            "vertex",
+            widen(vertices).saturating_mul(u128::from(MODEL_VERTEX_BYTES)),
+        ),
+        (
+            "index",
+            widen(indices).saturating_mul(u128::from(MODEL_INDEX_BYTES)),
+        ),
+    ] {
+        if bytes > u128::from(max_buffer_size) {
+            return Err(Error::ModelTooLarge {
+                vertices,
+                indices,
+                buffer,
+                bytes: saturating(bytes),
+                limit: max_buffer_size,
+            });
+        }
+    }
     Ok(())
 }
 
@@ -83,7 +154,15 @@ pub fn model_fits(_vertices: usize, _indices: usize, _max_buffer_size: u64) -> R
 /// # Errors
 /// [`Error::InstancesTooLarge`] when the list's buffer would exceed the
 /// limit.
-pub fn instances_fit(_count: usize, _max_buffer_size: u64) -> Result<(), Error> {
+pub fn instances_fit(count: usize, max_buffer_size: u64) -> Result<(), Error> {
+    let bytes = widen(count).saturating_mul(u128::from(INSTANCE_BYTES));
+    if bytes > u128::from(max_buffer_size) {
+        return Err(Error::InstancesTooLarge {
+            count,
+            bytes: saturating(bytes),
+            limit: max_buffer_size,
+        });
+    }
     Ok(())
 }
 
@@ -96,7 +175,26 @@ pub fn instances_fit(_count: usize, _max_buffer_size: u64) -> Result<(), Error> 
 /// and [`Error::InstanceColor`] for a colour channel that is not finite or
 /// is outside 0 to 1, the first offending instance in list order and, within
 /// one instance, in that order.
-pub fn check_instances(_instances: &[Instance], _models: usize) -> Result<(), Error> {
+pub fn check_instances(instances: &[Instance], models: usize) -> Result<(), Error> {
+    for (at, instance) in instances.iter().enumerate() {
+        if instance.model >= models {
+            return Err(Error::InstanceModel {
+                instance: at,
+                model: instance.model,
+                models,
+            });
+        }
+        if !instance
+            .transform
+            .iter()
+            .all(|column| column.iter().all(|c| c.is_finite()))
+        {
+            return Err(Error::InstanceTransform { instance: at });
+        }
+        if !instance.color.iter().all(|c| (0.0..=1.0).contains(c)) {
+            return Err(Error::InstanceColor { instance: at });
+        }
+    }
     Ok(())
 }
 
@@ -115,16 +213,30 @@ pub fn check_instances(_instances: &[Instance], _models: usize) -> Result<(), Er
 /// `heading`, `yaw`, or a coordinate of `position` is not finite; no matrix
 /// it returns reverses a triangle's winding.
 pub fn placement(
-    _position: [f32; 3],
-    _heading: f32,
-    _scale: f32,
-    _yaw: f32,
+    position: [f32; 3],
+    heading: f32,
+    scale: f32,
+    yaw: f32,
 ) -> Result<[[f32; 4]; 4], Error> {
+    let bad = |what: &'static str| Err(Error::BadPlacement { what });
+    if !(scale.is_finite() && scale > 0.0) {
+        return bad("scale");
+    }
+    if !heading.is_finite() {
+        return bad("heading");
+    }
+    if !yaw.is_finite() {
+        return bad("yaw");
+    }
+    if !finite3(position) {
+        return bad("position");
+    }
+    let (sin, cos) = (heading - yaw).sin_cos();
     Ok([
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.0],
-        [0.0, 0.0, 0.0, 1.0],
+        [scale * cos, 0.0, scale * sin, 0.0],
+        [0.0, scale, 0.0, 0.0],
+        [-scale * sin, 0.0, scale * cos, 0.0],
+        [position[0], position[1], position[2], 1.0],
     ])
 }
 
@@ -132,6 +244,11 @@ pub fn placement(
 /// `normal`: `color * (AMBIENT + (1 - AMBIENT) * max(n . L, 0))` with the
 /// terrain's own [`LIGHT_DIRECTION`] and [`AMBIENT`].
 #[must_use]
-pub const fn shade_lit(color: [f32; 3], _normal: [f32; 3]) -> [f32; 3] {
-    color
+pub fn shade_lit(color: [f32; 3], normal: [f32; 3]) -> [f32; 3] {
+    let facing = (normal[0] * LIGHT_DIRECTION[0]
+        + normal[1] * LIGHT_DIRECTION[1]
+        + normal[2] * LIGHT_DIRECTION[2])
+        .max(0.0);
+    let light = AMBIENT + (1.0 - AMBIENT) * facing;
+    color.map(|c| c * light)
 }
