@@ -95,8 +95,8 @@ fn child_bone(parent: i32) -> BoneSpec {
     }
 }
 
-/// The sixteen floats of vertex `seed`, in file order: position, tangent,
-/// normal, binormal, uv0, uv1. Distinct across seeds and positions.
+/// The sixteen floats of vertex `seed`, in file order: position, normal,
+/// tangent, binormal, uv0, uv1. Distinct across seeds and positions.
 fn vertex_floats(seed: u8) -> [f32; 16] {
     std::array::from_fn(|k| f32::from(seed) * 16.0 + f32::from(u8::try_from(k).unwrap_or(0)) * 0.5)
 }
@@ -109,8 +109,8 @@ fn expected_vertex(seed: u8) -> Vertex {
     let f = vertex_floats(seed);
     Vertex {
         position: [f[0], f[1], f[2]],
-        tangent: [f[3], f[4], f[5]],
-        normal: [f[6], f[7], f[8]],
+        normal: [f[3], f[4], f[5]],
+        tangent: [f[6], f[7], f[8]],
         binormal: [f[9], f[10], f[11]],
         uv0: [f[12], f[13]],
         uv1: [f[14], f[15]],
