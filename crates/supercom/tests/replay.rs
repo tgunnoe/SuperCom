@@ -225,3 +225,112 @@ fn conformance_window_replay_at_ten_times_prints_one_summary() {
         "{stdout:?}"
     );
 }
+
+/// A replay file ends with its checkpoints: a count as a `u32`, then for each
+/// its tick as a little-endian `u64` and its 32-byte digest (DET-026). The
+/// committed log holds 46, the first at tick 99.
+const CHECKPOINTS: usize = 46;
+const CHECKPOINT_BYTES: usize = 8 + 32;
+
+/// The committed log with one bit of its first checkpoint's digest changed.
+fn log_with_wrong_first_digest() -> Vec<u8> {
+    let Ok(mut bytes) = std::fs::read(committed_log()) else {
+        fail("the committed log reads");
+    };
+    let Some(first) = bytes.len().checked_sub(CHECKPOINTS * CHECKPOINT_BYTES) else {
+        fail("the committed log is shorter than its checkpoints");
+    };
+    let tick = bytes
+        .get(first..first + 8)
+        .and_then(|b| <[u8; 8]>::try_from(b).ok());
+    assert_eq!(tick.map(u64::from_le_bytes), Some(99), "the first tick");
+    let count = first
+        .checked_sub(4)
+        .and_then(|from| bytes.get(from..first))
+        .and_then(|b| <[u8; 4]>::try_from(b).ok());
+    assert_eq!(
+        count.map(u32::from_le_bytes),
+        Some(46),
+        "the checkpoint count precedes the first checkpoint"
+    );
+    let Some(digest_byte) = bytes.get_mut(first + 8) else {
+        fail("the first digest is in the file");
+    };
+    *digest_byte ^= 1;
+    bytes
+}
+
+/// A run that ends in a mismatch writes no summary line (REN-063): the log
+/// with its first checkpoint's digest changed, at ten times the speed in one
+/// real window, run only under `SUPERCOM_REQUIRE_DISPLAY=1` inside a nested
+/// compositor that shows nothing, ends with the failure code and a message
+/// on stderr naming tick 99, and nothing on stdout begins `replayed `.
+#[test]
+fn conformance_window_replay_mismatch_writes_no_summary() {
+    if std::env::var("SUPERCOM_REQUIRE_DISPLAY").as_deref() != Ok("1") {
+        println!("SKIP: set SUPERCOM_REQUIRE_DISPLAY=1 to open a window");
+        return;
+    }
+    let Some(fa) = supercom_testkit::require_game() else {
+        fail(
+            "SUPERCOM_REQUIRE_DISPLAY=1 is set but no game install was found; \
+             set SUPERCOM_FA_DIR to the install",
+        );
+    };
+    let dir = std::env::temp_dir().join(format!("supercom-replay-mismatch-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    if std::fs::create_dir_all(&dir).is_err() {
+        fail("the temporary directory is made");
+    }
+    let altered = dir.join("wrong-digest.replay");
+    if std::fs::write(&altered, log_with_wrong_first_digest()).is_err() {
+        let _ = std::fs::remove_dir_all(&dir);
+        fail("the altered copy is written");
+    }
+    let spawned = Command::new(BINARY)
+        .arg("replay")
+        .arg(&altered)
+        .args(["--speed", "10"])
+        .env("SUPERCOM_FA_DIR", fa)
+        .env("SUPERCOM_CACHE_DIR", dir.join("cache"))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+    let Ok(mut child) = spawned else {
+        let _ = std::fs::remove_dir_all(&dir);
+        fail("the binary starts");
+    };
+    let deadline = Instant::now() + Duration::from_secs(120);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = std::fs::remove_dir_all(&dir);
+                fail("the window did not finish within two minutes");
+            }
+            Err(error) => {
+                let _ = std::fs::remove_dir_all(&dir);
+                fail(&format!("waiting for the binary failed: {error}"));
+            }
+        }
+    };
+    let output = child.wait_with_output();
+    let _ = std::fs::remove_dir_all(&dir);
+    let Ok(output) = output else {
+        fail("the binary's output is read");
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(!status.success(), "a mismatch fails the run: {stdout:?}");
+    assert_eq!(status.code(), Some(1), "stderr {stderr:?}");
+    assert!(stderr.contains("tick 99"), "stderr {stderr:?}");
+    assert!(
+        !stdout.lines().any(|line| line.starts_with("replayed ")),
+        "no summary line after a mismatch: {stdout:?}"
+    );
+}
