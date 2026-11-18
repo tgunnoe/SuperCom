@@ -601,6 +601,11 @@ fn supercom_mesh_or_marker_rule_cases() {
     for (distance, own, want) in [
         (8.0, 1.0, true),
         (49.0, 1.0, true),
+        (50.0, 1.0, true),
+        (0.0, 1.0, true),
+        (0.0, 0.0, false),
+        (0.0, -1.0, false),
+        (0.0, f32::NAN, false),
         (51.0, 1.0, false),
         (309.02, 1.0, false),
         (8.0, 3.0, true),
@@ -652,6 +657,47 @@ fn supercom_mesh_or_marker_rule_cases() {
             "a kind not resolved is a marker"
         );
     }
+}
+
+/// A mesh at half a tick from a position 8 to 16 and a heading 6.2 to 0.1 is
+/// half way along x, its heading the shorter arc through the wrap, 6.2915926.
+fn mesh_between_ticks(kinds: &BTreeMap<String, UnitKind>) {
+    let mut before = state_of(kinds);
+    before.spawn(Army(1), "mobile1", pos(8.0, 0.0, 8.0), hundred());
+    if let Some(entity) = before.entities.values_mut().next() {
+        entity.heading = 6.2;
+    }
+    let mut now = state_of(kinds);
+    now.spawn(Army(1), "mobile1", pos(16.0, 0.0, 8.0), hundred());
+    if let Some(entity) = now.entities.values_mut().next() {
+        entity.heading = 0.1;
+    }
+    let blended = scene_instances(
+        &now,
+        &Kept::of(&before),
+        0.5,
+        kinds,
+        &unit_meshes(),
+        &ramp_mesh(),
+        8.0,
+    )
+    .unwrap_or_default();
+    assert_eq!(blended.len(), 1);
+    assert_eq!(blended[0].style, Style::Lit);
+    let t = blended[0].transform;
+    assert!(close3(at(&blended[0]), [12.0, 7.5, 8.0]), "{:?}", t[3]);
+    let forward = apply(&t, [0.0, 0.0, 1.0]);
+    assert!(
+        close3(
+            [
+                forward[0] - t[3][0],
+                forward[1] - t[3][1],
+                forward[2] - t[3][2]
+            ],
+            [0.499_982_33, 0.0, 0.004_203_624]
+        ),
+        "the heading along the shorter arc: {forward:?}"
+    );
 }
 
 /// A resolved unit near the camera is one lit instance of its mesh in its
@@ -723,6 +769,8 @@ fn supercom_scene_draws_meshes_and_markers() {
         ],
         "everything is a marker at the strategic view but the commander's mesh"
     );
+
+    mesh_between_ticks(&kinds);
 
     // Unfinished: half built, dimmed as the marker is.
     if let Some(entity) = state.entities.get_mut(&mobile) {

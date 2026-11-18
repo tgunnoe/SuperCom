@@ -62,13 +62,15 @@ pub struct Play {
     ticks_run: u64,
     matched: usize,
     held_frames: u64,
+    meshes: Meshes,
     unnamed: BTreeSet<String>,
 }
 
 impl Play {
-    /// A run at tick 0 of `state` over `replay`.
+    /// A run at tick 0 of `state` over `replay`, with `meshes` the kinds
+    /// the run resolved.
     #[must_use]
-    pub fn new(state: State, replay: Replay) -> Self {
+    pub fn new(state: State, replay: Replay, meshes: Meshes) -> Self {
         Self {
             state,
             replay,
@@ -76,16 +78,36 @@ impl Play {
             ticks_run: 0,
             matched: 0,
             held_frames: 0,
+            meshes,
             unnamed: BTreeSet::new(),
         }
     }
 
-    /// Notes the kinds the state now holds that `meshes` does not.
-    pub fn note_unnamed(&mut self, meshes: &Meshes) {
-        self.unnamed.extend(meshes.unnamed(&self.state));
+    /// Notes the kinds the state now holds that the run did not resolve.
+    pub fn note_unnamed(&mut self) {
+        self.unnamed.extend(self.meshes.unnamed(&self.state));
+    }
+
+    /// The kinds the run resolved.
+    #[must_use]
+    pub fn meshes(&self) -> &Meshes {
+        &self.meshes
+    }
+
+    /// The run's summary line, from the loop's own counts.
+    #[must_use]
+    pub fn summary(&self) -> String {
+        summary_line(
+            self.ticks_run,
+            self.matched,
+            self.replay.checkpoints.len(),
+            self.held_frames,
+            self.unnamed.len(),
+        )
     }
 
     /// How many distinct kinds met so far were not named by the replay.
+    #[cfg(test)]
     #[must_use]
     pub fn unnamed(&self) -> usize {
         self.unnamed.len()
@@ -166,18 +188,21 @@ impl Play {
     }
 
     /// The checkpoints matched so far.
+    #[cfg(test)]
     #[must_use]
     pub fn matched(&self) -> usize {
         self.matched
     }
 
     /// The checkpoints in the replay.
+    #[cfg(test)]
     #[must_use]
     pub fn total(&self) -> usize {
         self.replay.checkpoints.len()
     }
 
     /// The frames at which the cap held ticks back.
+    #[cfg(test)]
     #[must_use]
     pub fn held_frames(&self) -> u64 {
         self.held_frames
@@ -212,7 +237,6 @@ struct Replaying {
     clock: Option<Instant>,
     fraction: f64,
     reported: bool,
-    meshes: Meshes,
 }
 
 impl Replaying {
@@ -231,7 +255,7 @@ impl Replaying {
                 self.play.ticks_run(),
             );
             self.play.frame(&owed)?;
-            self.play.note_unnamed(&self.meshes);
+            self.play.note_unnamed();
             self.fraction = if self.play.finished() {
                 1.0
             } else {
@@ -248,16 +272,7 @@ impl Replaying {
     fn report(&mut self) {
         if !self.reported {
             self.reported = true;
-            println!(
-                "{}",
-                summary_line(
-                    self.play.ticks_run(),
-                    self.play.matched(),
-                    self.play.total(),
-                    self.play.held_frames(),
-                    self.play.unnamed()
-                )
-            );
+            println!("{}", self.play.summary());
         }
     }
 }
@@ -324,12 +339,11 @@ pub fn run_replay(
         shift: false,
         outcome: None,
         replay: Some(Replaying {
-            play: Play::new(state, replay),
+            play: Play::new(state, replay, meshes),
             speed,
             clock: None,
             fraction: 1.0,
             reported: false,
-            meshes,
         }),
     };
     drive(event_loop, &mut app)
@@ -344,7 +358,7 @@ fn set_scene(replaying: &Replaying, gfx: &mut Gfx) -> Result<(), RunError> {
         replaying.play.kept(),
         replaying.fraction,
         &state.world().units,
-        &replaying.meshes,
+        replaying.play.meshes(),
         &gfx.mesh,
         gfx.camera.distance(),
     )?;
@@ -546,7 +560,9 @@ impl ApplicationHandler for App {
         match build(
             event_loop,
             &self.map,
-            self.replay.as_ref().map(|replaying| &replaying.meshes),
+            self.replay
+                .as_ref()
+                .map(|replaying| replaying.play.meshes()),
         ) {
             Ok(gfx) => {
                 if let Some(replaying) = self.replay.as_mut() {

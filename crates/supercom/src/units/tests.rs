@@ -1,8 +1,9 @@
 use super::*;
 use crate::markers::marker_models;
 use std::path::Path;
+use std::sync::Arc;
 use supercom_sim::{
-    Army, Command, Order, Pos, QueueMode, REPLAY_FORMAT_VERSION, ReplayHeader, Tick,
+    Army, Command, Order, Pos, Q, QueueMode, REPLAY_FORMAT_VERSION, ReplayHeader, Tick, World,
 };
 
 const FIVE: [&str; 5] = ["ueb1103", "ueb2101", "uel0001", "urb1101", "url0001"];
@@ -108,7 +109,7 @@ fn supercom_unit_mesh_model_cases() {
     assert_eq!(model_of_mesh(&other), model);
 }
 
-fn header(players: &[(u8, &str)]) -> ReplayHeader {
+fn header() -> ReplayHeader {
     ReplayHeader {
         format_version: REPLAY_FORMAT_VERSION,
         engine_version: "test".to_owned(),
@@ -116,10 +117,7 @@ fn header(players: &[(u8, &str)]) -> ReplayHeader {
         map_digest: [0; 32],
         catalog_digest: [0; 32],
         plugins: Vec::new(),
-        players: players
-            .iter()
-            .map(|(army, name)| (Army(*army), (*name).to_owned()))
-            .collect(),
+        players: Vec::new(),
         seed: 1,
     }
 }
@@ -136,9 +134,9 @@ fn command(seq: u32, order: Order) -> Command {
     }
 }
 
-fn replay_of(players: &[(u8, &str)], orders: Vec<Order>) -> Replay {
+fn replay_of(orders: Vec<Order>) -> Replay {
     Replay {
-        header: header(players),
+        header: header(),
         commands: orders
             .into_iter()
             .zip(0..)
@@ -156,47 +154,50 @@ fn at() -> Pos {
     }
 }
 
-/// The kinds a replay names: each player's commander, every build order's
-/// blueprint in ASCII lower case, sorted and distinct; no other order names
-/// one.
+fn state_with(blueprints: &[&str]) -> State {
+    let mut state = State::with_world(Arc::new(World::empty()), 1);
+    for blueprint in blueprints {
+        state.spawn(Army(1), blueprint, at(), Q::from_num(100));
+    }
+    state
+}
+
+/// The kinds a run resolves: the blueprint of every entity of the start
+/// state and of every build order, in ASCII lower case, sorted and distinct;
+/// no other order names one.
 #[test]
 fn supercom_unit_kinds_named_cases() {
-    let players = [(1, "UEF"), (2, "Cybran"), (3, "Aeon"), (4, "Seraphim")];
-    let replay = replay_of(
-        &players,
-        vec![
-            Order::BuildMobile {
-                blueprint: "UEB1103".to_owned(),
-                at: at(),
-            },
-            Order::BuildFactory {
-                blueprint: "ueb2101".to_owned(),
-            },
-            Order::BuildMobile {
-                blueprint: "ueB1103".to_owned(),
-                at: at(),
-            },
-            Order::Move { to: at() },
-            Order::Stop,
-        ],
+    let state = state_with(&["uel0001", "uel0001", "url0001"]);
+    let replay = replay_of(vec![
+        Order::BuildMobile {
+            blueprint: "UEB1103".to_owned(),
+            at: at(),
+        },
+        Order::BuildFactory {
+            blueprint: "ueb1103".to_owned(),
+        },
+        Order::BuildMobile {
+            blueprint: "urb1101".to_owned(),
+            at: at(),
+        },
+        Order::BuildFactory {
+            blueprint: "UEL0001".to_owned(),
+        },
+        Order::Move { to: at() },
+        Order::Stop,
+    ]);
+    assert_eq!(
+        run_kinds(&state, &replay),
+        ["ueb1103", "uel0001", "urb1101", "url0001"],
     );
     assert_eq!(
-        kinds_named(&replay),
-        [
-            "ual0001", "ueb1103", "ueb2101", "uel0001", "url0001", "xsl0001"
-        ],
+        run_kinds(&state_with(&[]), &replay_of(Vec::new())),
+        Vec::<String>::new(),
+        "no entity and no build order name no kind"
     );
-
-    let two = replay_of(&[(1, "UEF"), (2, "Cybran")], Vec::new());
-    assert_eq!(kinds_named(&two), ["uel0001", "url0001"]);
-
-    // A name that is no faction's names nothing: the start state has refused
-    // such a header before this is asked.
-    let odd = replay_of(&[(1, "Klingon"), (2, "UEF")], Vec::new());
-    assert_eq!(kinds_named(&odd), ["uel0001"]);
     assert_eq!(
-        kinds_named(&replay_of(&[], Vec::new())),
-        Vec::<String>::new()
+        run_kinds(&state_with(&["uel0001"]), &replay_of(Vec::new())),
+        ["uel0001"]
     );
 }
 

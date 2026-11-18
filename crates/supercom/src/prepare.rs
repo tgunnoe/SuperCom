@@ -6,7 +6,7 @@ use crate::cache::{CacheVars, cache_dir};
 use crate::cli::is_single_component;
 use crate::error::RunError;
 use crate::plan::{check_install, read_map};
-use crate::units::{Meshes, kinds_named, resolve_kinds};
+use crate::units::{Meshes, resolve_kinds, run_kinds};
 use std::fs;
 use std::path::Path;
 use supercom_scmap::Map;
@@ -73,7 +73,7 @@ pub fn prepare_replay(
             reason: error.to_string(),
         })?;
     let map = read_map(install, folder)?;
-    let meshes = resolve_kinds(install, &kinds_named(&replay))?;
+    let meshes = resolve_kinds(install, &run_kinds(&state, &replay))?;
     Ok(Prepared {
         map,
         replay,

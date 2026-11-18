@@ -128,14 +128,7 @@ fn supercom_prepare_replay_failures() {
         "an install holding nothing gives no world: {world:?}"
     );
 
-    // The step after the map file: the kinds the header's two players name,
-    // and an install whose archives do not mount.
-    let named = read_replay(&bytes("SCMP_012", vec![(Tick(99), [1; 32])]));
-    assert_eq!(
-        named.map(|replay| crate::units::kinds_named(&replay)).ok(),
-        Some(vec!["uel0001".to_owned(), "url0001".to_owned()]),
-        "a replay of a UEF and a Cybran player names their two commanders"
-    );
+    // The step after the map file: an install whose archives do not mount.
     let mounted = crate::units::resolve_kinds(root.path(), &["uel0001".to_owned()]);
     assert!(
         matches!(&mounted, Err(RunError::UnitArchives { .. })),
@@ -198,7 +191,10 @@ fn conformance_prepare_replay_resolves_the_named_kinds() {
     assert!(prepared.is_ok(), "{:?}", prepared.as_ref().err());
     let Ok(prepared) = prepared else { return };
     let five = ["ueb1103", "ueb2101", "uel0001", "urb1101", "url0001"];
-    assert_eq!(crate::units::kinds_named(&prepared.replay), five);
+    assert_eq!(
+        crate::units::run_kinds(&prepared.state, &prepared.replay),
+        five
+    );
     assert_eq!(prepared.meshes.model_set().len(), 9);
     for (place, kind) in five.iter().enumerate() {
         assert_eq!(

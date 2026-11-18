@@ -97,10 +97,10 @@ fn faction(name: &str) -> Option<Faction> {
     }
 }
 
-/// The lower-case, sorted, distinct ids of the kinds `replay` names: each
-/// player's commander and every build order's blueprint.
+/// The lower-case, sorted, distinct ids of the kinds a run resolves.
 #[must_use]
-pub fn kinds_named(replay: &Replay) -> Vec<String> {
+pub fn run_kinds(state: &State, replay: &Replay) -> Vec<String> {
+    let _ = state;
     let commanders = replay
         .header
         .players
