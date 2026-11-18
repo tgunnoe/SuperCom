@@ -122,6 +122,41 @@ fn supercom_prepare_replay_failures() {
         "{relative:?}"
     );
 
+    // Two defects at once: the earlier step's failure is the one given.
+    let no_install = root.path().join("no-such-install");
+    let missing_and_unreadable = error_text(prepare_replay(
+        Some(&no_install),
+        &root.path().join("absent.replay"),
+        CacheVars::default(),
+    ));
+    assert_eq!(
+        missing_and_unreadable.map(|e| e.0),
+        Some(RunError::InstallMissing { dir: no_install }),
+        "the install is checked before the replay file is read"
+    );
+    let no_checkpoint_and_slash =
+        write(root.path(), "empty-slash.replay", &bytes("a/b", Vec::new()));
+    let first = error_text(prepare_replay(
+        Some(root.path()),
+        &no_checkpoint_and_slash,
+        CacheVars::default(),
+    ));
+    assert!(
+        matches!(&first, Some((RunError::ReplayNoCheckpoints { path }, _))
+            if *path == no_checkpoint_and_slash),
+        "a replay with no checkpoint is refused before its map folder is checked: {first:?}"
+    );
+    let slash_and_no_cache = error_text(prepare_replay(
+        Some(root.path()),
+        &slash,
+        CacheVars::default(),
+    ));
+    assert!(
+        matches!(&slash_and_no_cache, Some((RunError::ReplayMapFolder { folder }, _))
+            if folder == "a/b"),
+        "the map folder is checked before the cache directory: {slash_and_no_cache:?}"
+    );
+
     let world = error_text(prepare_replay(Some(root.path()), &good, vars));
     assert!(
         matches!(&world, Some((RunError::World { .. }, text)) if text.starts_with("world:")),
