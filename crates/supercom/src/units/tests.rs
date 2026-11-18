@@ -404,6 +404,98 @@ fn supercom_unit_kind_resolution_reports_the_earlier_of_two_failures() {
     );
 }
 
+/// The string literals of Rust source, comments left out: the text between
+/// double quotes, with a backslash taking the next character.
+fn string_literals(source: &str) -> Vec<String> {
+    let (mut found, mut current) = (Vec::new(), String::new());
+    let (mut in_string, mut in_comment) = (false, false);
+    let mut chars = source.chars().peekable();
+    while let Some(c) = chars.next() {
+        if in_comment {
+            in_comment = c != '\n';
+        } else if in_string {
+            match c {
+                '\\' => {
+                    let _ = chars.next();
+                }
+                '"' => {
+                    in_string = false;
+                    found.push(std::mem::take(&mut current));
+                }
+                _ => current.push(c),
+            }
+        } else if c == '/' && chars.peek() == Some(&'/') {
+            in_comment = true;
+        } else if c == '"' {
+            in_string = true;
+        } else if c == '\'' {
+            // A character literal: '"' must not open a string.
+            if chars.peek() == Some(&'\\') {
+                let _ = chars.next();
+            }
+            let _ = chars.next();
+            if chars.peek() == Some(&'\'') {
+                let _ = chars.next();
+            }
+        }
+    }
+    found
+}
+
+/// The `.rs` files under `dir`, not named for tests, found recursively.
+fn source_files(dir: &Path, into: &mut Vec<std::path::PathBuf>) {
+    let entries = std::fs::read_dir(dir);
+    assert!(
+        entries.is_ok(),
+        "{dir:?} lists: {:?}",
+        entries.as_ref().err()
+    );
+    let Ok(entries) = entries else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name();
+        if path.is_dir() {
+            source_files(&path, into);
+        } else if path.extension().is_some_and(|ext| ext == "rs")
+            && name != "tests.rs"
+            && name != "testing.rs"
+        {
+            into.push(path);
+        }
+    }
+}
+
+/// REN-082: the binary states no faction's name: no string literal of a
+/// non-test source file holds one, and the walk read enough files that an
+/// empty one cannot pass.
+#[test]
+fn supercom_binary_names_no_faction() {
+    let mut files = Vec::new();
+    source_files(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut files,
+    );
+    assert!(files.len() >= 10, "read only {} files", files.len());
+    for file in &files {
+        let text = std::fs::read_to_string(file);
+        assert!(text.is_ok(), "{file:?} reads: {:?}", text.as_ref().err());
+        let text = text.unwrap_or_default();
+        for literal in string_literals(&text) {
+            for faction in ["UEF", "Aeon", "Cybran", "Seraphim"] {
+                assert!(
+                    !literal.contains(faction),
+                    "{file:?} holds the literal {literal:?}"
+                );
+            }
+        }
+    }
+    // The reader finds a literal past a comment, an escape, and a quote
+    // character, so the walk above is not blind.
+    let found =
+        string_literals("// \"UEF\"\nlet a = '\"'; let b = \"x\\\"y\"; let c = \"Cybran\";");
+    assert_eq!(found, ["xy".to_owned(), "Cybran".to_owned()]);
+}
+
 /// The text of a kind's failure holds the kind and the step's name as the
 /// clause lists them, one for each of the six steps, and the text of a
 /// mismatch holds its tick.
