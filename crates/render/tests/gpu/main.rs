@@ -1787,7 +1787,7 @@ fn conformance_gpu_lit_pixels_match_the_lit_shading_function() {
     // is scaled to length 0.25 and turned to (0, 0.8, 0.6), whose share of
     // the light (-0.36, 0.8, -0.48) is 0.64 - 0.288 = 0.352, so the lit
     // factor is 0.3 + 0.7 * 0.352 = 0.5464. Left unturned or not
-    // renormalized, the normal would give 0.5968 or about 0.14.
+    // renormalized, the normal would give 0.5968 or about 0.36.
     let half_turn = std::f32::consts::FRAC_PI_2;
     let lit_at = [32.0, 8.0, 32.0];
     let flat_at = [16.0, 8.0, 16.0];
