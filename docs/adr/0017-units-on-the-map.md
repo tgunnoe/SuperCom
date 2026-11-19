@@ -1,6 +1,8 @@
 # ADR-0017: Units on the map: models and instances in the renderer
 
-**Status:** PROPOSED (awaiting the head's ratification)
+**Status:** ACCEPTED (ratified by the head on 2026-11-18, as written, after
+running the recorded skirmish on SCMP_012 in the window; the section
+Known at ratification lists what that look found and what stays open)
 
 **Date:** 2026-11-17
 
@@ -345,4 +347,32 @@ REN-056); this record is the source each names.
   reads a matrix.
 - **Camera that follows the ground now.** It changes REN-009's rule for the
   target and its clauses, and is tracked as issue 84 of
+  https://github.com/tgunnoe/SuperCom.
+
+## Known at ratification
+
+- **What the look covered.** On 2026-11-18 the head played the recorded skirmish
+  on SCMP_012 in the window at ten times the speed. Two commanders stood at
+  their start positions in two colours; structures appeared where and when they
+  were built, dimmer while unfinished; units moved without jumps; shots were
+  seen in flight; a defeated army's units vanished
+  about 20 seconds of match time after its commander's death; zooming in,
+  markers turned into meshes that stand on the ground at the right size and face
+  the way they move; and the run ended with every checkpoint matched, no frame
+  held back, and no kind drawn as a marker.
+- **The window's two calls.** Zooming in until markers became meshes is the look
+  that closes the window's two calls that no test reaches (REN-083, REN-088):
+  the model set and the instance list handed to the renderer.
+- **Structures face east here.** The head reports that structures face south in
+  the original, said without the original running beside the window. This is
+  filed as issue 93 of https://github.com/tgunnoe/SuperCom and not fixed, since
+  whether the simulation's heading for a new structure or the draw should change
+  is undecided.
+- **Mirroring stays open.** The head saw no unit drawn mirrored, but the
+  original was not running beside the window, so whether a unit is drawn as the
+  mirror image of itself in the original stays open (AGENTS.md U11).
+- **Filed and not done here.** Issues 84 (the camera cannot get close to the
+  ground on maps with relief), 89 (which stored vector is the tangent), 90 (a
+  frame can be counted as held back at the very end of a recording with nothing
+  held), and 92 (the windowed tests wait on each other in one compositor) of
   https://github.com/tgunnoe/SuperCom.

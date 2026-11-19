@@ -52,8 +52,14 @@ having raised no mismatch. The window's two calls that hand the renderer the
 model set and the instance list (REN-083, REN-088) are reached by no test: the
 window opens at the strategic view, where every unit of the committed log is a
 marker, and no test zooms; the close-zoom pixel test covers everything up to
-those calls, and the head's look closes them by zooming in until markers become
-meshes.
+those calls, and the head's look of 2026-11-18
+closed them: zooming in, markers became meshes.
+Structures are drawn facing east, where the head reports that the original
+builds them facing south (issue 93 of https://github.com/tgunnoe/SuperCom);
+whether a unit is drawn as the mirror image of itself in the original is
+unobserved (AGENTS.md U11); and at the very end of a recording REN-076 can count
+a frame as held back with nothing held (issue 90 of
+https://github.com/tgunnoe/SuperCom).
 
 ## Coordinates and conventions
 
