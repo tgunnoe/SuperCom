@@ -410,3 +410,10 @@ the head had not seen it when ratifying.
   loader or simulation crate is extended by
   docs/adr/0017-units-on-the-map.md, which is proposed and awaiting
   ratification: the replay run needs the simulation's crates.
+- **Ratified on 2026-11-18:** the head ratified
+  docs/adr/0017-units-on-the-map.md, which extends this record in three places:
+  the near end of the zoom range, 40 world units here, is 8 (REN-010);
+  the command line gains `replay` (REN-032); and this record's sentence that the
+  binary depends on no loader or simulation crate no longer holds, since the
+  replay run needs the simulation's crates. The two bullets above were written
+  while that record was proposed and stand as written.
