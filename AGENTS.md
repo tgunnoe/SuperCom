@@ -45,9 +45,11 @@ Commander Forged Alliance/` (`gamedata/*.scd` store-only zips: 568 unit
   docs/adr/0002-data-model-nickel.md. The installed armour table is read
   from its Lua by the ingest crate in this version, outside the Nickel model
   (the head's ruling of 2026-10-18); its overlay reopens when mod overlays
-  land. Signpost: full-set evaluation exceeds
-  the load budget even with the cache, or imports fail through
-  `nickel-lang-core`.
+  land. A unit's mesh scale is read from the installed blueprint by the binary
+  in this version, outside the Nickel model (the head's ruling of 2026-11-17);
+  it reopens when unit textures or mod overlays land. Signpost: full-set
+  evaluation exceeds the load budget even with the cache, or imports fail
+  through `nickel-lang-core`.
 - **R5 Rendering on wgpu.** Terrain splatting, decals, LiSPSM shadows, water
   reflection/refraction, team-colour unit shading, fog of war, strategic
   icons, bloom. Grounding: docs/adr/0003-render-and-sim-stack.md and the
@@ -133,6 +135,12 @@ Each item: statement · grounding (why unresolved) · signpost (what resolves it
   in the specification lint's `observed` class, and every other behavioural
   rule rests on readable Lua or on a recorded choice. Signpost: the first
   record with tick-level numbers that a clause is tested against.
+- **U11 Facing and mirroring against the original.** Whether a drawn unit is the
+  mirror image of the original cannot be told from the installed files
+  (docs/adr/0017-units-on-the-map.md), and structures face east here where the
+  head reports south in the original (issue 93). Grounding: the head's look of
+  2026-11-18, made without the original beside the window. Signpost: a
+  side-by-side observation recorded as U10's are.
 - **U8 Built-in versus plugin.** Which v0 behaviours (AI in particular) ship
   as first-party Wasm plugins rather than built-in Rust. Signpost: an ADR
   after the spec campaign.
@@ -164,7 +172,9 @@ Core (planned; `crates/supercom`, `crates/scd`, `crates/testkit`,
 `crates/sim-ingest`, `crates/replay-harness`, and `crates/render` exist today —
 WIP):
 
-- `crates/supercom` — binary: configuration, wiring, launches a skirmish.
+- `crates/supercom` — binary: configuration, wiring; today `view` draws an
+  installed map and `replay` plays a recorded match (units as markers, and as
+  the game's meshes up close); launching a skirmish is planned.
 - `crates/scd` — `.scd` archive virtual filesystem and mount order.
 - `crates/bp` — the data subset of the blueprint Lua dialect, parsed to a
   value tree; `crates/data` — Nickel contracts and the typed blueprint model;
@@ -192,7 +202,7 @@ specification domain, `survey/` census scripts over the installed game).
 ## Spec Pointers
 
 - docs/specs/README.md — the reverse-engineering spec index.
-- docs/adr/ — decisions 0001–0016.
+- docs/adr/ — decisions 0001–0017.
 - Graphics pipeline study:
   https://www.adriancourreges.com/blog/2015/06/23/supreme-commander-graphics-study/
 - Engine Lua API surface (read for understanding only, see I1):

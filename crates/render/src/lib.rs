@@ -1,5 +1,6 @@
 //! Headless core of the first-light renderer: the terrain grid built from a
-//! parsed map, the water plane, the camera, and the shading function, all
+//! parsed map, the water plane, the camera, the shading function, and the
+//! models and instances drawn over them, all
 //! pure functions over plain `f32` arrays, and the GPU side that draws them
 //! with wgpu into any texture view. Nothing here opens a window or links a
 //! windowing or math crate; the windowed mode calls the one draw function.
@@ -12,6 +13,8 @@
 mod camera;
 mod error;
 mod gate;
+mod model;
+mod model_shader;
 mod renderer;
 mod shader;
 mod shading;
@@ -24,6 +27,11 @@ pub use camera::{
 };
 pub use error::Error;
 pub use gate::{GpuGate, gpu_gate};
+pub use model::{
+    INSTANCE_BYTES, Instance, Model, Style, check_instances, check_model, instances_fit,
+    model_fits, placement, shade_lit,
+};
+pub use model_shader::model_shader_source;
 pub use renderer::{Renderer, SurfaceRenderer, surface_format};
 pub use shader::{CLEAR_COLOR, WATER_COLOR, shader_source};
 pub use shading::{AMBIENT, LIGHT_DIRECTION, RAMP, normalize_height, shade};

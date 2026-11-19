@@ -165,6 +165,56 @@ impl TerrainMesh {
     }
 }
 
+impl TerrainMesh {
+    /// The height of the drawn surface under `(x, z)`: the surface of the
+    /// two triangles of the cell that holds the point, split from the
+    /// cell's north-east vertex to its south-west one as the indices are,
+    /// interpolated linearly within the triangle. `None` for a point
+    /// outside the extent from 0 to [`TerrainMesh::width`] along x and from
+    /// 0 to [`TerrainMesh::height`] along z, edges included, and for a
+    /// coordinate that is not finite.
+    #[must_use]
+    pub fn height_at(&self, x: f32, z: f32) -> Option<f32> {
+        let in_extent = |v: f32, limit: f32| v.is_finite() && (0.0..=limit).contains(&v);
+        if !(in_extent(x, self.width) && in_extent(z, self.height)) {
+            return None;
+        }
+        let (column, u) = locate(x, self.width, self.columns)?;
+        let (row, v) = locate(z, self.height, self.rows)?;
+        let stride = self.columns + 1;
+        let at = |i: u32, j: u32| {
+            let index = usize::try_from(j * stride + i).ok()?;
+            self.positions.get(index).map(|p| p[1])
+        };
+        let (north_west, north_east) = (at(column, row)?, at(column + 1, row)?);
+        let (south_west, south_east) = (at(column, row + 1)?, at(column + 1, row + 1)?);
+        // The cell is split from its north-east vertex to its south-west one,
+        // where u + v is 1.
+        Some(if u + v <= 1.0 {
+            north_west + u * (north_east - north_west) + v * (south_west - north_west)
+        } else {
+            south_east
+                + (1.0 - u) * (south_west - south_east)
+                + (1.0 - v) * (north_east - south_east)
+        })
+    }
+}
+
+/// The cell of `cells` along an axis of `extent` that holds `coordinate`,
+/// and the fraction of the cell it lies at; the far edge belongs to the last
+/// cell. `None` for an axis with no cell.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the value is clamped to 0 up to the last cell before the cast"
+)]
+fn locate(coordinate: f32, extent: f32, cells: u32) -> Option<(u32, f32)> {
+    let last = cells.checked_sub(1)?;
+    let scaled = coordinate / (extent / to_f32(cells));
+    let cell = scaled.floor().clamp(0.0, to_f32(last)) as u32;
+    Some((cell, scaled - to_f32(cell)))
+}
+
 /// The cell counts of a grid whose vertex count already fits 32 bits.
 #[derive(Clone, Copy)]
 struct Grid {

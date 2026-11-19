@@ -14,12 +14,32 @@ use supercom_scmap::Map;
 /// be listed, a folder without exactly one map file, an unreadable file, or
 /// a file that does not parse.
 pub fn plan_run(game_dir: Option<&Path>, folder: &str) -> Result<Map, RunError> {
+    let dir = check_install(game_dir)?;
+    read_map(dir, folder)
+}
+
+/// The install directory, if there is one and it is a directory.
+///
+/// # Errors
+/// [`RunError::InstallUnresolved`] for none and [`RunError::InstallMissing`]
+/// for a path that is not a directory.
+pub fn check_install(game_dir: Option<&Path>) -> Result<&Path, RunError> {
     let dir = game_dir.ok_or(RunError::InstallUnresolved)?;
-    if !dir.is_dir() {
-        return Err(RunError::InstallMissing {
+    if dir.is_dir() {
+        Ok(dir)
+    } else {
+        Err(RunError::InstallMissing {
             dir: dir.to_path_buf(),
-        });
+        })
     }
+}
+
+/// Finds, reads, and parses the map in `folder` under the install `dir`.
+///
+/// # Errors
+/// [`RunError`] for a folder that cannot be listed, a folder without
+/// exactly one map file, an unreadable file, or a file that does not parse.
+pub fn read_map(dir: &Path, folder: &str) -> Result<Map, RunError> {
     let folder_path = dir.join("maps").join(folder);
     let listing = |error: std::io::Error| RunError::MapFolder {
         folder: folder.to_owned(),
