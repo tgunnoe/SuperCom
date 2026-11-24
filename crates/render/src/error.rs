@@ -106,6 +106,99 @@ pub enum Error {
         /// Height in pixels.
         height: u32,
     },
+    /// A model has no vertex or no index.
+    EmptyModel {
+        /// The model's index in the set.
+        model: usize,
+    },
+    /// A model's position and normal counts differ.
+    ModelNormalCount {
+        /// The model's index in the set.
+        model: usize,
+        /// Positions the model holds.
+        positions: usize,
+        /// Normals the model holds.
+        normals: usize,
+    },
+    /// A model's index count is not a multiple of three.
+    ModelIndexCount {
+        /// The model's index in the set.
+        model: usize,
+        /// Indices the model holds.
+        indices: usize,
+    },
+    /// A model's index is at or past its vertex count.
+    ModelIndexRange {
+        /// The model's index in the set.
+        model: usize,
+        /// The offending index.
+        index: u32,
+        /// Vertices the model holds.
+        vertices: usize,
+    },
+    /// A model's position or normal is not finite.
+    ModelNonFinite {
+        /// The model's index in the set.
+        model: usize,
+        /// The offending vertex.
+        vertex: usize,
+    },
+    /// A model's normal is shorter than 1e-6.
+    ModelShortNormal {
+        /// The model's index in the set.
+        model: usize,
+        /// The offending vertex.
+        vertex: usize,
+    },
+    /// A buffer a model needs would exceed the device's maximum buffer
+    /// size.
+    ModelTooLarge {
+        /// Vertices the model holds.
+        vertices: usize,
+        /// Indices the model holds.
+        indices: usize,
+        /// Which buffer: `"vertex"` or `"index"`.
+        buffer: &'static str,
+        /// The size in bytes that buffer would need.
+        bytes: u64,
+        /// The device's maximum buffer size in bytes.
+        limit: u64,
+    },
+    /// An instance names a model the uploaded set does not hold.
+    InstanceModel {
+        /// The instance's position in the list.
+        instance: usize,
+        /// The model index it names.
+        model: usize,
+        /// Models the set holds.
+        models: usize,
+    },
+    /// An instance's transform holds a value that is not finite.
+    InstanceTransform {
+        /// The instance's position in the list.
+        instance: usize,
+    },
+    /// An instance's colour channel is not finite or is outside 0 to 1.
+    InstanceColor {
+        /// The instance's position in the list.
+        instance: usize,
+    },
+    /// An instance list's buffer would exceed the device's maximum buffer
+    /// size.
+    InstancesTooLarge {
+        /// Instances in the list.
+        count: usize,
+        /// The size in bytes the buffer would need.
+        bytes: u64,
+        /// The device's maximum buffer size in bytes.
+        limit: u64,
+    },
+    /// A placement's scale is not finite and positive, or its heading,
+    /// yaw, or position is not finite.
+    BadPlacement {
+        /// Which input: `"scale"`, `"heading"`, `"yaw"`, or `"position"`.
+        what: &'static str,
+    },
     /// wgpu reported a validation or out-of-memory error while the
     /// renderer created resources or recorded a frame.
     Gpu {
@@ -176,6 +269,18 @@ impl fmt::Display for Error {
                     "the render target is {width} by {height} pixels; both must be positive"
                 )
             }
+            Self::EmptyModel { .. }
+            | Self::ModelNormalCount { .. }
+            | Self::ModelIndexCount { .. }
+            | Self::ModelIndexRange { .. }
+            | Self::ModelNonFinite { .. }
+            | Self::ModelShortNormal { .. }
+            | Self::ModelTooLarge { .. }
+            | Self::InstanceModel { .. }
+            | Self::InstanceTransform { .. }
+            | Self::InstanceColor { .. }
+            | Self::InstancesTooLarge { .. }
+            | Self::BadPlacement { .. } => self.fmt_model(f),
             Self::Gpu { during, reason } => {
                 write!(f, "wgpu reported an error during {during}: {reason}")
             }
@@ -190,6 +295,85 @@ impl fmt::Display for Error {
                 f,
                 "extent {width} by {height} is smaller than the camera's near zoom distance allows"
             ),
+        }
+    }
+}
+
+impl Error {
+    /// The text of the errors the models and instances raise.
+    fn fmt_model(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyModel { model } => {
+                write!(f, "model {model} has no vertex or no index")
+            }
+            Self::ModelNormalCount {
+                model,
+                positions,
+                normals,
+            } => write!(
+                f,
+                "model {model} holds {positions} positions and {normals} normals; the counts must be equal"
+            ),
+            Self::ModelIndexCount { model, indices } => write!(
+                f,
+                "model {model} holds {indices} indices; the count must be a multiple of three"
+            ),
+            Self::ModelIndexRange {
+                model,
+                index,
+                vertices,
+            } => write!(
+                f,
+                "model {model} has an index {index} at or past its {vertices} vertices"
+            ),
+            Self::ModelNonFinite { model, vertex } => write!(
+                f,
+                "model {model} has a position or normal that is not finite at vertex {vertex}"
+            ),
+            Self::ModelShortNormal { model, vertex } => write!(
+                f,
+                "model {model} has a normal shorter than 1e-6 at vertex {vertex}"
+            ),
+            Self::ModelTooLarge {
+                vertices,
+                indices,
+                buffer,
+                bytes,
+                limit,
+            } => write!(
+                f,
+                "a model of {vertices} vertices and {indices} indices needs a {buffer} buffer of {bytes} bytes, over the device's {limit}"
+            ),
+            Self::InstanceModel {
+                instance,
+                model,
+                models,
+            } => write!(
+                f,
+                "instance {instance} names model {model}, but the set holds {models}"
+            ),
+            Self::InstanceTransform { instance } => {
+                write!(f, "instance {instance} has a transform that is not finite")
+            }
+            Self::InstanceColor { instance } => write!(
+                f,
+                "instance {instance} has a colour channel that is not finite or is outside 0 to 1"
+            ),
+            Self::InstancesTooLarge {
+                count,
+                bytes,
+                limit,
+            } => write!(
+                f,
+                "{count} instances need a buffer of {bytes} bytes, over the device's {limit}"
+            ),
+            Self::BadPlacement { what } => {
+                write!(
+                    f,
+                    "the placement's {what} is not finite or, for a scale, not positive"
+                )
+            }
+            other => write!(f, "{other:?}"),
         }
     }
 }
