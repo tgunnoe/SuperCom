@@ -1,6 +1,7 @@
-//! Reader for the headers of `.dds` textures: dimensions, mip count, and
-//! pixel-format classification. Pixel data stays opaque: block-compressed
-//! data is decoded by the renderer, not here.
+//! Reader for `.dds` textures: [`Header::parse`] reads the dimensions, mip
+//! count, and pixel-format classification and leaves the pixel data opaque;
+//! [`decode`] decodes the pixels of every level of the formats the game's
+//! ground and unit textures use, after checking the header against the data.
 //!
 //! A `.dds` file is a 128-byte little-endian header (the magic `DDS ` and a
 //! 124-byte `DDS_HEADER`) followed by the pixel data. The header layout is
@@ -11,10 +12,14 @@
 //! at 88).
 //!
 //! [`Header::parse`] reads the header and nothing after it: the number of
-//! bytes that follow is reported as [`Header::data_len`], and their layout
-//! is the renderer's concern.
+//! bytes that follow is reported as [`Header::data_len`], and checks nothing
+//! against them. [`decode`] and [`decoded_len`] are the consumer that does.
 
 use std::fmt;
+
+mod decode;
+
+pub use decode::{Level, MAX_SIDE, decode, decoded_len};
 
 /// Length of the magic plus the `DDS_HEADER`: the pixel data starts here.
 const HEADER_LEN: usize = 128;
@@ -171,6 +176,42 @@ pub enum Error {
         /// What disagreed, for the reader of the message.
         reason: String,
     },
+    /// A side is zero or beyond [`MAX_SIDE`].
+    BadDimensions {
+        /// The width found.
+        width: u32,
+        /// The height found.
+        height: u32,
+    },
+    /// The mip count is zero or more than the longer side has levels.
+    BadMipCount {
+        /// The mip count found.
+        mip_count: u32,
+        /// The most levels the longer side allows.
+        most: u32,
+    },
+    /// A cube map or a volume texture, which are not decoded.
+    UnsupportedKind {
+        /// What the header's caps word says the texture is.
+        kind: &'static str,
+    },
+    /// A pixel format that is not decoded.
+    UnsupportedFormat {
+        /// The format found.
+        found: Format,
+    },
+    /// A colour mask that is not one byte-aligned run of eight bits.
+    BadChannelMask {
+        /// The channel, one of `R`, `G`, `B`, or `A`.
+        channel: char,
+        /// The mask found.
+        mask: u32,
+    },
+    /// Two channels read the same byte.
+    OverlappingChannelMasks {
+        /// The mask two channels share.
+        mask: u32,
+    },
 }
 
 impl fmt::Display for Error {
@@ -182,6 +223,26 @@ impl fmt::Display for Error {
                 write!(f, "truncated: needs {needed} bytes, has {len}")
             }
             Self::Malformed { reason } => write!(f, "malformed: {reason}"),
+            Self::BadDimensions { width, height } => {
+                write!(
+                    f,
+                    "dimensions {width} by {height} are not 1 to {MAX_SIDE} a side"
+                )
+            }
+            Self::BadMipCount { mip_count, most } => {
+                write!(f, "mip count {mip_count} is not 1 to {most}")
+            }
+            Self::UnsupportedKind { kind } => write!(f, "unsupported texture kind: {kind}"),
+            Self::UnsupportedFormat { found } => write!(f, "unsupported pixel format {found:?}"),
+            Self::BadChannelMask { channel, mask } => {
+                write!(
+                    f,
+                    "channel {channel} mask {mask:#010x} is not one aligned byte"
+                )
+            }
+            Self::OverlappingChannelMasks { mask } => {
+                write!(f, "two channels share the mask {mask:#010x}")
+            }
         }
     }
 }

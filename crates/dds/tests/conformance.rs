@@ -20,6 +20,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use std::collections::HashMap;
 use supercom_dds::{Format, Header};
 use supercom_scd::Vfs;
 
@@ -238,4 +239,219 @@ fn conformance_dds_data_fits() {
     );
     assert_eq!(compressed, 13_703, "block-compressed textures");
     assert_eq!(exact, 13_620, "textures whose data is exactly the chain");
+}
+
+/// What decoding one texture gives the digests of FMT-077: its CRC-32 over
+/// every level's bytes, the levels and bytes it holds, and the DXT3 and DXT5
+/// colour blocks that FMT-080 counts.
+struct Decoded {
+    crc: u32,
+    levels: u64,
+    bytes: u64,
+    late_blocks: u64,
+}
+
+/// The table of the CRC-32 with the reflected polynomial 0xEDB88320.
+fn crc_table() -> [u32; 256] {
+    let mut table = [0_u32; 256];
+    for (slot, index) in table.iter_mut().zip(0_u32..) {
+        let mut crc = index;
+        for _ in 0..8 {
+            crc = if crc & 1 == 1 {
+                0xEDB8_8320 ^ (crc >> 1)
+            } else {
+                crc >> 1
+            };
+        }
+        *slot = crc;
+    }
+    table
+}
+
+/// DXT3 and DXT5 colour blocks whose first endpoint is at or below the
+/// second and which use a code of 2 or 3, counted over every level of the
+/// chain, read from the raw bytes and not from the decoder.
+fn late_colour_blocks(raw: &[u8], header: &Header) -> u64 {
+    if !matches!(header.format, Format::Dxt3 | Format::Dxt5) {
+        return 0;
+    }
+    let (mut width, mut height) = (header.width, header.height);
+    let mut at = HEADER_LEN;
+    let mut late = 0;
+    for _ in 0..header.mip_count {
+        let blocks = width.div_ceil(4).max(1) * height.div_ceil(4).max(1);
+        for _ in 0..blocks {
+            let block = &raw[at..at + 16];
+            at += 16;
+            let word = |from: usize| {
+                u32::from_le_bytes([
+                    block[from],
+                    block[from + 1],
+                    block[from + 2],
+                    block[from + 3],
+                ])
+            };
+            let (c0, c1) = (block[8..10].to_vec(), block[10..12].to_vec());
+            let first = u16::from_le_bytes([c0[0], c0[1]]);
+            let second = u16::from_le_bytes([c1[0], c1[1]]);
+            let codes = word(12);
+            let uses_late_code = (0..16).any(|texel| (codes >> (2 * texel)) & 3 >= 2);
+            if first <= second && uses_late_code {
+                late += 1;
+            }
+        }
+        width = (width / 2).max(1);
+        height = (height / 2).max(1);
+    }
+    late
+}
+
+/// Decodes `raw` and digests its levels, top first, bytes in the order red,
+/// green, blue, alpha.
+fn decode_for_digest(raw: &[u8], table: &[u32; 256]) -> Decoded {
+    let header = Header::parse(raw);
+    assert!(
+        header.is_ok(),
+        "header must parse, got {:?}",
+        header.as_ref().err()
+    );
+    let header = header.expect("parsed: asserted above");
+    let levels = supercom_dds::decode(raw);
+    assert!(
+        levels.is_ok(),
+        "texture must decode, got {:?}",
+        levels.as_ref().err()
+    );
+    let levels = levels.expect("decoded: asserted above");
+    let mut register = u32::MAX;
+    let mut bytes = 0_u64;
+    for level in &levels {
+        for &byte in &level.rgba {
+            register = table
+                [usize::from(u8::try_from((register ^ u32::from(byte)) & 0xFF).expect("a byte"))]
+                ^ (register >> 8);
+        }
+        bytes += u64::try_from(level.rgba.len()).expect("a length fits in u64");
+    }
+    Decoded {
+        crc: !register,
+        levels: u64::try_from(levels.len()).expect("a count fits in u64"),
+        bytes,
+        late_blocks: late_colour_blocks(raw, &header),
+    }
+}
+
+/// The combined digest of FMT-077: FNV-1a over 64 bits of each file's CRC as
+/// four little-endian bytes, in the order given.
+fn combined_digest(files: &[Decoded]) -> u64 {
+    let mut state: u64 = 0xcbf2_9ce4_8422_5325;
+    for file in files {
+        for byte in file.crc.to_le_bytes() {
+            state = (state ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    state
+}
+
+/// Decodes the files `read` yields for each of `names`, several at a time,
+/// holding at most one batch of raw files; the results are in `names`'
+/// order.
+fn decode_all(names: &[String], read: impl Fn(&str) -> Vec<u8> + Sync) -> Vec<Decoded> {
+    let table = crc_table();
+    let workers = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
+    let mut out = Vec::with_capacity(names.len());
+    for batch in names.chunks(workers * 4) {
+        let size = batch.len().div_ceil(workers).max(1);
+        let parts: Vec<Vec<Decoded>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = batch
+                .chunks(size)
+                .map(|part| {
+                    let (read, table) = (&read, &table);
+                    scope.spawn(move || {
+                        part.iter()
+                            .map(|name| decode_for_digest(&read(name), table))
+                            .collect::<Vec<Decoded>>()
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().expect("a decoding thread must not panic"))
+                .collect()
+        });
+        out.extend(parts.into_iter().flatten());
+    }
+    out
+}
+
+/// The totals a set's clause states: files, levels, bytes, late colour
+/// blocks, and the combined digest.
+fn totals(files: &[Decoded]) -> (usize, u64, u64, u64, u64) {
+    (
+        files.len(),
+        files.iter().map(|f| f.levels).sum(),
+        files.iter().map(|f| f.bytes).sum(),
+        files.iter().map(|f| f.late_blocks).sum(),
+        combined_digest(files),
+    )
+}
+
+/// Pins the units' textures (FMT-079, FMT-080): for each of the 526 unit
+/// blueprints that have both `units/<ID>/<ID>_albedo.dds` and
+/// `units/<ID>/<ID>_specteam.dds`, 1,052 files in ascending order of path,
+/// the decoded levels hold 10,473 levels and 3,079,054,692 bytes and have the
+/// combined digest 9925447467578818197, and no DXT3 or DXT5 colour block has
+/// its first endpoint at or below its second with a code of 2 or 3.
+#[test]
+fn conformance_dds_unit_textures_digest() {
+    let Some(fa) = supercom_testkit::require_game() else {
+        return;
+    };
+    let vfs = mounted(&fa);
+    let stored: HashMap<String, String> = vfs
+        .files()
+        .map(|entry| (entry.name.to_lowercase(), entry.name.clone()))
+        .collect();
+    let mut paths: Vec<String> = stored
+        .keys()
+        .filter_map(|name| {
+            let id = name
+                .strip_prefix("units/")?
+                .strip_suffix("_unit.bp")?
+                .rsplit('/')
+                .next()?;
+            Some(id.to_owned())
+        })
+        .flat_map(|id| {
+            [
+                format!("units/{id}/{id}_albedo.dds"),
+                format!("units/{id}/{id}_specteam.dds"),
+            ]
+        })
+        .collect();
+    paths.sort();
+    // A blueprint has the pair or contributes none of it.
+    let held: std::collections::HashSet<String> = paths
+        .iter()
+        .filter(|p| stored.contains_key(*p))
+        .cloned()
+        .collect();
+    paths.retain(|path| {
+        let (albedo, specteam) = if path.ends_with("_albedo.dds") {
+            (path.clone(), path.replace("_albedo.dds", "_specteam.dds"))
+        } else {
+            (path.replace("_specteam.dds", "_albedo.dds"), path.clone())
+        };
+        held.contains(&albedo) && held.contains(&specteam)
+    });
+    let files = decode_all(&paths, |path| {
+        let name = &stored[path];
+        let read = vfs.read(name);
+        assert!(read.is_ok(), "{name} unreadable: {:?}", read.as_ref().err());
+        read.expect("read: asserted above")
+    });
+    assert_eq!(
+        totals(&files),
+        (1052, 10_473, 3_079_054_692, 0, 9_925_447_467_578_818_197)
+    );
 }
