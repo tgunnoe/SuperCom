@@ -1,6 +1,7 @@
 //! Loader for the binary `.scmap` map file: the terrain heightmap, the
-//! embedded preview image, the water's presence and elevations, and the
-//! terrain texture layers (strata).
+//! embedded preview image, the water's presence and elevations, the terrain
+//! program's name, the terrain texture layers (strata), and the two texture
+//! masks.
 //!
 //! A `.scmap` is little-endian. It opens with a 30-byte fixed header
 //! (signature `0x1a70614d`, major version 2, two constant words, the map's
@@ -9,16 +10,21 @@
 //! file), an `i32` inner version (56 or 60), the heightmap, and a long run
 //! of sections (terrain shader paths, cube maps, lighting, water and its
 //! wave generators, minimap colours) that this crate walks to reach the
-//! terrain strata. Decals, props, and the sections after the strata are not
-//! read.
+//! terrain strata, then, after the strata, the nine normal slots, the decals,
+//! the decal groups, and the embedded normal maps, which it walks to reach the
+//! two masks. Reading stops after the high mask; the props and whatever else
+//! follows are not read.
 //!
 //! The layout follows the MIT-licensed reference reader
 //! `SCMapImporter.java` at
 //! <https://github.com/FAForever/Neroxis-Map-Generator> (commit 10b130836034,
 //! `shared/src/main/java/com/faforever/neroxis/importer/SCMapImporter.java`,
-//! lines 58-149): the preview at 78 and 446-453, the heightmap at 82-89, the
-//! water at 109 and 353-357, the strata at 126-136. The map file is binary; the `_scenario.lua` and
-//! `_save.lua` beside it are not read here.
+//! lines 58-178): the preview at 78 and 446-453, the heightmap at 82-89, the
+//! water at 109 and 353-357, the strata at 126-136, the normal slots at
+//! 138-143, the decals at 153-157 and 417-433, the decal groups at 160-164
+//! and 435-444, the normal maps at 171-174, and the masks at 177-178. The map
+//! file is binary; the `_scenario.lua` and `_save.lua` beside it are not read
+//! here.
 //!
 //! [`Map::parse`] walks the file front to back with a checked cursor. Each
 //! section between the heightmap and the strata is read or skipped by the
@@ -31,8 +37,9 @@
 //! an `i32` count of wave generators, each two paths and 17 `f32`; six `i32`
 //! minimap words; and, in a version-60 file only, one more `f32`. Strings
 //! are decoded as ISO-8859-1. Every length is checked against the buffer
-//! before it is read or allocated, so a lying count is [`Error::Truncated`]
-//! and never an allocation.
+//! before it is read or allocated, and every count against the bytes that
+//! remain at the least its items can take, so a lying count is
+//! [`Error::Truncated`] and never an allocation.
 
 use std::fmt;
 
@@ -102,6 +109,19 @@ impl<'a> Reader<'a> {
         u32::try_from(value).map_err(|_| malformed(format!("{what} is {value}, a negative size")))
     }
 
+    /// A count of items that each take at least `min_item` bytes, checked
+    /// against the bytes that remain before it is used: a count that cannot
+    /// fit is [`Error::Truncated`], a negative one [`Error::Malformed`].
+    fn items(&mut self, what: &str, min_item: usize) -> Result<usize, Error> {
+        let count = to_usize(self.count(what)?);
+        let take = count.saturating_mul(min_item);
+        let remaining = self.bytes.len().saturating_sub(self.pos);
+        if take > remaining {
+            return Err(self.truncated(self.pos.saturating_add(take)));
+        }
+        Ok(count)
+    }
+
     /// A NUL-terminated string, decoded as ISO-8859-1 (one `char` per byte).
     /// A string with no terminator before the end of the buffer needs one
     /// more byte than the buffer has.
@@ -145,6 +165,17 @@ const WAVE_NORMALS: usize = 4;
 const WAVE_GENERATOR_FLOATS: usize = 17;
 /// `i32` minimap colour and contour words.
 const MINIMAP_WORDS: usize = 6;
+/// Normal slots after the strata.
+const NORMAL_SLOTS: usize = 9;
+/// Bytes of a decal before its textures: an id and a type.
+const DECAL_HEAD: usize = 8;
+/// Bytes of a decal after its textures: scale, position, rotation, two
+/// `f32`, and an owner.
+const DECAL_TAIL: usize = 48;
+/// The least a decal takes: its head, a texture count, and its tail.
+const DECAL_MIN: usize = DECAL_HEAD + 4 + DECAL_TAIL;
+/// The least a decal group takes: an id, a name terminator, a member count.
+const GROUP_MIN: usize = 4 + 1 + 4;
 
 /// The terrain heightmap.
 #[derive(Clone, Debug, PartialEq)]
@@ -246,13 +277,14 @@ impl Map {
         }
 
         let heightmap = read_heightmap(&mut file)?;
-        let water = skip_to_strata(&mut file, version)?;
+        let (water, terrain_program) = skip_to_strata(&mut file, version)?;
         let mut strata = Vec::with_capacity(STRATA);
         for _ in 0..STRATA {
             let texture = file.cstr()?;
             let scale = file.f32()?;
             strata.push(Stratum { texture, scale });
         }
+        let (low_mask, high_mask) = read_masks(&mut file)?;
         Ok(Self {
             width,
             height,
@@ -261,9 +293,9 @@ impl Map {
             heightmap,
             strata,
             water,
-            terrain_program: String::new(),
-            low_mask: Vec::new(),
-            high_mask: Vec::new(),
+            terrain_program,
+            low_mask,
+            high_mask,
         })
     }
 }
@@ -295,10 +327,12 @@ fn read_heightmap(file: &mut Reader<'_>) -> Result<Heightmap, Error> {
 
 /// Walks the sections between the heightmap and the strata, in file order
 /// (importer lines 94-127), and leaves the cursor at the first stratum.
-/// Returns the water elevations read on the way.
-fn skip_to_strata(file: &mut Reader<'_>, version: u32) -> Result<Option<Water>, Error> {
-    // Shader, background, and sky cube paths.
-    for _ in 0..3 {
+/// Returns the water elevations and the terrain program's name read on the
+/// way.
+fn skip_to_strata(file: &mut Reader<'_>, version: u32) -> Result<(Option<Water>, String), Error> {
+    // The terrain program, then the background and sky cube paths.
+    let program = file.cstr()?;
+    for _ in 0..2 {
         file.cstr()?;
     }
     for _ in 0..file.count("cube map count")? {
@@ -334,7 +368,43 @@ fn skip_to_strata(file: &mut Reader<'_>, version: u32) -> Result<Option<Water>, 
     if version > 56 {
         file.skip(4)?;
     }
-    Ok(water)
+    Ok((water, program))
+}
+
+/// Walks the sections after the strata (importer lines 138-178) and returns
+/// the low and the high mask, each a length and that many bytes.
+fn read_masks(file: &mut Reader<'_>) -> Result<(Vec<u8>, Vec<u8>), Error> {
+    for _ in 0..NORMAL_SLOTS {
+        file.cstr()?;
+        file.skip(4)?;
+    }
+    file.skip(8)?;
+    for _ in 0..file.items("decal count", DECAL_MIN)? {
+        file.skip(DECAL_HEAD)?;
+        for _ in 0..file.items("decal texture count", 4)? {
+            let length = to_usize(file.count("decal texture length")?);
+            file.skip(length)?;
+        }
+        file.skip(DECAL_TAIL)?;
+    }
+    for _ in 0..file.items("decal group count", GROUP_MIN)? {
+        file.skip(4)?;
+        file.cstr()?;
+        let members = file.items("decal group member count", 4)?;
+        file.skip(members.saturating_mul(4))?;
+    }
+    file.skip(8)?;
+    for _ in 0..file.items("normal map count", 4)? {
+        let length = to_usize(file.count("normal map length")?);
+        file.skip(length)?;
+    }
+    let mut mask = || -> Result<Vec<u8>, Error> {
+        let length = to_usize(file.count("mask length")?);
+        Ok(file.take(length)?.to_vec())
+    };
+    let low = mask()?;
+    let high = mask()?;
+    Ok((low, high))
 }
 
 /// Why a map could not be parsed.
