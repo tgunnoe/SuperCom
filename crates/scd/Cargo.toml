@@ -5,7 +5,7 @@ license      = { workspace = true }
 name         = "supercom-scd"
 publish      = false
 repository   = { workspace = true }
-rust-version = { workspace = true }
+rust-version = "1.88"
 version      = { workspace = true }
 
 [lints]
