@@ -5,14 +5,14 @@ license      = { workspace = true }
 name         = "supercom-scd"
 publish      = false
 repository   = { workspace = true }
-rust-version = { workspace = true }
+rust-version = "1.88"
 version      = { workspace = true }
 
 [lints]
 workspace = true
 
 [dependencies]
-zip = { default-features = false, version = "7.2" }
+zip = { default-features = false, version = "9.0.5" }
 
 [dev-dependencies]
 supercom-testkit = { path = "../testkit", version = "0.0.1" }
