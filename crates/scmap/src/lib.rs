@@ -199,6 +199,13 @@ pub struct Map {
     pub strata: Vec<Stratum>,
     /// The water elevations; `None` when the map's presence byte is not 1.
     pub water: Option<Water>,
+    /// The name of the terrain program: the first of the three paths that
+    /// follow the heightmap.
+    pub terrain_program: String,
+    /// The low texture mask: a whole texture file, not looked into.
+    pub low_mask: Vec<u8>,
+    /// The high texture mask: a whole texture file, not looked into.
+    pub high_mask: Vec<u8>,
 }
 
 impl Map {
@@ -254,6 +261,9 @@ impl Map {
             heightmap,
             strata,
             water,
+            terrain_program: String::new(),
+            low_mask: Vec::new(),
+            high_mask: Vec::new(),
         })
     }
 }
