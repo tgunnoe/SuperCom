@@ -124,7 +124,7 @@ fn fold(name: &str) -> String {
 /// deprecated `to_u16`.
 #[allow(
     deprecated,
-    reason = "zip 7 exposes a member's numeric method id only through to_u16"
+    reason = "zip 9 exposes a member's numeric method id only through to_u16"
 )]
 fn method_id(method: CompressionMethod) -> u16 {
     method.to_u16()
@@ -206,7 +206,16 @@ impl Archive {
         let mut members = Vec::with_capacity(count);
         let mut by_name = HashMap::with_capacity(count);
         for index in 0..count {
-            let name = zip.name_for_index(index).unwrap_or_default().to_owned();
+            let name = match zip.name_for_index(index) {
+                Some(Ok(name)) => name.into_owned(),
+                Some(Err(source)) => {
+                    return Err(zip_error(
+                        source,
+                        format_args!("reading the name of member {index} in {}", path.display()),
+                    ));
+                }
+                None => String::new(),
+            };
             if name.ends_with('/') {
                 continue;
             }
@@ -216,8 +225,16 @@ impl Archive {
                     format_args!("reading the header of {name} in {}", path.display()),
                 )
             })?;
+            // `by_index_raw` locates the data, so the offset is set once it
+            // returns; an unset one is a fault in the archive's header.
+            let data_start = member.data_start().ok_or_else(|| {
+                io_error(
+                    io::Error::from(io::ErrorKind::InvalidData),
+                    format_args!("locating the data of {name} in {}", path.display()),
+                )
+            })?;
             let at = Location {
-                data_start: member.data_start(),
+                data_start,
                 stored_len: member.compressed_size(),
                 method: method_id(member.compression()),
             };
