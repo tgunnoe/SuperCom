@@ -33,12 +33,17 @@ wildcards         = "deny"
 unknown-git      = "deny"
 unknown-registry = "deny"
 
-# Two advisories are reached only through nickel-lang-core 0.19.0 (the newest
-# release) via nickel-lang-vector 0.2.0, which has no published version off
-# the affected lines; `cargo update` moves nothing. Each entry carries its
-# reason and revisit triggers; issue 24 tracks their removal.
+# Four advisories have no upgrade. Two are reached only through
+# nickel-lang-core 0.19.0 (the newest release) via nickel-lang-vector 0.2.0,
+# which has no published version off the affected lines; `cargo update`
+# moves nothing. A third comes through nickel-lang-core's serde_yaml,
+# and the fourth through winit. Each entry carries its
+# reason and revisit triggers; issue 24 tracks the Nickel entries and
+# issue 98 the winit one.
 [advisories]
 ignore = [
   { id = "RUSTSEC-2026-0292", reason = "imbl-sized-chunks 0.1.3 is transitive through nickel-lang-core 0.19.0 via nickel-lang-vector 0.2.0, with no fixed nickel-lang-vector published; the advisory's path needs a stored element's Drop to panic; since 561b574 the Nickel evaluator receives only the contract-declared fields of each installed blueprint, which narrows the exposure without making it unreachable. Revisit when nickel-lang-core moves past 0.19.0, and before any overlay or mod Nickel source is evaluated (issue 24)." },
   { id = "RUSTSEC-2026-0247", reason = "bitmaps 3.2.1 is unmaintained with no safe upgrade and is transitive through the same nickel-lang-vector 0.2.0 chain. Revisit when nickel-lang-core moves past 0.19.0, and before any overlay or mod Nickel source is evaluated (issue 24)." },
+  { id = "RUSTSEC-2026-0192", reason = "ttf-parser 0.25.1 is a TrueType and OpenType font parser whose author has declared it unmaintained, with no safe upgrade; the advisory names skrifa as the maintained alternative. It reaches the supercom binary through winit 0.30.13, sctk-adwaita 0.10.1, ab_glyph 0.2.32 and owned_ttf_parser 0.25.1, and no crate of this workspace depends on it directly. It cannot be moved here because the version is fixed by that chain, and no release of it will fix the advisory. Revisit when winit, sctk-adwaita or ab_glyph moves off ttf-parser (issue 98)." },
+  { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml 0.2.11 is a machine translation of libyaml into unsafe Rust, archived upstream and unmaintained, with no safe upgrade. It is transitive through serde_yaml 0.9.34 (itself deprecated) in nickel-lang-core 0.19.0, which supercom-data depends on; supercom-bp-import, supercom-sim-ingest, supercom-sim and the supercom binary reach it through supercom-data. It cannot be moved here because nickel-lang-core 0.19.0 is the newest release and pins that dependency. Revisit when nickel-lang-core moves past 0.19.0 and off serde_yaml, and before any overlay or mod Nickel source is evaluated (issue 24)." },
 ]
