@@ -344,7 +344,7 @@ fn decode_for_digest(raw: &[u8], table: &[u32; 256]) -> Decoded {
 /// The combined digest of FMT-077: FNV-1a over 64 bits of each file's CRC as
 /// four little-endian bytes, in the order given.
 fn combined_digest(files: &[Decoded]) -> u64 {
-    let mut state: u64 = 0xcbf2_9ce4_8422_5325;
+    let mut state: u64 = 0xcbf2_9ce4_8422_2325;
     for file in files {
         for byte in file.crc.to_le_bytes() {
             state = (state ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);

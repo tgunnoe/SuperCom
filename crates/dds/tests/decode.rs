@@ -337,7 +337,7 @@ fn reversed_order_expected() -> Vec<u8> {
         e0, e1, c2, c3, //
         c3, c2, e1, e0, //
         e0, e0, e0, e0, //
-        e0, e0, e0, e0,
+        c3, c3, c3, c3,
     ])
 }
 
