@@ -11,10 +11,14 @@ on:
     paths:
       - Cargo.lock
       - deny.toml
+      # A change to this workflow is itself run once.
+      - .github/workflows/audit.yml
   pull_request:
     paths:
       - Cargo.lock
       - deny.toml
+      # A change to this workflow is itself run once.
+      - .github/workflows/audit.yml
   workflow_dispatch:
 
 permissions:
