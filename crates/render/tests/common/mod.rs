@@ -58,6 +58,9 @@ pub fn grid_map(
         },
         strata: Vec::new(),
         water: None,
+        terrain_program: String::new(),
+        low_mask: Vec::new(),
+        high_mask: Vec::new(),
     }
 }
 

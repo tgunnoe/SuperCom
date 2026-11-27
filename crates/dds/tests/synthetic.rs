@@ -5,9 +5,8 @@
 //!
 //! These pin what the installed game cannot: the exact error for each way a
 //! header can be wrong, the classification of every pixel format, and the
-//! meaning of the mip-count flag. The crate is a skeleton, so each test
-//! below fails today on `Error::Unimplemented` and passes only when the
-//! parser exists.
+//! meaning of the mip-count flag. The decoder has its own file,
+//! `decode.rs`.
 
 #![allow(
     clippy::expect_used,
@@ -125,14 +124,21 @@ fn dds_header_shorter_than_128_bytes_is_truncated() {
 }
 
 /// Pins `Error::Malformed`: `dwSize` is 124 in every installed texture, and
-/// a header that says otherwise is rejected.
+/// a header that says otherwise is rejected as malformed; and a buffer
+/// shorter than the header is reported as truncated, not as malformed.
 #[test]
-fn dds_dwsize_other_than_124_is_malformed() {
+fn dds_dwsize_is_malformed_and_a_short_buffer_is_truncated() {
     let mut buf = Spec::dxt1().bytes();
     buf[4..8].copy_from_slice(&100u32.to_le_bytes());
     let result = Header::parse(&buf);
     assert!(
         matches!(result, Err(Error::Malformed { .. })),
+        "got {:?}",
+        result.err()
+    );
+    let result = Header::parse(&Spec::dxt1().bytes()[..HEADER_LEN - 1]);
+    assert!(
+        matches!(result, Err(Error::Truncated { .. })),
         "got {:?}",
         result.err()
     );

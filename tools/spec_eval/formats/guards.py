@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluator for the reserved-variant clauses of docs/specs/formats.md (FMT-025, FMT-045).
+"""Evaluator for the reserved-variant and no-float clauses of docs/specs/formats.md (FMT-025, FMT-045, FMT-073).
 
 Both clauses describe code, so the script reads the repository only: it counts the
 places where a crate's source builds the reserved error variant, outside the enum
@@ -39,9 +39,23 @@ def reserved(path: str, variant: str):
     return check
 
 
+def integer_only(_game) -> None:
+    """FMT-073: no `f32` or `f64` in the code of any source file under the texture crate's src, subdirectories included."""
+    import glob
+
+    found = []
+    for path in sorted(glob.glob(os.path.join(F.REPO, "crates", "dds", "src", "**", "*.rs"), recursive=True)):
+        relative = os.path.relpath(path, F.REPO)
+        for number, line in enumerate(F.repo_text(relative).splitlines(), 1):
+            if re.search(r"\bf(32|64)\b", line.split("//", 1)[0]):
+                found.append(f"{relative}:{number}")
+    F.expect("lines_naming_a_float_type", found, [])
+
+
 CHECKS = {
     "FMT-025": reserved("crates/bp/src/lib.rs", "Encoding"),
     "FMT-045": reserved("crates/dds/src/lib.rs", "UnsupportedVersion"),
+    "FMT-073": integer_only,
 }
 
 if __name__ == "__main__":

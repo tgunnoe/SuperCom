@@ -279,6 +279,25 @@ run's table, so the table is not repeated. The closing sentence of the first
 run still holds: the record does not cover aarch64-darwin, other compiler
 versions, or logs other than the committed skirmish.
 
+On 2026-11-27 the gate workflow gained a job on a hosted aarch64-linux runner
+(`ubuntu-24.04-arm`) that runs the evidence crate's golden vectors, the
+simulation crate's tests with its pinned digests of synthetic worlds, and the
+texture loader's tests that need no installed game. Its first run, number
+46040720557 on commit 9bb7ca1, listed 181 tests and passed 181. The five tests
+that run reports as skipped were never selected: the job's filter leaves out
+the four `conformance_` tests of `supercom-dds`, which ask for the installed
+game, and one test of `supercom-sim` is marked ignored. Among them are the six
+tests of `supercom-detbench` and the simulation's
+three pinned digests (`sim_movement_golden_digest_is_pinned`,
+`sim_combat_golden_digest_is_pinned`, and `sim_world_digests_golden_vector`);
+the same tests with the same committed values pass on x86_64 in the gate job of
+that run. This meets step 1 of "What would close the gap" for aarch64-linux and
+now runs on every change. That the simulation's pinned digests agree on both
+architectures is evidence the hand runs above did not have in CI. It does not
+show the replay comparison of the committed skirmish on the installed map,
+which still runs only by hand because CI has no installed game, and
+aarch64-darwin is still unmeasured.
+
 ## Consequences
 
 ### Positive
