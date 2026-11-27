@@ -56,7 +56,10 @@ ci-select packages filter:
     listed=$(cargo nextest list {{ packages }} -E {{ quote(filter) }} --message-format oneline | grep -c .) || listed=0
     echo "ci-select: the selection lists $listed tests"
     [ "$listed" -gt 0 ] || { echo "ci-select: the selection lists no tests" >&2; exit 1; }
-    cargo nextest run {{ packages }} -E {{ quote(filter) }} --no-tests=fail --no-fail-fast 2>&1 | tee "$log"
+    # The default profile shows a passing test's output only for conformance_ tests, so
+    # without --success-output immediate a skip line from any other selected test
+    # never reaches the log and the check below could not see it.
+    cargo nextest run {{ packages }} -E {{ quote(filter) }} --no-tests=fail --no-fail-fast --success-output immediate 2>&1 | tee "$log"
     passed=$(sed -nE 's/.* ([0-9]+) passed.*/\1/p' "$log" | tail -n 1)
     echo "ci-select: listed $listed, passed ${passed:-0}"
     [ "${passed:-0}" -eq "$listed" ] || { echo "ci-select: not every listed test passed" >&2; exit 1; }
