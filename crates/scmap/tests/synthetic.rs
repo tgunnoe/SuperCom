@@ -771,3 +771,19 @@ fn scmap_counts_that_cannot_fit_are_refused_at_once() {
         assert_eq!(result, Err(expected), "{name}");
     }
 }
+
+/// FMT-076: a decal's texture count that cannot fit is refused at once, as
+/// the other counts are; it is the word before the first texture's length.
+#[test]
+fn scmap_decal_texture_count_that_cannot_fit_is_refused_at_once() {
+    let built = busy_after_the_strata().build();
+    let mut buf = built.bytes.clone();
+    set_i32(&mut buf, built.decal_texture_len_at - 4, i32::MAX);
+    assert_eq!(
+        Map::parse(&buf),
+        Err(Error::Truncated {
+            needed: built.decal_texture_len_at + 8_589_934_588,
+            len: buf.len()
+        })
+    );
+}
