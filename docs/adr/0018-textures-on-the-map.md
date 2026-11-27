@@ -63,8 +63,8 @@ about drawing; later work adds its own sections under Decision.
   and no two may coincide, and a zero alpha mask reads as opaque. This covers
   every installed uncompressed texture the milestone reads and refuses the
   rest by name rather than guessing.
-- **Small levels (FMT-070).** A level under four texels on a side is decoded
-  from its one block, cropped, with the block's own texel indices.
+- **Small levels (FMT-070, FMT-082).** A level under four texels on a side is decoded
+  from its one block, cropped, with the block's own texel indices; a block that overhangs the edge of a larger level is cropped the same way.
 - **What is refused, before anything is sized (FMT-071, FMT-072).** The
   decoder refuses a zero side or one over 8,192 (the largest 2D texture side
   of wgpu's default limits, and four times the installed maximum of 2,048), a
