@@ -2,6 +2,94 @@
 
 use std::fmt;
 
+/// Which terrain texture a refusal names.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TextureItem {
+    /// The layer of this slot, 0 to 9.
+    Layer(usize),
+    /// The mask of this index, 0 for the first and 1 for the second.
+    Mask(usize),
+}
+
+impl fmt::Display for TextureItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Layer(slot) => write!(f, "layer {slot}"),
+            Self::Mask(at) => write!(f, "mask {}", at + 1),
+        }
+    }
+}
+
+/// What is wrong with a terrain texture.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TextureFault {
+    /// The texture holds no level.
+    NoLevels,
+    /// A level whose width or height is zero.
+    ZeroSide {
+        /// The level's index.
+        level: usize,
+    },
+    /// A level's side is above the device's largest 2D texture side.
+    Oversize {
+        /// The level's index.
+        level: usize,
+        /// The larger side.
+        side: u32,
+        /// The device's limit.
+        limit: u32,
+    },
+    /// A level's byte count is not width times height times 4.
+    Bytes {
+        /// The level's index.
+        level: usize,
+        /// The count the sides require.
+        expected: u64,
+        /// The count the level holds.
+        found: usize,
+    },
+    /// A level is not the previous one halved, rounding down and never
+    /// below 1.
+    Chain {
+        /// The level's index.
+        level: usize,
+    },
+    /// A scale that is not finite and positive.
+    Scale {
+        /// The scale as given.
+        scale: f32,
+    },
+    /// The program reads this mask and none was given.
+    Missing,
+}
+
+impl fmt::Display for TextureFault {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoLevels => write!(f, "holds no level"),
+            Self::ZeroSide { level } => write!(f, "level {level} has a zero side"),
+            Self::Oversize { level, side, limit } => write!(
+                f,
+                "level {level} has a side of {side}, over the device's {limit}"
+            ),
+            Self::Bytes {
+                level,
+                expected,
+                found,
+            } => write!(
+                f,
+                "level {level} holds {found} bytes, its sides need {expected}"
+            ),
+            Self::Chain { level } => write!(
+                f,
+                "level {level} is not the one before it halved, rounding down and never below 1"
+            ),
+            Self::Scale { scale } => write!(f, "scale {scale} is not finite and positive"),
+            Self::Missing => write!(f, "is read by the program and was not given"),
+        }
+    }
+}
+
 /// Why a mesh or a camera could not be built, or why the GPU side could not
 /// draw. GPU-side causes carry wgpu's own text as a `String`, because wgpu's
 /// error types are neither `Clone` nor `PartialEq`.
@@ -199,6 +287,21 @@ pub enum Error {
         /// Which input: `"scale"`, `"heading"`, `"yaw"`, or `"position"`.
         what: &'static str,
     },
+    /// A terrain texture or mask is refused.
+    Texture {
+        /// Which texture.
+        item: TextureItem,
+        /// What is wrong with it.
+        fault: TextureFault,
+    },
+    /// The textured terrain's pass binds more sampled textures than the
+    /// device allows a shader stage.
+    TextureBinding {
+        /// Sampled textures the pass binds.
+        needed: u32,
+        /// The device's limit.
+        limit: u32,
+    },
     /// wgpu reported a validation or out-of-memory error while the
     /// renderer created resources or recorded a frame.
     Gpu {
@@ -281,6 +384,11 @@ impl fmt::Display for Error {
             | Self::InstanceColor { .. }
             | Self::InstancesTooLarge { .. }
             | Self::BadPlacement { .. } => self.fmt_model(f),
+            Self::Texture { item, fault } => write!(f, "terrain {item} {fault}"),
+            Self::TextureBinding { needed, limit } => write!(
+                f,
+                "the textured terrain binds {needed} sampled textures, over the device's {limit}"
+            ),
             Self::Gpu { during, reason } => {
                 write!(f, "wgpu reported an error during {during}: {reason}")
             }

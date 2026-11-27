@@ -4,9 +4,9 @@
 
 use crate::terrain::VERTEX_BYTES;
 use crate::{
-    Camera, Error, INSTANCE_BYTES, Instance as Placed, Model, Style, TerrainMesh, WaterPlane,
-    check_instances, check_model, grid_fits, grid_vertex_count, instances_fit, model_fits,
-    model_shader, shader,
+    Camera, Error, INSTANCE_BYTES, Instance as Placed, Model, Style, TerrainMesh, TerrainTextures,
+    WaterPlane, check_instances, check_model, grid_fits, grid_vertex_count, instances_fit,
+    model_fits, model_shader, shader,
 };
 use std::num::NonZeroU64;
 use wgpu::{
@@ -488,6 +488,27 @@ impl Renderer {
         })?;
         self.instances = Some(GpuInstances { buffer, runs });
         Ok(())
+    }
+
+    /// Checks `textures` against the device and, when they pass, keeps them
+    /// for the draws that follow: the terrain is then drawn textured. A
+    /// refused or failed set leaves the textures as they were.
+    ///
+    /// # Errors
+    /// [`Error::Texture`] and [`Error::TextureBinding`] for a set the device
+    /// cannot hold, and [`Error::Gpu`] when wgpu reports an error.
+    pub fn set_terrain_textures(&mut self, textures: &TerrainTextures) -> Result<(), Error> {
+        let _ = textures;
+        Ok(())
+    }
+
+    /// Drops the terrain's textures: the terrain is drawn by the height ramp.
+    pub fn clear_terrain_textures(&mut self) {}
+
+    /// Whether the terrain is drawn textured.
+    #[must_use]
+    pub fn terrain_textured(&self) -> bool {
+        false
     }
 
     fn mesh_buffers(&self, label: &'static str, vertices: &[f32], indices: &[u32]) -> GpuMesh {

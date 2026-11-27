@@ -11,9 +11,10 @@ use std::fmt::Debug;
 use std::path::{Path, PathBuf};
 use std::{env, fs, sync::mpsc};
 use supercom_render::{
-    AMBIENT, CLEAR_COLOR, Camera, Error, GpuGate, Instance, LIGHT_DIRECTION, Model, RAMP, Renderer,
-    Style, TerrainMesh, WATER_COLOR, WaterPlane, ZoomSpeed, gpu_gate, grid_fits,
-    model_shader_source, normalize_height, placement, shade, shader_source,
+    AMBIENT, Blend, CLEAR_COLOR, Camera, Error, Filtering, GpuGate, Instance, LIGHT_DIRECTION,
+    Layer, Model, RAMP, Renderer, Style, TerrainMesh, TerrainTextures, TextureFault, TextureItem,
+    TextureLevel, WATER_COLOR, WaterPlane, ZoomSpeed, gpu_gate, grid_fits, model_shader_source,
+    normalize_height, placement, shade, shader_source, textured_shader_source,
 };
 use supercom_scmap::{Heightmap, Map, Water};
 use wgpu::{
@@ -2021,6 +2022,841 @@ fn render_model_shader_source_is_a_second_module_assembled_from_the_constants() 
         assert!(
             source.lines().any(|line| line == declaration),
             "the source declares {declaration:?} on a line of its own"
+        );
+    }
+}
+
+// ---- the textured terrain (REN-092 to REN-108) -------------------------
+
+fn texture_level(width: u32, height: u32, texels: &[[u8; 4]]) -> TextureLevel {
+    assert_eq!(
+        texels.len(),
+        to_usize(width * height),
+        "a literal texture holds width times height texels"
+    );
+    TextureLevel {
+        width,
+        height,
+        rgba: texels.iter().flatten().copied().collect(),
+    }
+}
+
+fn layer_of(width: u32, height: u32, texels: &[[u8; 4]], scale: f32) -> Layer {
+    Layer {
+        levels: vec![texture_level(width, height, texels)],
+        scale,
+    }
+}
+
+fn solid_layer(rgba: [u8; 4]) -> Layer {
+    layer_of(1, 1, &[rgba], 4.0)
+}
+
+/// A plane whose normal is the light direction (-0.36, 0.8, -0.48): the
+/// surface y = 0.45 x + 0.6 z, so the lit factor is 1 everywhere.
+fn lit_plane() -> Map {
+    map_of(8, 64.0, 0.1, |i, j| {
+        i16::try_from(36 * i + 48 * j).unwrap_or(0)
+    })
+}
+
+fn lit_surface(x: f64, z: f64) -> f64 {
+    0.45 * x + 0.6 * z
+}
+
+/// The 0 to 255 value a stored value `stored` lit at `factor` reads back as
+/// on a target of `format`: the stored value itself on an sRGB target (the
+/// transfer function's decoding and the target's encoding cancel), and its
+/// decoding on a Unorm target.
+fn stored_pixel(stored: [f64; 3], factor: f64, format: TextureFormat) -> [f64; 3] {
+    stored.map(|v| {
+        let lit = v * factor;
+        if format.is_srgb() {
+            lit
+        } else {
+            let s = lit / 255.0;
+            let linear = if s <= 0.040_45 {
+                s / 12.92
+            } else {
+                ((s + 0.055) / 1.055).powf(2.4)
+            };
+            linear * 255.0
+        }
+    })
+}
+
+const FORMATS: [TextureFormat; 3] = [
+    TextureFormat::Rgba8UnormSrgb,
+    TextureFormat::Bgra8UnormSrgb,
+    TextureFormat::Rgba8Unorm,
+];
+
+const BASE_COLOR: [u8; 4] = [200, 40, 40, 9];
+const LAYER_COLORS: [[u8; 4]; 8] = [
+    [40, 200, 40, 9],
+    [40, 40, 200, 9],
+    [200, 200, 40, 9],
+    [40, 200, 200, 9],
+    [200, 40, 200, 9],
+    [120, 120, 120, 9],
+    [240, 160, 80, 9],
+    [80, 160, 240, 9],
+];
+
+/// The first mask, row by row from the north edge, each texel's red, green,
+/// blue, and alpha.
+const LOW_MASK: [[u8; 4]; 16] = [
+    [127, 0, 0, 0],
+    [128, 0, 0, 0],
+    [191, 0, 0, 0],
+    [255, 0, 0, 0],
+    [255, 255, 0, 0],
+    [255, 255, 255, 0],
+    [255, 255, 255, 255],
+    [191, 128, 0, 0],
+    [0, 255, 0, 0],
+    [0, 0, 255, 0],
+    [0, 0, 0, 255],
+    [255, 191, 128, 127],
+    [128, 128, 128, 128],
+    [127, 127, 127, 127],
+    [0, 191, 255, 0],
+    [255, 0, 255, 0],
+];
+
+const HIGH_MASK: [[u8; 4]; 16] = [
+    [255, 0, 0, 0],
+    [0, 255, 0, 0],
+    [0, 0, 255, 0],
+    [0, 0, 0, 255],
+    [191, 191, 191, 191],
+    [128, 0, 255, 0],
+    [0, 0, 0, 0],
+    [255, 255, 255, 255],
+    [127, 255, 0, 191],
+    [255, 128, 255, 0],
+    [0, 255, 128, 255],
+    [191, 0, 0, 255],
+    [255, 255, 255, 255],
+    [0, 191, 0, 128],
+    [128, 255, 191, 0],
+    [0, 0, 0, 0],
+];
+
+/// Slot 9: one repeat across the map, its colour (10, 20, 250), its alpha
+/// 0, 255, 100, 0 down the columns.
+fn top_layer() -> Layer {
+    let texels: Vec<[u8; 4]> = (0..16)
+        .map(|k| [10, 20, 250, [0, 255, 100, 0][k % 4]])
+        .collect();
+    layer_of(4, 4, &texels, 64.0)
+}
+
+fn blend_set(blend: Blend, unnamed: &[usize], filtering: Filtering) -> TerrainTextures {
+    let layers = std::array::from_fn(|k| {
+        (!unnamed.contains(&(k + 1))).then(|| solid_layer(LAYER_COLORS[k]))
+    });
+    TerrainTextures {
+        blend,
+        filtering,
+        base: solid_layer(BASE_COLOR),
+        layers,
+        top: top_layer(),
+        low: texture_level(4, 4, &LOW_MASK),
+        high: Some(texture_level(4, 4, &HIGH_MASK)),
+    }
+}
+
+/// The stored colour of each texel centre, row by row, worked from REN-094
+/// and REN-095 by a script apart from the crate: eight layers, then four
+/// (the second mask ignored), then eight with slots 2 and 7 unnamed.
+const EIGHT: [[f64; 3]; 16] = [
+    [200.0, 40.0, 200.0],
+    [10.0, 20.0, 250.0],
+    [149.8, 105.1, 146.7],
+    [80.0, 160.0, 240.0],
+    [130.0, 139.8, 179.9],
+    [10.0, 20.0, 250.0],
+    [28.2, 129.4, 219.6],
+    [80.0, 160.0, 240.0],
+    [100.1, 139.9, 179.8],
+    [10.0, 20.0, 250.0],
+    [52.5, 105.1, 243.9],
+    [80.0, 160.0, 240.0],
+    [80.0, 160.0, 240.0],
+    [10.0, 20.0, 250.0],
+    [113.2, 92.9, 158.9],
+    [200.0, 200.0, 40.0],
+];
+
+const FOUR: [[f64; 3]; 16] = [
+    [200.0, 40.0, 40.0],
+    [10.0, 20.0, 250.0],
+    [77.1, 80.6, 122.4],
+    [40.0, 200.0, 40.0],
+    [40.0, 40.0, 200.0],
+    [10.0, 20.0, 250.0],
+    [28.2, 129.4, 219.6],
+    [120.0, 119.4, 40.6],
+    [40.0, 40.0, 200.0],
+    [10.0, 20.0, 250.0],
+    [28.2, 129.4, 219.6],
+    [40.6, 120.6, 119.4],
+    [198.1, 41.9, 41.2],
+    [10.0, 20.0, 250.0],
+    [125.5, 129.4, 122.4],
+    [200.0, 200.0, 40.0],
+];
+
+const UNNAMED: [[f64; 3]; 16] = [
+    [200.0, 40.0, 200.0],
+    [10.0, 20.0, 250.0],
+    [77.1, 80.6, 122.4],
+    [80.0, 160.0, 240.0],
+    [100.0, 140.0, 179.7],
+    [10.0, 20.0, 250.0],
+    [28.2, 129.4, 219.6],
+    [80.0, 160.0, 240.0],
+    [100.1, 139.9, 179.8],
+    [10.0, 20.0, 250.0],
+    [52.5, 105.1, 243.9],
+    [80.0, 160.0, 240.0],
+    [80.0, 160.0, 240.0],
+    [10.0, 20.0, 250.0],
+    [76.9, 80.8, 171.0],
+    [200.0, 200.0, 40.0],
+];
+
+/// A renderer with the lit plane uploaded and its camera.
+fn lit_scene(renderer: &mut Renderer) -> (TerrainMesh, Camera) {
+    let mesh = scene(renderer, &lit_plane(), false);
+    let camera = must(Camera::for_mesh(&mesh, 1.0), "the camera builds");
+    (mesh, camera)
+}
+
+/// The pixel the lit plane shows at the world point `(x, z)`.
+fn lit_pixel(camera: &Camera, (x, z): (f64, f64), size: (u32, u32)) -> (u32, u32) {
+    pixel_of(&camera.view_projection(), [x, lit_surface(x, z), z], size)
+}
+
+/// Checks the centre of each of the 16 texels of a 4 by 4 grid over the map
+/// against `table`, row by row from the north.
+fn check_texel_table(frame: &Frame, camera: &Camera, table: &[[f64; 3]; 16], label: &str) {
+    for (k, stored) in table.iter().enumerate() {
+        let (c, r) = (
+            f64::from(u32::try_from(k % 4).unwrap_or(0)),
+            f64::from(u32::try_from(k / 4).unwrap_or(0)),
+        );
+        let (x, y) = lit_pixel(
+            camera,
+            (16.0 * c + 8.0, 16.0 * r + 8.0),
+            (frame.width, frame.height),
+        );
+        let want = stored_pixel(*stored, 1.0, frame.format);
+        assert!(
+            near(frame.at(x, y), want),
+            "{label}: texel ({c}, {r}) at pixel ({x}, {y}) is {:?}, want {want:?}",
+            frame.at(x, y)
+        );
+    }
+}
+
+// REN-103
+#[test]
+fn conformance_gpu_textured_blend_follows_the_program_and_the_masks() {
+    for format in FORMATS {
+        let Some(mut renderer) = gpu(format) else {
+            return;
+        };
+        let (_, camera) = lit_scene(&mut renderer);
+        for (name, set, table) in [
+            (
+                "eight",
+                blend_set(Blend::Eight, &[], Filtering::Nearest),
+                &EIGHT,
+            ),
+            (
+                "four",
+                blend_set(Blend::Four, &[], Filtering::Nearest),
+                &FOUR,
+            ),
+            (
+                "unnamed",
+                blend_set(Blend::Eight, &[2, 7], Filtering::Nearest),
+                &UNNAMED,
+            ),
+        ] {
+            must(renderer.set_terrain_textures(&set), "the set is accepted");
+            let frame = draw_frame(
+                &mut renderer,
+                &camera,
+                SIZE,
+                &format!("blend-{name}-{format:?}"),
+            );
+            check_texel_table(&frame, &camera, table, &format!("{name} {format:?}"));
+        }
+    }
+}
+
+// REN-098
+#[test]
+fn conformance_gpu_mask_lookup_reads_north_west_first_and_clamps_at_the_edges() {
+    for format in FORMATS {
+        let Some(mut renderer) = gpu(format) else {
+            return;
+        };
+        let (_, camera) = lit_scene(&mut renderer);
+        // One channel for each quadrant: the north-west texel is the first
+        // stored, then the north-east, the south-west, the south-east.
+        let mask = texture_level(
+            2,
+            2,
+            &[
+                [255, 0, 0, 0],
+                [0, 255, 0, 0],
+                [0, 0, 255, 0],
+                [0, 0, 0, 255],
+            ],
+        );
+        let mut set = blend_set(Blend::Four, &[], Filtering::Nearest);
+        set.low = mask;
+        set.top = solid_layer([10, 20, 250, 0]);
+        must(renderer.set_terrain_textures(&set), "the set is accepted");
+        let frame = draw_frame(&mut renderer, &camera, SIZE, &format!("mask-{format:?}"));
+        // Slot 1 in the north-west, 2 north-east, 3 south-west, 4 south-east;
+        // each at the quadrant's centre and a unit and a half inside the
+        // quadrant's corner at the map's edge.
+        let green = [40.0, 200.0, 40.0];
+        let blue = [40.0, 40.0, 200.0];
+        let yellow = [200.0, 200.0, 40.0];
+        let cyan = [40.0, 200.0, 200.0];
+        for (at, stored) in [
+            ((16.0, 16.0), green),
+            ((1.5, 1.5), green),
+            ((48.0, 16.0), blue),
+            ((62.5, 1.5), blue),
+            ((16.0, 48.0), yellow),
+            ((1.5, 62.5), yellow),
+            ((48.0, 48.0), cyan),
+            ((62.5, 62.5), cyan),
+        ] {
+            let (x, y) = lit_pixel(&camera, at, SIZE);
+            let want = stored_pixel(stored, 1.0, format);
+            assert!(
+                frame.is_terrain(x, y) && near(frame.at(x, y), want),
+                "{format:?}: at {at:?} pixel ({x}, {y}) is {:?}, want {want:?}",
+                frame.at(x, y)
+            );
+        }
+    }
+}
+
+// REN-100
+#[test]
+fn conformance_gpu_layer_repeats_by_world_over_scale() {
+    let a = [250, 10, 10, 9];
+    let b = [10, 250, 10, 9];
+    let c = [10, 10, 250, 9];
+    let d = [250, 250, 10, 9];
+    let rgb = |t: [u8; 4]| [f64::from(t[0]), f64::from(t[1]), f64::from(t[2])];
+    for format in FORMATS {
+        let Some(mut renderer) = gpu(format) else {
+            return;
+        };
+        let (_, camera) = lit_scene(&mut renderer);
+        // At the scale 32 on a map 64 wide the texture repeats twice across
+        // and twice down, so a texel is 16 units; at the scale 64 it repeats
+        // once, so a texel is 32 units. The points are 8, 24, 40, and 56.
+        for (scale, grid) in [
+            (
+                32.0,
+                [[a, b, a, b], [c, d, c, d], [a, b, a, b], [c, d, c, d]],
+            ),
+            (
+                64.0,
+                [[a, a, b, b], [a, a, b, b], [c, c, d, d], [c, c, d, d]],
+            ),
+        ] {
+            let mut set = blend_set(Blend::Four, &[], Filtering::Nearest);
+            set.base = layer_of(2, 2, &[a, b, c, d], scale);
+            set.low = texture_level(1, 1, &[[0, 0, 0, 0]]);
+            set.top = solid_layer([10, 20, 250, 0]);
+            must(renderer.set_terrain_textures(&set), "the set is accepted");
+            let frame = draw_frame(
+                &mut renderer,
+                &camera,
+                SIZE,
+                &format!("repeat-{scale}-{format:?}"),
+            );
+            for (r, row) in grid.iter().enumerate() {
+                for (k, texel) in row.iter().enumerate() {
+                    let x = 8.0 + 16.0 * f64::from(u32::try_from(k).unwrap_or(0));
+                    let z = 8.0 + 16.0 * f64::from(u32::try_from(r).unwrap_or(0));
+                    let (px, py) = lit_pixel(&camera, (x, z), SIZE);
+                    let want = stored_pixel(rgb(*texel), 1.0, format);
+                    assert!(
+                        near(frame.at(px, py), want),
+                        "{format:?} scale {scale}: ({x}, {z}) is {:?}, want {want:?}",
+                        frame.at(px, py)
+                    );
+                }
+            }
+        }
+    }
+}
+
+// REN-102
+#[test]
+fn conformance_gpu_textured_pixels_hold_the_stored_value_lit() {
+    let mut set = blend_set(Blend::Four, &[], Filtering::Nearest);
+    set.base = solid_layer([128, 128, 128, 9]);
+    set.low = texture_level(1, 1, &[[0, 0, 0, 0]]);
+    set.top = solid_layer([10, 20, 250, 0]);
+    // A stored 128 at a factor of 1 is 128 on an sRGB target, and the
+    // decoding of 128/255 (0.2158605) times 255 = 55.04 on a Unorm one; at
+    // the factor 0.86 of flat ground, 110.08 and 39.82.
+    for (format, facing, flat) in [
+        (TextureFormat::Rgba8UnormSrgb, 128.0, 110.08),
+        (TextureFormat::Bgra8UnormSrgb, 128.0, 110.08),
+        (TextureFormat::Rgba8Unorm, 55.04, 39.82),
+    ] {
+        let Some(mut renderer) = gpu(format) else {
+            return;
+        };
+        must(renderer.set_terrain_textures(&set), "the set is accepted");
+        for (name, map, want) in [
+            ("facing", lit_plane(), facing),
+            ("flat", map_of(8, 64.0, 1.0, |_, _| 7), flat),
+        ] {
+            let mesh = scene(&mut renderer, &map, false);
+            let camera = must(Camera::for_mesh(&mesh, 1.0), "the camera builds");
+            let frame = draw_frame(
+                &mut renderer,
+                &camera,
+                SIZE,
+                &format!("colour-{name}-{format:?}"),
+            );
+            for (u, v) in [(0.3, 0.3), (0.5, 0.5), (0.7, 0.4)] {
+                let (x, y) = pixel_of(
+                    &camera.view_projection(),
+                    [
+                        u * 64.0,
+                        if name == "flat" {
+                            7.0
+                        } else {
+                            lit_surface(u * 64.0, v * 64.0)
+                        },
+                        v * 64.0,
+                    ],
+                    SIZE,
+                );
+                assert!(
+                    near(frame.at(x, y), [want; 3]),
+                    "{name} {format:?}: ({x}, {y}) is {:?}, want {want}",
+                    frame.at(x, y)
+                );
+            }
+        }
+    }
+}
+
+// REN-105
+#[test]
+fn conformance_gpu_a_refused_set_leaves_the_frame_and_the_fallback_matches_a_bare_renderer() {
+    let format = TextureFormat::Rgba8UnormSrgb;
+    let Some(mut renderer) = gpu(format) else {
+        return;
+    };
+    let Some(mut bare) = gpu(format) else {
+        return;
+    };
+    let (_, camera) = lit_scene(&mut renderer);
+    let _ = lit_scene(&mut bare);
+    let before = draw_frame(&mut renderer, &camera, SIZE, "refused-before");
+    let never = draw_frame(&mut bare, &camera, SIZE, "refused-bare");
+    assert_eq!(
+        before.pixels, never.pixels,
+        "a renderer given nothing draws the ramp"
+    );
+    let limit = renderer.device().limits().max_texture_dimension_2d;
+    let mut refusals: Vec<(Error, TerrainTextures)> = Vec::new();
+    let mut short = blend_set(Blend::Four, &[], Filtering::Nearest);
+    short.base.levels[0].rgba.pop();
+    refusals.push((
+        Error::Texture {
+            item: TextureItem::Layer(0),
+            fault: TextureFault::Bytes {
+                level: 0,
+                expected: 4,
+                found: 3,
+            },
+        },
+        short,
+    ));
+    let mut zero = blend_set(Blend::Four, &[], Filtering::Nearest);
+    zero.top.levels[0] = TextureLevel {
+        width: 0,
+        height: 1,
+        rgba: Vec::new(),
+    };
+    refusals.push((
+        Error::Texture {
+            item: TextureItem::Layer(9),
+            fault: TextureFault::ZeroSide { level: 0 },
+        },
+        zero,
+    ));
+    let mut wide = blend_set(Blend::Four, &[], Filtering::Nearest);
+    wide.low = TextureLevel {
+        width: limit + 1,
+        height: 1,
+        rgba: vec![0; to_usize(limit + 1) * 4],
+    };
+    refusals.push((
+        Error::Texture {
+            item: TextureItem::Mask(0),
+            fault: TextureFault::Oversize {
+                level: 0,
+                side: limit + 1,
+                limit,
+            },
+        },
+        wide,
+    ));
+    let mut chain = blend_set(Blend::Four, &[], Filtering::Nearest);
+    chain.base.levels = vec![
+        texture_level(2, 2, &[[0; 4]; 4]),
+        texture_level(2, 2, &[[0; 4]; 4]),
+    ];
+    refusals.push((
+        Error::Texture {
+            item: TextureItem::Layer(0),
+            fault: TextureFault::Chain { level: 1 },
+        },
+        chain,
+    ));
+    let mut scale = blend_set(Blend::Four, &[], Filtering::Nearest);
+    scale.base.scale = 0.0;
+    refusals.push((
+        Error::Texture {
+            item: TextureItem::Layer(0),
+            fault: TextureFault::Scale { scale: 0.0 },
+        },
+        scale,
+    ));
+    let mut missing = blend_set(Blend::Eight, &[], Filtering::Nearest);
+    missing.high = None;
+    refusals.push((
+        Error::Texture {
+            item: TextureItem::Mask(1),
+            fault: TextureFault::Missing,
+        },
+        missing,
+    ));
+    for (want, set) in &refusals {
+        assert_eq!(renderer.set_terrain_textures(set).as_ref(), Err(want));
+        assert!(
+            !renderer.terrain_textured(),
+            "a refused set leaves no textures: {want:?}"
+        );
+        let after = draw_frame(&mut renderer, &camera, SIZE, "refused-after");
+        assert_eq!(
+            after.pixels, before.pixels,
+            "a refused set leaves the frame: {want:?}"
+        );
+    }
+    // A set accepted, then another refused: the accepted one stays.
+    must(
+        renderer.set_terrain_textures(&blend_set(Blend::Four, &[], Filtering::Nearest)),
+        "a good set is accepted",
+    );
+    let textured = draw_frame(&mut renderer, &camera, SIZE, "refused-textured");
+    assert_ne!(
+        textured.pixels, before.pixels,
+        "the textured terrain is not the ramp"
+    );
+    let (want, bad) = &refusals[0];
+    assert_eq!(renderer.set_terrain_textures(bad).as_ref(), Err(want));
+    assert!(renderer.terrain_textured());
+    let kept = draw_frame(&mut renderer, &camera, SIZE, "refused-kept");
+    assert_eq!(
+        kept.pixels, textured.pixels,
+        "a refused set leaves the set before it"
+    );
+    renderer.clear_terrain_textures();
+    assert!(!renderer.terrain_textured());
+    let cleared = draw_frame(&mut renderer, &camera, SIZE, "refused-cleared");
+    assert_eq!(
+        cleared.pixels, never.pixels,
+        "a cleared renderer draws the ramp"
+    );
+}
+
+// REN-106
+#[test]
+fn conformance_gpu_textures_leave_the_water_the_models_and_the_list_and_the_upload_leaves_the_textures()
+ {
+    let format = TextureFormat::Rgba8UnormSrgb;
+    let Some(mut renderer) = gpu(format) else {
+        return;
+    };
+    // The lit plane's western half is under water at elevation 14.4.
+    let map = with_water(lit_plane(), 14.4);
+    let mesh = scene(&mut renderer, &map, true);
+    let camera = must(Camera::for_mesh(&mesh, 1.0), "the camera builds");
+    must(renderer.upload_models(&[square(3.0)]), "a model uploads");
+    let marker = [60.0, 30.0, 40.0];
+    must(
+        renderer.set_instances(&[at(0, marker, MAGENTA, Style::Flat)]),
+        "an instance uploads",
+    );
+    let before = draw_frame(&mut renderer, &camera, SIZE, "scene-before");
+    must(
+        renderer.set_terrain_textures(&blend_set(Blend::Four, &[], Filtering::Nearest)),
+        "the set is accepted",
+    );
+    let textured = draw_frame(&mut renderer, &camera, SIZE, "scene-textured");
+    let spots = [
+        pixel_of(&camera.view_projection(), [4.0, 10.0, 4.0], SIZE),
+        pixel_of(&camera.view_projection(), marker.map(f64::from), SIZE),
+    ];
+    for (x, y) in spots {
+        assert_eq!(
+            textured.at(x, y),
+            before.at(x, y),
+            "the water and the instance at ({x}, {y}) are as they were"
+        );
+    }
+    let (tx, ty) = lit_pixel(&camera, (56.0, 8.0), SIZE);
+    assert_ne!(
+        textured.at(tx, ty),
+        before.at(tx, ty),
+        "the terrain changed"
+    );
+    must(renderer.upload(&mesh, None), "the terrain uploads again");
+    assert!(renderer.terrain_textured(), "an upload leaves the textures");
+    let again = draw_frame(&mut renderer, &camera, SIZE, "scene-reuploaded");
+    let (x, y) = lit_pixel(&camera, (8.0, 8.0), SIZE);
+    assert_eq!(
+        again.at(tx, ty),
+        textured.at(tx, ty),
+        "textured still, at the east"
+    );
+    assert_ne!(
+        again.at(x, y),
+        before.at(x, y),
+        "textured still, at the north-west"
+    );
+}
+
+// ---- REN-105, REN-108 ---------------------------------------------------
+
+/// The linear lookup's value of two stored texels `a` and `b` a share
+/// `along` of the way from `a` to `b`.
+fn mix(a: [f64; 3], b: [f64; 3], along: f64) -> [f64; 3] {
+    [0, 1, 2].map(|k| a[k] + (b[k] - a[k]) * along)
+}
+
+// REN-108
+#[test]
+fn conformance_gpu_nearest_returns_one_texel_and_linear_blends_two() {
+    let format = TextureFormat::Rgba8UnormSrgb;
+    let Some(mut renderer) = gpu(format) else {
+        return;
+    };
+    let (_, camera) = lit_scene(&mut renderer);
+    // A first mask of two texels, 255 then 191, laid over slot 0: the
+    // weights are 1 and 127/255.
+    for (filtering, at, want) in [
+        // Nearest, inside the first texel: its weight 1.
+        (Filtering::Nearest, 30.0, [40.0, 200.0, 40.0]),
+        // Nearest, inside the second texel: 127/255 of the way to slot 1.
+        (
+            Filtering::Nearest,
+            34.0,
+            mix([200.0, 40.0, 40.0], [40.0, 200.0, 40.0], 127.0 / 255.0),
+        ),
+    ] {
+        let mut set = blend_set(Blend::Four, &[], filtering);
+        set.low = texture_level(2, 1, &[[255, 0, 0, 0], [191, 0, 0, 0]]);
+        set.top = solid_layer([10, 20, 250, 0]);
+        must(renderer.set_terrain_textures(&set), "the set is accepted");
+        let frame = draw_frame(&mut renderer, &camera, SIZE, "filter");
+        let (x, y) = lit_pixel(&camera, (at, 32.0), SIZE);
+        let want = stored_pixel(want, 1.0, format);
+        assert!(
+            near(frame.at(x, y), want),
+            "{filtering:?} at x = {at}: {:?}, want {want:?}",
+            frame.at(x, y)
+        );
+    }
+    // Linear, at the border of the two texels: the mean of the two values
+    // 255 and 191, 223/255, a weight of 191/255 laid over slot 0.
+    let mut set = blend_set(Blend::Four, &[], Filtering::Linear);
+    set.low = texture_level(2, 1, &[[255, 0, 0, 0], [191, 0, 0, 0]]);
+    set.top = solid_layer([10, 20, 250, 0]);
+    must(renderer.set_terrain_textures(&set), "the set is accepted");
+    let frame = draw_frame(&mut renderer, &camera, SIZE, "filter-linear");
+    let target = lit_pixel(&camera, (32.0, 32.0), SIZE);
+    let (wx, _) = surface_under(
+        &camera.view_projection(),
+        centre_ndc(target.0, target.1, SIZE),
+        &lit_surface,
+        (32.0, 32.0),
+    );
+    // The lookup is linear in x between the texel centres at 16 and 48.
+    let m = (255.0 + (191.0 - 255.0) * ((wx - 16.0) / 32.0)) / 255.0;
+    let weight = (2.0 * m - 1.0_f64).clamp(0.0, 1.0);
+    let want = stored_pixel(
+        mix([200.0, 40.0, 40.0], [40.0, 200.0, 40.0], weight),
+        1.0,
+        format,
+    );
+    assert!(
+        near(frame.at(target.0, target.1), want),
+        "linear at x = {wx}: {:?}, want {want:?}",
+        frame.at(target.0, target.1)
+    );
+}
+
+// REN-109
+#[test]
+fn conformance_gpu_linear_lookups_clamp_masks_and_repeat_layers() {
+    let format = TextureFormat::Rgba8UnormSrgb;
+    let Some(mut renderer) = gpu(format) else {
+        return;
+    };
+    let (_, camera) = lit_scene(&mut renderer);
+    // The mask: 255 then 0 over slot 1. A clamped lookup one unit inside
+    // the west edge holds the first texel whole, weight 1; a repeating one
+    // would blend in the last texel.
+    let mut set = blend_set(Blend::Four, &[], Filtering::Linear);
+    set.low = texture_level(2, 1, &[[255, 0, 0, 0], [0, 0, 0, 0]]);
+    set.top = solid_layer([10, 20, 250, 0]);
+    must(renderer.set_terrain_textures(&set), "the set is accepted");
+    let frame = draw_frame(&mut renderer, &camera, SIZE, "linear-mask");
+    let (x, y) = lit_pixel(&camera, (1.5, 32.0), SIZE);
+    let want = stored_pixel([40.0, 200.0, 40.0], 1.0, format);
+    assert!(
+        near(frame.at(x, y), want),
+        "the mask clamps at the west edge: {:?}, want {want:?}",
+        frame.at(x, y)
+    );
+    // The layer: two texels A, B over one repeat of 64 units. Near the east
+    // edge the lookup blends B with A, the first texel again, a share
+    // frac of the way, and not with B itself.
+    let a = [250.0, 10.0, 10.0];
+    let b = [10.0, 250.0, 10.0];
+    let mut set = blend_set(Blend::Four, &[], Filtering::Linear);
+    set.base = layer_of(2, 1, &[[250, 10, 10, 9], [10, 250, 10, 9]], 64.0);
+    set.low = texture_level(1, 1, &[[0, 0, 0, 0]]);
+    set.top = solid_layer([10, 20, 250, 0]);
+    must(renderer.set_terrain_textures(&set), "the set is accepted");
+    let frame = draw_frame(&mut renderer, &camera, SIZE, "linear-layer");
+    let target = lit_pixel(&camera, (62.0, 32.0), SIZE);
+    let (wx, _) = surface_under(
+        &camera.view_projection(),
+        centre_ndc(target.0, target.1, SIZE),
+        &lit_surface,
+        (62.0, 32.0),
+    );
+    // Texel centres at 16 and 48 (and 80 for the repeat of A).
+    let want = stored_pixel(mix(b, a, (wx - 48.0) / 32.0), 1.0, format);
+    assert!(
+        near(frame.at(target.0, target.1), want),
+        "the layer repeats at x = {wx}: {:?}, want {want:?}",
+        frame.at(target.0, target.1)
+    );
+}
+
+// REN-108
+#[test]
+fn conformance_gpu_filtered_lookup_chooses_a_smaller_level_where_texels_crowd() {
+    let format = TextureFormat::Rgba8UnormSrgb;
+    let Some(mut renderer) = gpu(format) else {
+        return;
+    };
+    let (_, camera) = lit_scene(&mut renderer);
+    // Level 0, 8 by 8 texels alternating red and blue; level 1, 4 by 4
+    // green. At a scale of 1 the map shows 64 repeats of 8 texels across,
+    // about 3.6 texels to a pixel at this size, so level 1 is chosen.
+    let level0: Vec<[u8; 4]> = (0..64)
+        .map(|k| {
+            if (k % 8 + k / 8) % 2 == 0 {
+                [250, 10, 10, 9]
+            } else {
+                [10, 10, 250, 9]
+            }
+        })
+        .collect();
+    let mut set = blend_set(Blend::Four, &[], Filtering::Linear);
+    set.base = Layer {
+        levels: vec![
+            texture_level(8, 8, &level0),
+            texture_level(4, 4, &[[10, 250, 10, 9]; 16]),
+        ],
+        scale: 1.0,
+    };
+    set.low = texture_level(1, 1, &[[0, 0, 0, 0]]);
+    set.top = solid_layer([10, 20, 250, 0]);
+    must(renderer.set_terrain_textures(&set), "the set is accepted");
+    let frame = draw_frame(&mut renderer, &camera, SIZE, "levels");
+    let mut sampled = String::new();
+    for iz in 1..9_u32 {
+        for ix in 1..9_u32 {
+            let at = (f64::from(ix) * 7.0, f64::from(iz) * 7.0);
+            let (x, y) = lit_pixel(&camera, at, SIZE);
+            let p = frame.at(x, y);
+            sampled.push_str(&format!(" {},{},{}", p[0], p[1], p[2]));
+            assert!(
+                near(p, [10.0, 250.0, 10.0]),
+                "level 1 is chosen where texels crowd: ({x}, {y}) is {p:?}"
+            );
+        }
+    }
+    println!("LEVEL_SAMPLE {}{sampled}", renderer.adapter_name());
+}
+
+// ---- REN-102: the third module -----------------------------------------
+
+// REN-107
+#[test]
+fn render_textured_shader_source_is_a_third_module_assembled_from_the_constants() {
+    use supercom_render::wgpu::naga::{
+        ShaderStage,
+        front::wgsl,
+        valid::{Capabilities, ValidationFlags, Validator},
+    };
+    let source = textured_shader_source();
+    let module = must(wgsl::parse_str(&source), "naga parses the textured shader");
+    must(
+        Validator::new(ValidationFlags::all(), Capabilities::default()).validate(&module),
+        "naga validates the textured shader",
+    );
+    let names: Vec<(&str, ShaderStage)> = module
+        .entry_points
+        .iter()
+        .map(|entry| (entry.name.as_str(), entry.stage))
+        .collect();
+    assert_eq!(
+        names,
+        [
+            ("vs_textured", ShaderStage::Vertex),
+            ("fs_textured", ShaderStage::Fragment)
+        ],
+        "the module's two entry points"
+    );
+    let bound = module
+        .global_variables
+        .iter()
+        .filter(|(_, v)| v.binding.is_some())
+        .count();
+    // The frame uniform, the textured uniform, two samplers, twelve textures.
+    assert_eq!(bound, 16, "bound globals");
+    for number in LIGHT_DIRECTION.iter().chain([&AMBIENT]) {
+        assert!(
+            source.contains(&format!("{number:?}")),
+            "the source writes {number:?} from the Rust constant"
         );
     }
 }
