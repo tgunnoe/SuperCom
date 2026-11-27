@@ -82,9 +82,11 @@ about drawing; later work adds its own sections under Decision.
   masks' bytes and the terrain program's name. It does not look inside a mask
   (the caller decodes it) and it returns no normal slot, decal, decal group,
   or embedded normal map; each is read past with its counts and lengths
-  checked against the bytes that remain. A file that ends before the masks,
-  which the loader used to accept, is now refused as truncated: that is the
-  one change to what an existing input returns.
+  checked against the bytes that remain. A file whose sections after the strata do not run through the high mask,
+  which the loader used to accept, is now refused: as truncated where it ends
+  early or a count or length outruns the data, and
+  as malformed where a count or length is negative. No installed map is among
+  them.
 - **Digests (FMT-077 to FMT-079).** The three sets the milestone reads (the
   ground textures, the masks, the units' textures) are fixed by a count and
   one combined digest each, which the Rust decoder and the independent script
@@ -97,10 +99,10 @@ about drawing; later work adds its own sections under Decision.
   header, and can compare its own sampling against the same sets.
 - The decoder's memory for a worst-case file is bounded by its data, not by
   its header; a consumer that decodes a whole set at once still pays the sum
-  of the decoded sizes, about 3 GiB for the units' two textures, and decodes a
-  file at a time.
+  of the decoded sizes, about 3 GiB for the units' two textures,
+  unless it decodes one file at a time.
 - The rounding is the project's, not the original's; if a side-by-side
   observation shows a last-bit difference that matters, this section is the
   place to revise it, and the three digests change with it.
-- The map loader now fails a file that the earlier one accepted if it ends
-  before its masks; the 60 installed maps all carry them.
+- The map loader now refuses a file that the earlier one accepted when what
+  follows its strata does not run through its masks; the 60 installed maps all do.
