@@ -4,10 +4,12 @@
 
 use crate::error::RunError;
 use std::fmt;
+use std::path::PathBuf;
 use supercom_render::{
     Blend, Error as RenderError, Filtering, Layer, Renderer, TerrainTextures, TextureItem,
     TextureLevel, grid_fits,
 };
+use supercom_scd::Vfs;
 use supercom_scmap::Map;
 
 /// What an item of the terrain's set is.
@@ -403,21 +405,34 @@ pub fn terrain(
     Ok(resolution.verdict)
 }
 
-/// The step of `view`: [`terrain`] reading through the install's archives,
-/// which are mounted at the first read, so a map that does not fit the device
-/// mounts nothing. An install that does not mount makes every file missing.
+/// Where a run reads the game's files from: `view` mounts nothing before
+/// the window, so it hands on the install directory; `replay` mounted the
+/// archives to resolve its unit kinds, so it hands on that reader. Either is
+/// dropped when the texture step returns, and a run mounts at most once.
+pub enum Source {
+    /// The install directory, whose archives are mounted at the first read.
+    Install(PathBuf),
+    /// Archives already mounted.
+    Mounted(Vfs),
+}
+
+/// The step of a run between the renderer and the terrain mesh: [`terrain`]
+/// reading through `source`. An install that does not mount makes every file
+/// missing.
 ///
 /// # Errors
 /// As [`terrain`].
-pub fn load(
-    map: &Map,
-    install: &std::path::Path,
-    renderer: &mut Renderer,
-) -> Result<Verdict, RunError> {
-    let mut vfs: Option<Result<supercom_scd::Vfs, String>> = None;
+pub fn load(map: &Map, source: Source, renderer: &mut Renderer) -> Result<Verdict, RunError> {
+    let (mut vfs, install) = match source {
+        Source::Mounted(vfs) => (Some(Ok(vfs)), None),
+        Source::Install(dir) => (None, Some(dir)),
+    };
     let mut read = |path: &str| {
         let mounted = vfs.get_or_insert_with(|| {
-            supercom_scd::Vfs::from_install(install).map_err(|error| error.to_string())
+            let dir = install
+                .as_deref()
+                .unwrap_or_else(|| std::path::Path::new(""));
+            Vfs::from_install(dir).map_err(|error| error.to_string())
         });
         match mounted {
             Ok(vfs) => vfs.read(path).map_err(|error| error.to_string()),

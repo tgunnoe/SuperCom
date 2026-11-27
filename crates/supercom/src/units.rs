@@ -193,21 +193,33 @@ pub fn resolve_kind(
     build_kind(kind, &mesh, &blueprint)
 }
 
-/// Resolves every kind of `kinds` from the install at `install`.
+/// Mounts the install's archives, once, and resolves every kind of `kinds`
+/// from them, handing the mounted archives back for the rest of the run.
 ///
 /// # Errors
 /// [`RunError::UnitArchives`] when the archives do not mount, and
 /// [`RunError::UnitKind`] for the first kind that does not resolve.
-pub fn resolve_kinds(install: &Path, kinds: &[String]) -> Result<Meshes, RunError> {
+pub fn mount_kinds(install: &Path, kinds: &[String]) -> Result<(Meshes, Vfs), RunError> {
     let vfs = Vfs::from_install(install).map_err(|error| RunError::UnitArchives {
         reason: error.to_string(),
     })?;
     let read = |path: &str| vfs.read(path).map_err(|error| error.to_string());
-    kinds
+    let meshes = kinds
         .iter()
         .map(|kind| resolve_kind(kind, &read))
         .collect::<Result<Vec<_>, _>>()
-        .map(Meshes::new)
+        .map(Meshes::new)?;
+    Ok((meshes, vfs))
+}
+
+/// Resolves every kind of `kinds` from the install at `install`, dropping
+/// the archives.
+///
+/// # Errors
+/// As [`mount_kinds`].
+#[cfg(test)]
+pub fn resolve_kinds(install: &Path, kinds: &[String]) -> Result<Meshes, RunError> {
+    mount_kinds(install, kinds).map(|(meshes, _)| meshes)
 }
 
 #[cfg(test)]
