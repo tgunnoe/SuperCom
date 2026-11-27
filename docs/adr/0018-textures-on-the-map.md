@@ -45,9 +45,9 @@ about drawing; later work adds its own sections under Decision.
   8 bits by replicating its high bits (a 5-bit `v` becomes `(v << 3) | (v >>
 2)`, a 6-bit one `(v << 2) | (v >> 4)`), then take each quotient of 8-bit
   values to the nearest integer, a tie going up, as `(n + d / 2) / d`. Ties
-  occur only for the midpoint of two endpoints. Hardware decoders differ in
-  the last bit of an interpolated channel, so no choice is the original's, and
-  the tests pin this one with values on which truncation gives another number.
+  occur only for the midpoint of two endpoints. Which rounding the
+  original used is not established, so this choice is not claimed to be its,
+  and the tests pin this one with values on which truncation gives another number.
 - **The colour block of DXT3 and DXT5 (FMT-067, FMT-068).** It is decoded in
   the four-colour form whatever the order of the endpoints, which is the
   wording of the OpenGL extension (FMT-063); its implementation note on
