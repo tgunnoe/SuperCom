@@ -283,8 +283,11 @@ On 2026-11-27 the gate workflow gained a job on a hosted aarch64-linux runner
 (`ubuntu-24.04-arm`) that runs the evidence crate's golden vectors, the
 simulation crate's tests with its pinned digests of synthetic worlds, and the
 texture loader's tests that need no installed game. Its first run, number
-46040720557 on commit 9bb7ca1, listed 181 tests and passed 181, with no skipped
-test. Among them are the six tests of `supercom-detbench` and the simulation's
+46040720557 on commit 9bb7ca1, listed 181 tests and passed 181. The five tests
+that run reports as skipped were never selected: the job's filter leaves out
+the four `conformance_` tests of `supercom-dds`, which ask for the installed
+game, and one test of `supercom-sim` is marked ignored. Among them are the six
+tests of `supercom-detbench` and the simulation's
 three pinned digests (`sim_movement_golden_digest_is_pinned`,
 `sim_combat_golden_digest_is_pinned`, and `sim_world_digests_golden_vector`);
 the same tests with the same committed values pass on x86_64 in the gate job of
