@@ -74,6 +74,7 @@ struct Spec {
     decal_textures: usize,
     /// Decal groups, each with `group_members` members.
     groups: usize,
+    group_name: &'static str,
     group_members: usize,
     /// The embedded normal maps, each a blob.
     normal_maps: Vec<Vec<u8>>,
@@ -129,6 +130,7 @@ impl Spec {
             decals: 0,
             decal_textures: 0,
             groups: 0,
+            group_name: "group",
             group_members: 0,
             normal_maps: vec![vec![1, 2, 3]],
             low_mask: Vec::new(),
@@ -259,9 +261,11 @@ impl Spec {
             put_i32(&mut out, 7); // id
             put_i32(&mut out, 1); // type
             put_i32(&mut out, len32(self.decal_textures));
-            for _ in 0..self.decal_textures {
-                put_i32(&mut out, 9);
-                out.extend_from_slice(b"decal.dds");
+            // Textures of different lengths: 3, 7, 11 bytes, and so on.
+            for texture in 0..self.decal_textures {
+                let name = "d".repeat(3 + 4 * texture);
+                put_i32(&mut out, len32(name.len()));
+                out.extend_from_slice(name.as_bytes());
             }
             out.extend_from_slice(&[0x5A; DECAL_TAIL]);
         }
@@ -269,7 +273,7 @@ impl Spec {
         put_i32(&mut out, len32(self.groups));
         for _ in 0..self.groups {
             put_i32(&mut out, 5); // id
-            put_cstr(&mut out, "group");
+            put_cstr(&mut out, self.group_name);
             put_i32(&mut out, len32(self.group_members));
             for member in 0..self.group_members {
                 put_i32(&mut out, len32(member));
@@ -717,5 +721,53 @@ fn scmap_every_prefix_before_the_masks_end_is_truncated() {
             "prefix of {len} bytes: got {:?}",
             result.err()
         );
+    }
+}
+
+/// Pins the decal group's layout (FMT-074, FMT-076): an id of 4 bytes, then
+/// a name of any length (here 2 bytes and its terminator, so a reader that
+/// skips more than the id lands inside the name's successor), then a count
+/// and that many 4-byte members. Two decals with textures of 3 and 7 bytes
+/// come before it. The masks that follow are returned exactly.
+#[test]
+fn scmap_decal_group_with_a_short_name_and_members_is_walked() {
+    let spec = Spec {
+        program: "TTerrainTest",
+        decals: 2,
+        decal_textures: 2,
+        groups: 2,
+        group_name: "ab",
+        group_members: 2,
+        low_mask: vec![31, 32, 33, 34],
+        high_mask: vec![41, 42],
+        ..Spec::minimal()
+    };
+    let map = parsed(&spec.build().bytes);
+    assert_eq!(map.low_mask, [31, 32, 33, 34]);
+    assert_eq!(map.high_mask, [41, 42]);
+    assert_eq!(map, spec.expected());
+}
+
+/// Pins the bound on a count (FMT-076): a count that cannot fit in the bytes
+/// that remain is refused at once, reporting the position after the count
+/// plus the count times the least one item takes. A decal takes at least 60
+/// bytes (8 + 4 + 48), a decal group 9 (4 + 1 + 4), a normal map 4; the
+/// products are 2,147,483,647 times 60, 9, and 4.
+#[test]
+fn scmap_counts_that_cannot_fit_are_refused_at_once() {
+    let built = busy_after_the_strata().build();
+    for (name, at, needed_beyond) in [
+        ("decal count", built.decal_count_at, 128_849_018_820_usize),
+        ("decal group count", built.group_count_at, 19_327_352_823),
+        ("normal map count", built.normal_count_at, 8_589_934_588),
+    ] {
+        let mut buf = built.bytes.clone();
+        set_i32(&mut buf, at, i32::MAX);
+        let result = Map::parse(&buf);
+        let expected = Error::Truncated {
+            needed: at + 4 + needed_beyond,
+            len: buf.len(),
+        };
+        assert_eq!(result, Err(expected), "{name}");
     }
 }

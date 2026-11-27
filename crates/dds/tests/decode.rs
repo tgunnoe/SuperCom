@@ -854,3 +854,29 @@ fn decode_arbitrary_headers_reach_the_size_function_and_agree() {
     }
     assert!(reached >= 100, "only {reached} headers reached a size");
 }
+
+/// FMT-082: a block that overhangs the right or the bottom edge of a level
+/// of any size is cropped to the level's width and height. A 6 by 5 level of
+/// 2 by 2 blocks: block 0 red, block 1 blue and black on its first two
+/// columns, block 2 green, block 3 white and black. A reader that wrote the
+/// overhang would put block 1's third and fourth columns over the first two
+/// pixels of the next row. The path is shared by the three block formats.
+#[test]
+fn decode_blocks_overhanging_the_level_are_cropped() {
+    let data = [
+        solid(0xF800),
+        colour(0x001F, 0x0000, [0xE4; 4]),
+        solid(0x07E0),
+        colour(0xFFFF, 0x0000, [0xE4; 4]),
+    ]
+    .concat();
+    let level = one_level(&Tex::dxt1(6, 5, data));
+    assert_eq!((level.width, level.height), (6, 5));
+    let (black, green, white) = ([0, 0, 0, 255], [0, 255, 0, 255], [255, 255, 255, 255]);
+    let mut pixels = Vec::new();
+    for _ in 0..4 {
+        pixels.extend_from_slice(&[RED, RED, RED, RED, BLUE, black]);
+    }
+    pixels.extend_from_slice(&[green, green, green, green, white, black]);
+    assert_eq!(level.rgba, flat(&pixels));
+}
