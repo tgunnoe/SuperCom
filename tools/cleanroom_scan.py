@@ -61,9 +61,13 @@ FIXTURES = TOOL_DIR / "cleanroom_scan" / "fixtures"
 INSTALL_VAR = "SUPERCOM_FA_DIR"
 WARNING = "WARNING: SUPERCOM_FA_DIR is unset or names no install; the overlap scan was skipped"
 
-# File types the game ships. None may be tracked, in any letter case.
+# File types the game ships, and the image formats a screenshot or captured frame is
+# written in. None may be tracked, in any letter case.
 DENIED_EXTENSIONS = frozenset(
-    "bp scm sca scmap dds xwb xsb sfd fx cg lua scd tga bmp psd txmap ogg wav".split()
+    (
+        "bp scm sca scmap dds xwb xsb sfd fx cg lua scd tga bmp psd txmap ogg wav "
+        "png ppm pnm pam jpg jpeg"
+    ).split()
 )
 FIXTURE_DIR = "fixtures"
 FIXTURE_LIMIT = 4096
