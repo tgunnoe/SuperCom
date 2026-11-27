@@ -13,6 +13,7 @@ mod cache;
 mod cli;
 mod error;
 mod frame;
+mod ground;
 mod input;
 mod interp;
 mod mapfile;
