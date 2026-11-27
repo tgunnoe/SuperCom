@@ -403,6 +403,8 @@ NOTE = (
 # The file types the specification forbids, spelled out here so the check does not
 # depend on the constant it checks.
 SPEC_DENIED = "bp scm sca scmap dds xwb xsb sfd fx cg lua scd tga bmp psd txmap ogg wav".split()
+# Rendered images (screenshots, captured frames) are refused by extension too, one case each.
+IMAGE_DENIED = "png ppm pnm pam jpg jpeg".split()
 
 
 def body(*lines: str) -> bytes:
@@ -493,6 +495,14 @@ def tree_cases() -> list[TreeCase]:
     return [
         TreeCase(
             "denylisted-extensions-any-case", denied, tuple((p, 1, "extension") for p in denied)
+        ),
+        *(
+            TreeCase(
+                f"image-extension-{ext}",
+                {f"shots/frame.{ext}": b"x\n", f"shots/FRAME.{ext.upper()}": b"x\n"},
+                ((f"shots/frame.{ext}", 1, "extension"), (f"shots/FRAME.{ext.upper()}", 1, "extension")),
+            )
+            for ext in IMAGE_DENIED
         ),
         TreeCase("extension-lookalikes", {name: b"x\n" for name in lookalikes}),
         TreeCase(
