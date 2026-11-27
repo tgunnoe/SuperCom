@@ -704,3 +704,96 @@ fn supercom_ground_fit_check_comes_before_any_file_is_read() {
     assert_eq!(got.ok(), Some(Verdict::Textured(Blend::Four)));
     assert_eq!(asked.len(), 6);
 }
+
+/// Pins REN-111's sentence that the program's name is matched exactly: a name
+/// in another case or with a space before or after is the fallback's first
+/// case, and the notice carries it as stored.
+#[test]
+fn supercom_ground_program_name_is_matched_exactly() {
+    for name in ["tterrain", "TTERRAIN", " TTerrain", "TTerrain\n"] {
+        let verdict = decide(name, &four());
+        let notice = fallback(&verdict);
+        assert_eq!(
+            notice.map(|n| (n.item, n.path.as_str(), n.failed)),
+            Some((Item::Program, name, 1)),
+            "{name:?}"
+        );
+    }
+}
+
+/// Pins REN-109's sentence that the binary's lookups are filtered, linearly
+/// with the levels: the set a run asks for is built with linear filtering.
+#[test]
+fn supercom_ground_run_asks_for_the_filtered_lookups() {
+    let mut log = Vec::new();
+    let got = run_gather(&map_named("TTerrain", &all(), 4.0), &mut reader(&mut log));
+    assert_eq!(
+        got.textures.map(|set| set.filtering),
+        Some(Filtering::Linear)
+    );
+}
+
+/// Pins REN-113's notice for a first mask: the item reads `first mask`, and
+/// no path is shown.
+#[test]
+fn supercom_ground_notice_for_a_first_mask_reads_first_mask() {
+    let notice = Notice {
+        item: Item::Mask(0),
+        path: String::new(),
+        reason: "the map stores no first mask".to_owned(),
+        failed: 1,
+    };
+    assert_eq!(
+        notice.to_string(),
+        "terrain textures not used, the height ramp is drawn: first mask: the map stores no first mask (1 failed)"
+    );
+}
+
+/// Pins REN-111's sentence that a set the renderer refuses is the fallback:
+/// the verdict after the renderer's answer names the item the error names,
+/// with the file the map stores for a layer, and counts one; an accepted set
+/// is the textured terrain.
+#[test]
+fn supercom_ground_a_renderer_refusal_is_the_fallback() {
+    use supercom_render::{Error, TextureFault};
+    let map = map_named("TTerrain", &all(), 4.0);
+    assert_eq!(
+        after_renderer(Blend::Four, Ok(()), &map),
+        Verdict::Textured(Blend::Four)
+    );
+    let layer = Error::Texture {
+        item: supercom_render::TextureItem::Layer(3),
+        fault: TextureFault::NoLevels,
+    };
+    assert_eq!(
+        after_renderer(Blend::Four, Err(layer), &map),
+        Verdict::Fallback(Notice {
+            item: Item::Layer(3),
+            path: "\\Env\\Layer3.DDS".to_owned(),
+            reason: "terrain layer 3 holds no level".to_owned(),
+            failed: 1,
+        })
+    );
+    let mask = Error::Texture {
+        item: supercom_render::TextureItem::Mask(1),
+        fault: TextureFault::Missing,
+    };
+    assert_eq!(
+        after_renderer(Blend::Eight, Err(mask), &map),
+        Verdict::Fallback(Notice {
+            item: Item::Mask(1),
+            path: String::new(),
+            reason: "terrain mask 2 is read by the program and was not given".to_owned(),
+            failed: 1,
+        })
+    );
+    let binding = Error::TextureBinding {
+        needed: 12,
+        limit: 11,
+    };
+    let verdict = after_renderer(Blend::Four, Err(binding), &map);
+    assert_eq!(
+        fallback(&verdict).map(|n| (n.item, n.failed)),
+        Some((Item::Set, 1))
+    );
+}
