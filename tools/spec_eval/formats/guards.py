@@ -40,14 +40,15 @@ def reserved(path: str, variant: str):
 
 
 def integer_only(_game) -> None:
-    """FMT-073: no `f32` or `f64` in the code of the texture crate's source files."""
+    """FMT-073: no `f32` or `f64` in the code of any source file under the texture crate's src, subdirectories included."""
     import glob
 
     found = []
-    for path in sorted(glob.glob(os.path.join(F.REPO, "crates", "dds", "src", "*.rs"))):
-        for number, line in enumerate(F.repo_text(os.path.relpath(path, F.REPO)).splitlines(), 1):
+    for path in sorted(glob.glob(os.path.join(F.REPO, "crates", "dds", "src", "**", "*.rs"), recursive=True)):
+        relative = os.path.relpath(path, F.REPO)
+        for number, line in enumerate(F.repo_text(relative).splitlines(), 1):
             if re.search(r"\bf(32|64)\b", line.split("//", 1)[0]):
-                found.append(f"{os.path.basename(path)}:{number}")
+                found.append(f"{relative}:{number}")
     F.expect("lines_naming_a_float_type", found, [])
 
 
