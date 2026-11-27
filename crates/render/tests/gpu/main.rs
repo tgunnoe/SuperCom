@@ -2354,31 +2354,41 @@ fn conformance_gpu_mask_lookup_reads_north_west_first_and_clamps_at_the_edges() 
 // REN-100
 #[test]
 fn conformance_gpu_layer_repeats_by_world_over_scale() {
-    let a = [250, 10, 10, 9];
-    let b = [10, 250, 10, 9];
-    let c = [10, 10, 250, 9];
-    let d = [250, 250, 10, 9];
+    let tex_a = [250, 10, 10, 9];
+    let tex_b = [10, 250, 10, 9];
+    let tex_c = [10, 10, 250, 9];
+    let tex_d = [250, 250, 10, 9];
     let rgb = |t: [u8; 4]| [f64::from(t[0]), f64::from(t[1]), f64::from(t[2])];
     for format in FORMATS {
         let Some(mut renderer) = gpu(format) else {
             return;
         };
         let (_, camera) = lit_scene(&mut renderer);
-        // At the scale 32 on a map 64 wide the texture repeats twice across
-        // and twice down, so a texel is 16 units; at the scale 64 it repeats
-        // once, so a texel is 32 units. The points are 8, 24, 40, and 56.
+        // At the scale 32 on tex_a map 64 wide the texture repeats twice across
+        // and twice down, so tex_a texel is 16 units; at the scale 64 it repeats
+        // once, so tex_a texel is 32 units. The points are 8, 24, 40, and 56.
         for (scale, grid) in [
             (
                 32.0,
-                [[a, b, a, b], [c, d, c, d], [a, b, a, b], [c, d, c, d]],
+                [
+                    [tex_a, tex_b, tex_a, tex_b],
+                    [tex_c, tex_d, tex_c, tex_d],
+                    [tex_a, tex_b, tex_a, tex_b],
+                    [tex_c, tex_d, tex_c, tex_d],
+                ],
             ),
             (
                 64.0,
-                [[a, a, b, b], [a, a, b, b], [c, c, d, d], [c, c, d, d]],
+                [
+                    [tex_a, tex_a, tex_b, tex_b],
+                    [tex_a, tex_a, tex_b, tex_b],
+                    [tex_c, tex_c, tex_d, tex_d],
+                    [tex_c, tex_c, tex_d, tex_d],
+                ],
             ),
         ] {
             let mut set = blend_set(Blend::Four, &[], Filtering::Nearest);
-            set.base = layer_of(2, 2, &[a, b, c, d], scale);
+            set.base = layer_of(2, 2, &[tex_a, tex_b, tex_c, tex_d], scale);
             set.low = texture_level(1, 1, &[[0, 0, 0, 0]]);
             set.top = solid_layer([10, 20, 250, 0]);
             must(renderer.set_terrain_textures(&set), "the set is accepted");
@@ -2460,25 +2470,9 @@ fn conformance_gpu_textured_pixels_hold_the_stored_value_lit() {
     }
 }
 
-// REN-105
-#[test]
-fn conformance_gpu_a_refused_set_leaves_the_frame_and_the_fallback_matches_a_bare_renderer() {
-    let format = TextureFormat::Rgba8UnormSrgb;
-    let Some(mut renderer) = gpu(format) else {
-        return;
-    };
-    let Some(mut bare) = gpu(format) else {
-        return;
-    };
-    let (_, camera) = lit_scene(&mut renderer);
-    let _ = lit_scene(&mut bare);
-    let before = draw_frame(&mut renderer, &camera, SIZE, "refused-before");
-    let never = draw_frame(&mut bare, &camera, SIZE, "refused-bare");
-    assert_eq!(
-        before.pixels, never.pixels,
-        "a renderer given nothing draws the ramp"
-    );
-    let limit = renderer.device().limits().max_texture_dimension_2d;
+/// A set for each fault a device-independent buffer can show, with the
+/// error the renderer must refuse it with.
+fn refused_sets(limit: u32) -> Vec<(Error, TerrainTextures)> {
     let mut refusals: Vec<(Error, TerrainTextures)> = Vec::new();
     let mut short = blend_set(Blend::Four, &[], Filtering::Nearest);
     short.base.levels[0].rgba.pop();
@@ -2553,6 +2547,29 @@ fn conformance_gpu_a_refused_set_leaves_the_frame_and_the_fallback_matches_a_bar
         },
         missing,
     ));
+    refusals
+}
+
+// REN-105
+#[test]
+fn conformance_gpu_a_refused_set_leaves_the_frame_and_the_fallback_matches_a_bare_renderer() {
+    let format = TextureFormat::Rgba8UnormSrgb;
+    let Some(mut renderer) = gpu(format) else {
+        return;
+    };
+    let Some(mut bare) = gpu(format) else {
+        return;
+    };
+    let (_, camera) = lit_scene(&mut renderer);
+    let _ = lit_scene(&mut bare);
+    let before = draw_frame(&mut renderer, &camera, SIZE, "refused-before");
+    let never = draw_frame(&mut bare, &camera, SIZE, "refused-bare");
+    assert_eq!(
+        before.pixels, never.pixels,
+        "a renderer given nothing draws the ramp"
+    );
+    let limit = renderer.device().limits().max_texture_dimension_2d;
+    let refusals = refused_sets(limit);
     for (want, set) in &refusals {
         assert_eq!(renderer.set_terrain_textures(set).as_ref(), Err(want));
         assert!(
@@ -2801,20 +2818,43 @@ fn conformance_gpu_filtered_lookup_chooses_a_smaller_level_where_texels_crowd() 
     set.top = solid_layer([10, 20, 250, 0]);
     must(renderer.set_terrain_textures(&set), "the set is accepted");
     let frame = draw_frame(&mut renderer, &camera, SIZE, "levels");
-    let mut sampled = String::new();
+    let mut sampled = Vec::new();
     for iz in 1..9_u32 {
         for ix in 1..9_u32 {
             let at = (f64::from(ix) * 7.0, f64::from(iz) * 7.0);
             let (x, y) = lit_pixel(&camera, at, SIZE);
             let p = frame.at(x, y);
-            sampled.push_str(&format!(" {},{},{}", p[0], p[1], p[2]));
+            sampled.push(format!("{},{},{}", p[0], p[1], p[2]));
             assert!(
                 near(p, [10.0, 250.0, 10.0]),
                 "level 1 is chosen where texels crowd: ({x}, {y}) is {p:?}"
             );
         }
     }
-    println!("LEVEL_SAMPLE {}{sampled}", renderer.adapter_name());
+    println!(
+        "LEVEL_SAMPLE {} {}",
+        renderer.adapter_name(),
+        sampled.join(" ")
+    );
+    // The measurement: at a scale of 2 the map shows about 1.8 texels to a
+    // pixel, so the lookup falls between the two levels; the pixels read are
+    // printed for a comparison of two adapters, and nothing is asserted.
+    set.base.scale = 2.0;
+    must(renderer.set_terrain_textures(&set), "the set is accepted");
+    let frame = draw_frame(&mut renderer, &camera, SIZE, "levels-between");
+    let mut between = Vec::new();
+    for iz in 1..9_u32 {
+        for ix in 1..9_u32 {
+            let (x, y) = lit_pixel(&camera, (f64::from(ix) * 7.0, f64::from(iz) * 7.0), SIZE);
+            let p = frame.at(x, y);
+            between.push(format!("{},{},{}", p[0], p[1], p[2]));
+        }
+    }
+    println!(
+        "LEVEL_BETWEEN {} {}",
+        renderer.adapter_name(),
+        between.join(" ")
+    );
 }
 
 // ---- REN-102: the third module -----------------------------------------

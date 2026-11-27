@@ -335,6 +335,13 @@ fn render_texture_checks_refuse_each_fault() {
         "a level that is not the one before halved"
     );
     assert_eq!(
+        refused(good(), |s| {
+            s.base.levels = vec![level(2, 2), level(1, 1), level(1, 1)];
+        }),
+        fault(TextureItem::Layer(0), TextureFault::Chain { level: 2 }),
+        "no more levels than the larger side has: 2 by 2 has two"
+    );
+    assert_eq!(
         refused(good(), |s| s.top.levels[1] = level(3, 1)),
         fault(TextureItem::Layer(9), TextureFault::Chain { level: 1 })
     );

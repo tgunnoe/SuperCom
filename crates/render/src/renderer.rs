@@ -4,24 +4,27 @@
 
 use crate::terrain::VERTEX_BYTES;
 use crate::{
-    Camera, Error, INSTANCE_BYTES, Instance as Placed, Model, Style, TerrainMesh, TerrainTextures,
-    WaterPlane, check_instances, check_model, grid_fits, grid_vertex_count, instances_fit,
-    model_fits, model_shader, shader,
+    Blend, Camera, Error, Filtering, INSTANCE_BYTES, Instance as Placed, Layer, Model,
+    SAMPLED_TEXTURES, Style, TerrainMesh, TerrainTextures, TextureLevel, WaterPlane,
+    check_instances, check_model, check_textures, grid_fits, grid_vertex_count, instances_fit,
+    model_fits, model_shader, shader, textured_shader,
 };
 use std::num::NonZeroU64;
 use wgpu::{
-    Adapter, Backend, Backends, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
-    BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, Buffer, BufferBindingType,
-    BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites, CommandEncoderDescriptor,
-    CompareFunction, DepthStencilState, Device, DeviceDescriptor, ErrorFilter, Extent3d, Face,
-    Features, FragmentState, FrontFace, IndexFormat, Instance, InstanceDescriptor, Limits, LoadOp,
-    MultisampleState, Operations, PipelineLayout, PipelineLayoutDescriptor, PrimitiveState,
-    PrimitiveTopology, Queue, RenderPassColorAttachment, RenderPassDepthStencilAttachment,
-    RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions,
-    ShaderModuleDescriptor, ShaderSource, ShaderStages, StoreOp, Surface, SurfaceTarget,
-    TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
-    TextureViewDescriptor, VertexAttribute, VertexBufferLayout, VertexFormat, VertexState,
-    VertexStepMode,
+    Adapter, AddressMode, Backend, Backends, BindGroup, BindGroupDescriptor, BindGroupEntry,
+    BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, Buffer,
+    BufferBindingType, BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites,
+    CommandEncoderDescriptor, CompareFunction, DepthStencilState, Device, DeviceDescriptor,
+    ErrorFilter, Extent3d, Face, Features, FilterMode, FragmentState, FrontFace, IndexFormat,
+    Instance, InstanceDescriptor, Limits, LoadOp, MipmapFilterMode, MultisampleState, Operations,
+    Origin3d, PipelineLayout, PipelineLayoutDescriptor, PrimitiveState, PrimitiveTopology, Queue,
+    RenderPassColorAttachment, RenderPassDepthStencilAttachment, RenderPassDescriptor,
+    RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions, Sampler, SamplerBindingType,
+    SamplerDescriptor, ShaderModuleDescriptor, ShaderSource, ShaderStages, StoreOp, Surface,
+    SurfaceTarget, TexelCopyBufferLayout, TexelCopyTextureInfo, TextureAspect, TextureDescriptor,
+    TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureView,
+    TextureViewDescriptor, TextureViewDimension, VertexAttribute, VertexBufferLayout, VertexFormat,
+    VertexState, VertexStepMode,
 };
 
 /// The depth target's format.
@@ -107,6 +110,29 @@ struct Scene {
     terrain: GpuMesh,
     water: Option<GpuMesh>,
     range: [f32; 2],
+    extent: [f32; 2],
+}
+
+/// Floats in the textured terrain's uniform: the map's extent, then the ten
+/// layers' scales and the ten layers' named flags, each in three vectors of
+/// four.
+const TEXTURED_FLOATS: usize = 28;
+
+/// The textured pipeline and the layout of its bind group, made when the
+/// first set of textures is accepted.
+#[derive(Clone, Debug)]
+struct TexturedPipeline {
+    pipeline: RenderPipeline,
+    layout: BindGroupLayout,
+}
+
+/// What [`Renderer::set_terrain_textures`] left on the device: the bind
+/// group holding the twelve textures, the two samplers, and the uniform
+/// whose first two floats are the map's extent, written at each draw.
+#[derive(Debug)]
+struct GpuTextures {
+    bind_group: BindGroup,
+    uniform: Buffer,
 }
 
 /// A run of consecutive instances of one style that share a model, drawn by
@@ -148,6 +174,9 @@ pub struct Renderer {
     flat_pipeline: RenderPipeline,
     uniform: Buffer,
     bind_group: BindGroup,
+    frame_layout: BindGroupLayout,
+    textured: Option<TexturedPipeline>,
+    terrain_textures: Option<GpuTextures>,
     depth: Option<DepthTarget>,
     scene: Option<Scene>,
     models: Vec<GpuMesh>,
@@ -235,6 +264,9 @@ impl Renderer {
             flat_pipeline: made.flat,
             uniform: made.uniform,
             bind_group: made.bind_group,
+            frame_layout: made.frame_layout,
+            textured: None,
+            terrain_textures: None,
             depth: None,
             scene: None,
             models: Vec::new(),
@@ -384,6 +416,7 @@ impl Renderer {
                 .as_ref()
                 .map(|(vertices, indices)| self.mesh_buffers("water", vertices, indices)),
             range: [mesh.lowest, mesh.highest],
+            extent: [mesh.width, mesh.height],
         })?;
         self.scene = Some(scene);
         Ok(())
@@ -491,24 +524,49 @@ impl Renderer {
     }
 
     /// Checks `textures` against the device and, when they pass, keeps them
-    /// for the draws that follow: the terrain is then drawn textured. A
-    /// refused or failed set leaves the textures as they were.
+    /// for the draws that follow: the terrain is then drawn textured, through
+    /// the third shader module, in place of the height ramp. A refused or
+    /// failed set leaves the textures as they were, and so does the terrain's
+    /// upload.
     ///
     /// # Errors
-    /// [`Error::Texture`] and [`Error::TextureBinding`] for a set the device
-    /// cannot hold, and [`Error::Gpu`] when wgpu reports an error.
+    /// [`Error::TextureBinding`] when the pass binds more sampled textures
+    /// than the device allows a shader stage, [`Error::Texture`] for the
+    /// first texture that no device could hold or that is malformed (see
+    /// [`check_textures`]), both before anything is created, and
+    /// [`Error::Gpu`] when wgpu reports an error while creating the
+    /// textures, the samplers, the bind group, or the pipeline.
     pub fn set_terrain_textures(&mut self, textures: &TerrainTextures) -> Result<(), Error> {
-        let _ = textures;
+        let limits = self.device.limits();
+        check_textures(
+            textures,
+            limits.max_texture_dimension_2d,
+            limits.max_sampled_textures_per_shader_stage,
+        )?;
+        let pipeline = match &self.textured {
+            Some(made) => made.clone(),
+            None => scoped(&self.device, "textured terrain pipeline", || {
+                textured_pipeline(&self.device, &self.frame_layout, self.format)
+            })?,
+        };
+        let gpu = scoped(&self.device, "terrain textures", || {
+            terrain_textures(&self.device, &self.queue, &pipeline.layout, textures)
+        })?;
+        self.textured = Some(pipeline);
+        self.terrain_textures = Some(gpu);
         Ok(())
     }
 
-    /// Drops the terrain's textures: the terrain is drawn by the height ramp.
-    pub fn clear_terrain_textures(&mut self) {}
+    /// Drops the terrain's textures: the terrain is drawn by the height ramp
+    /// again.
+    pub fn clear_terrain_textures(&mut self) {
+        self.terrain_textures = None;
+    }
 
     /// Whether the terrain is drawn textured.
     #[must_use]
     pub fn terrain_textured(&self) -> bool {
-        false
+        self.terrain_textures.is_some()
     }
 
     fn mesh_buffers(&self, label: &'static str, vertices: &[f32], indices: &[u32]) -> GpuMesh {
@@ -580,6 +638,10 @@ impl Renderer {
         scoped(device, "frame submission", || {
             self.queue
                 .write_buffer(&self.uniform, 0, bytemuck::cast_slice(&uniform));
+            if let Some(textures) = &self.terrain_textures {
+                self.queue
+                    .write_buffer(&textures.uniform, 0, bytemuck::cast_slice(&scene.extent));
+            }
             let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor::default());
             let [r, g, b] = shader::CLEAR_COLOR.map(f64::from);
             {
@@ -604,7 +666,13 @@ impl Renderer {
                     ..RenderPassDescriptor::default()
                 });
                 pass.set_bind_group(0, &self.bind_group, &[]);
-                pass.set_pipeline(&self.terrain_pipeline);
+                match (&self.textured, &self.terrain_textures) {
+                    (Some(made), Some(textures)) => {
+                        pass.set_pipeline(&made.pipeline);
+                        pass.set_bind_group(1, &textures.bind_group, &[]);
+                    }
+                    _ => pass.set_pipeline(&self.terrain_pipeline),
+                }
                 draw_mesh(&mut pass, &scene.terrain);
                 if let Some(water) = &scene.water {
                     pass.set_pipeline(&self.water_pipeline);
@@ -673,6 +741,7 @@ struct Pipelines {
     flat: RenderPipeline,
     uniform: Buffer,
     bind_group: BindGroup,
+    frame_layout: BindGroupLayout,
 }
 
 /// How one pipeline differs from the others: its shader entry points, its
@@ -827,5 +896,269 @@ fn pipelines(device: &Device, format: TextureFormat) -> Pipelines {
         flat: build(&model("flat models", "vs_flat", "fs_flat", false)),
         uniform,
         bind_group,
+        frame_layout: group_layout,
+    }
+}
+
+/// The textured terrain's pipeline: the third module, the frame's group and
+/// the textures' group, and the terrain's own vertex layout and state.
+fn textured_pipeline(
+    device: &Device,
+    frame_layout: &BindGroupLayout,
+    format: TextureFormat,
+) -> TexturedPipeline {
+    let uniform_bytes = (TEXTURED_FLOATS * 4) as u64;
+    let texture_entry = |binding: u32| BindGroupLayoutEntry {
+        binding,
+        visibility: ShaderStages::FRAGMENT,
+        ty: BindingType::Texture {
+            sample_type: TextureSampleType::Float { filterable: true },
+            view_dimension: TextureViewDimension::D2,
+            multisampled: false,
+        },
+        count: None,
+    };
+    let sampler_entry = |binding: u32| BindGroupLayoutEntry {
+        binding,
+        visibility: ShaderStages::FRAGMENT,
+        ty: BindingType::Sampler(SamplerBindingType::Filtering),
+        count: None,
+    };
+    let mut entries = vec![
+        BindGroupLayoutEntry {
+            binding: 0,
+            visibility: ShaderStages::FRAGMENT,
+            ty: BindingType::Buffer {
+                ty: BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: NonZeroU64::new(uniform_bytes),
+            },
+            count: None,
+        },
+        sampler_entry(1),
+        sampler_entry(2),
+    ];
+    entries.extend((3..3 + SAMPLED_TEXTURES).map(texture_entry));
+    let layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        label: Some("textured terrain"),
+        entries: &entries,
+    });
+    let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+        label: Some("textured terrain"),
+        bind_group_layouts: &[Some(frame_layout), Some(&layout)],
+        immediate_size: 0,
+    });
+    let module = device.create_shader_module(ShaderModuleDescriptor {
+        label: Some("textured terrain"),
+        source: ShaderSource::Wgsl(textured_shader::textured_shader_source().into()),
+    });
+    let buffers = [Some(VertexBufferLayout {
+        array_stride: VERTEX_BYTES,
+        step_mode: VertexStepMode::Vertex,
+        attributes: &VERTEX_ATTRIBUTES,
+    })];
+    let pipeline = build_pipeline(
+        device,
+        &pipeline_layout,
+        format,
+        &Variant {
+            label: "textured terrain",
+            module: &module,
+            vertex: "vs_textured",
+            fragment: "fs_textured",
+            buffers: &buffers,
+            cull: Some(Face::Back),
+            depth_write: true,
+            depth_compare: CompareFunction::Less,
+        },
+    );
+    TexturedPipeline { pipeline, layout }
+}
+
+/// One texture of `levels`, stored bytes in a format that applies no
+/// conversion on lookup, each level written to its own mip.
+fn level_texture(
+    device: &Device,
+    queue: &Queue,
+    label: &'static str,
+    levels: &[TextureLevel],
+) -> wgpu::Texture {
+    let (width, height) = levels
+        .first()
+        .map_or((1, 1), |level| (level.width, level.height));
+    let texture = device.create_texture(&TextureDescriptor {
+        label: Some(label),
+        size: Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: u32::try_from(levels.len()).unwrap_or(1),
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    for (mip, level) in levels.iter().enumerate() {
+        queue.write_texture(
+            TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: u32::try_from(mip).unwrap_or(0),
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
+            },
+            &level.rgba,
+            TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(level.width * 4),
+                rows_per_image: Some(level.height),
+            },
+            Extent3d {
+                width: level.width,
+                height: level.height,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+    texture
+}
+
+fn sampler(
+    device: &Device,
+    label: &'static str,
+    filtering: Filtering,
+    address: AddressMode,
+) -> Sampler {
+    let filter = match filtering {
+        Filtering::Nearest => FilterMode::Nearest,
+        Filtering::Linear => FilterMode::Linear,
+    };
+    device.create_sampler(&SamplerDescriptor {
+        label: Some(label),
+        address_mode_u: address,
+        address_mode_v: address,
+        address_mode_w: address,
+        mag_filter: filter,
+        min_filter: filter,
+        mipmap_filter: match filtering {
+            Filtering::Nearest => MipmapFilterMode::Nearest,
+            Filtering::Linear => MipmapFilterMode::Linear,
+        },
+        ..SamplerDescriptor::default()
+    })
+}
+
+/// The terrain's uniform past its extent: the ten layers' scales (1 where a
+/// slot is unnamed) and the flags that weigh a slot at all, 0 for an unnamed
+/// slot and for slots 5 to 8 under the first program.
+fn textured_params(textures: &TerrainTextures) -> [f32; TEXTURED_FLOATS] {
+    let mut floats = [0.0_f32; TEXTURED_FLOATS];
+    let layers: [Option<&Layer>; 10] = std::array::from_fn(|slot| match slot {
+        0 => Some(&textures.base),
+        9 => Some(&textures.top),
+        _ => textures.layers[slot - 1].as_ref(),
+    });
+    for (slot, layer) in layers.iter().enumerate() {
+        let used = slot == 0 || slot == 9 || slot <= 4 || textures.blend == Blend::Eight;
+        floats[4 + slot] = layer.map_or(1.0, |layer| layer.scale);
+        floats[16 + slot] = if layer.is_some() && used { 1.0 } else { 0.0 };
+    }
+    floats
+}
+
+/// The twelve textures, the two samplers, and the uniform, bound in one
+/// group. An unnamed layer and an unread mask are bound to a one-texel
+/// stand-in that the shader weighs by zero.
+fn terrain_textures(
+    device: &Device,
+    queue: &Queue,
+    layout: &BindGroupLayout,
+    textures: &TerrainTextures,
+) -> GpuTextures {
+    let stand_in = [TextureLevel {
+        width: 1,
+        height: 1,
+        rgba: vec![255; 4],
+    }];
+    let layer_levels = |slot: usize| -> &[TextureLevel] {
+        match slot {
+            0 => &textures.base.levels,
+            9 => &textures.top.levels,
+            _ => textures.layers[slot - 1]
+                .as_ref()
+                .map_or(&stand_in[..], |layer| &layer.levels),
+        }
+    };
+    let views: Vec<wgpu::TextureView> = (0..10)
+        .map(|slot| level_texture(device, queue, "terrain layer", layer_levels(slot)))
+        .chain([
+            level_texture(
+                device,
+                queue,
+                "terrain mask",
+                std::slice::from_ref(&textures.low),
+            ),
+            level_texture(
+                device,
+                queue,
+                "terrain mask",
+                textures
+                    .high
+                    .as_ref()
+                    .map_or(&stand_in[..], std::slice::from_ref),
+            ),
+        ])
+        .map(|texture| texture.create_view(&TextureViewDescriptor::default()))
+        .collect();
+    let masks = sampler(
+        device,
+        "terrain masks",
+        textures.filtering,
+        AddressMode::ClampToEdge,
+    );
+    let layers = sampler(
+        device,
+        "terrain layers",
+        textures.filtering,
+        AddressMode::Repeat,
+    );
+    let uniform = device.create_buffer(&BufferDescriptor {
+        label: Some("textured terrain uniform"),
+        size: (TEXTURED_FLOATS * 4) as u64,
+        usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(
+        &uniform,
+        0,
+        bytemuck::cast_slice(&textured_params(textures)),
+    );
+    let mut entries = vec![
+        BindGroupEntry {
+            binding: 0,
+            resource: uniform.as_entire_binding(),
+        },
+        BindGroupEntry {
+            binding: 1,
+            resource: wgpu::BindingResource::Sampler(&masks),
+        },
+        BindGroupEntry {
+            binding: 2,
+            resource: wgpu::BindingResource::Sampler(&layers),
+        },
+    ];
+    entries.extend(views.iter().zip(3..).map(|(view, binding)| BindGroupEntry {
+        binding,
+        resource: wgpu::BindingResource::TextureView(view),
+    }));
+    let bind_group = device.create_bind_group(&BindGroupDescriptor {
+        label: Some("textured terrain"),
+        layout,
+        entries: &entries,
+    });
+    GpuTextures {
+        bind_group,
+        uniform,
     }
 }
