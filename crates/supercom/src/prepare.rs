@@ -8,7 +8,7 @@ use crate::error::RunError;
 use crate::plan::{check_install, read_map};
 use crate::units::{Meshes, resolve_kinds, run_kinds};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use supercom_scmap::Map;
 use supercom_sim::{Replay, State, read_replay};
 use supercom_sim_ingest::load_world;
@@ -17,6 +17,8 @@ use supercom_sim_ingest::load_world;
 pub struct Prepared {
     /// The parsed map, drawn as `view` draws it.
     pub map: Map,
+    /// The install directory the run reads the game's files from.
+    pub install: PathBuf,
     /// The parsed replay, with its checkpoints.
     pub replay: Replay,
     /// The state at tick 0 of the skirmish the replay's header names.
@@ -76,6 +78,7 @@ pub fn prepare_replay(
     let meshes = resolve_kinds(install, &run_kinds(&state, &replay))?;
     Ok(Prepared {
         map,
+        install: install.to_path_buf(),
         replay,
         state,
         meshes,

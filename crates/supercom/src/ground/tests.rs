@@ -42,7 +42,7 @@ fn eight() -> Vec<Checked> {
         .collect()
 }
 
-fn replace(mut items: Vec<Checked>, with: Checked) -> Vec<Checked> {
+fn replace(mut items: Vec<Checked>, with: &Checked) -> Vec<Checked> {
     for item in &mut items {
         if item.item == with.item {
             *item = with.clone();
@@ -81,7 +81,7 @@ fn supercom_ground_program_names_choose_the_blend() {
 fn supercom_ground_path_normalization_cases() {
     for (stored, want) in [
         ("/Env/Layers/Grass.DDS", "env/layers/grass.dds"),
-        ("\\Evil\\Layers\\A.dds", "evil/layers/a.dds"),
+        ("\\Evil\\Layers\\A.dds", "/evil/layers/a.dds"),
         ("env/x.dds", "env/x.dds"),
         ("//a/B", "/a/b"),
         ("", ""),
@@ -117,7 +117,7 @@ fn supercom_ground_decision_cases() {
     for slot in [0, 1, 2, 3, 4, 9] {
         let verdict = textured(
             "TTerrain",
-            &replace(four(), failed(Item::Layer(slot), "gone")),
+            &replace(four(), &failed(Item::Layer(slot), "gone")),
         );
         let notice = fallback(&verdict);
         assert_eq!(
@@ -128,33 +128,33 @@ fn supercom_ground_decision_cases() {
     }
     let verdict = textured(
         "TTerrain",
-        &replace(four(), failed(Item::Mask(0), "refused")),
+        &replace(four(), &failed(Item::Mask(0), "refused")),
     );
     assert_eq!(fallback(&verdict).map(|n| n.item), Some(Item::Mask(0)));
     for slot in [5, 6, 7, 8] {
         let verdict = textured(
             "TTerrainXP",
-            &replace(eight(), failed(Item::Layer(slot), "gone")),
+            &replace(eight(), &failed(Item::Layer(slot), "gone")),
         );
         assert_eq!(fallback(&verdict).map(|n| n.item), Some(Item::Layer(slot)));
     }
     let verdict = textured(
         "TTerrainXP",
-        &replace(eight(), failed(Item::Mask(1), "refused")),
+        &replace(eight(), &failed(Item::Mask(1), "refused")),
     );
     assert_eq!(fallback(&verdict).map(|n| n.item), Some(Item::Mask(1)));
 
     // Reading 1: an unnamed slot 0 or 9 is the fallback; an unnamed slot
     // from 1 to 8 its program blends is skipped.
     for slot in [0, 9] {
-        let verdict = textured("TTerrain", &replace(four(), unnamed(Item::Layer(slot))));
+        let verdict = textured("TTerrain", &replace(four(), &unnamed(Item::Layer(slot))));
         assert_eq!(fallback(&verdict).map(|n| n.item), Some(Item::Layer(slot)));
     }
     for slot in [1, 3] {
-        let items = replace(four(), unnamed(Item::Layer(slot)));
+        let items = replace(four(), &unnamed(Item::Layer(slot)));
         assert_eq!(textured("TTerrain", &items), Verdict::Textured(Blend::Four));
     }
-    let items = replace(eight(), unnamed(Item::Layer(6)));
+    let items = replace(eight(), &unnamed(Item::Layer(6)));
     assert_eq!(
         textured("TTerrainXP", &items),
         Verdict::Textured(Blend::Eight)
@@ -173,17 +173,17 @@ fn supercom_ground_decision_cases() {
 
     // The first failing item in the order program, slot 0 to 9, first mask,
     // second mask is named, and every failure is counted.
-    let mut items = replace(eight(), failed(Item::Mask(1), "m1"));
-    items = replace(items, failed(Item::Mask(0), "m0"));
-    items = replace(items, failed(Item::Layer(9), "s9"));
-    items = replace(items, failed(Item::Layer(4), "s4"));
-    items = replace(items, unnamed(Item::Layer(0)));
+    let mut items = replace(eight(), &failed(Item::Mask(1), "m1"));
+    items = replace(items, &failed(Item::Mask(0), "m0"));
+    items = replace(items, &failed(Item::Layer(9), "s9"));
+    items = replace(items, &failed(Item::Layer(4), "s4"));
+    items = replace(items, &unnamed(Item::Layer(0)));
     let verdict = textured("TTerrainXP", &items);
     assert_eq!(
         fallback(&verdict).map(|n| (n.item, n.failed)),
         Some((Item::Layer(0), 5))
     );
-    let verdict = textured("TTerrainXP", &replace(items, ready(Item::Layer(0))));
+    let verdict = textured("TTerrainXP", &replace(items, &ready(Item::Layer(0))));
     assert_eq!(
         fallback(&verdict).map(|n| (n.item, n.failed, n.reason.as_str())),
         Some((Item::Layer(4), 4, "s4"))
@@ -286,12 +286,12 @@ fn supercom_ground_gather_reads_only_what_the_program_draws() {
     assert_eq!(
         log,
         [
-            "env/layer0.dds",
-            "env/layer1.dds",
-            "env/layer2.dds",
-            "env/layer3.dds",
-            "env/layer4.dds",
-            "env/layer9.dds"
+            "/env/layer0.dds",
+            "/env/layer1.dds",
+            "/env/layer2.dds",
+            "/env/layer3.dds",
+            "/env/layer4.dds",
+            "/env/layer9.dds"
         ],
         "slots 0 to 4 and 9, normalized, in order"
     );
@@ -408,8 +408,7 @@ fn supercom_ground_hands_the_renderer_the_set_or_nothing() {
     let require = std::env::var("SUPERCOM_REQUIRE_GPU").is_ok_and(|value| value == "1");
     match gpu_gate(found, require) {
         GpuGate::Skip(reason) => return eprintln!("SKIP: {reason}"),
-        GpuGate::Fail(reason) => panic!("{reason}"),
-        GpuGate::Run => {}
+        gate => assert_eq!(gate, GpuGate::Run, "an adapter is required"),
     }
     let mut renderer = made.expect("the renderer is built on the adapter found");
     let mut log = Vec::new();
@@ -458,7 +457,9 @@ fn conformance_ground_terrain_member_is_pinned() {
         .find(|name| name.eq_ignore_ascii_case("effects/terrain.fx"))
         .expect("effects.scd holds effects/terrain.fx");
     let bytes = archive.read(&name).expect("the member reads");
-    let newlines = bytes.iter().filter(|b| **b == b'\n').count();
+    let newlines = bytes
+        .iter()
+        .fold(0_usize, |n, b| n + usize::from(*b == b'\n'));
     assert_eq!((bytes.len(), newlines), (47_280, 1_567));
 }
 
@@ -483,7 +484,7 @@ fn conformance_ground_installed_reads_only_what_the_program_draws() {
             let got = gather(&map, &mut read, Filtering::Linear);
             println!(
                 "GROUND_TIMING {folder} {run}: mount {mounted:?}, read and decode {:?}",
-                started.elapsed() - mounted
+                started.elapsed().saturating_sub(mounted)
             );
             assert_eq!(files.len(), 6, "{folder}: six texture files are read");
             assert_eq!(
@@ -545,8 +546,7 @@ fn installed_frames(fa: &std::path::Path, folder: &str) -> (Vec<[u8; 3]>, Vec<[u
             eprintln!("SKIP: {reason}");
             return (Vec::new(), Vec::new());
         }
-        GpuGate::Fail(reason) => panic!("{reason}"),
-        GpuGate::Run => {}
+        gate => assert_eq!(gate, GpuGate::Run, "an adapter is required"),
     }
     let mut renderer = made.expect("the renderer is built on the adapter found");
     let map = installed_map(fa, folder);
@@ -636,7 +636,8 @@ fn conformance_gpu_ground_installed_scmp_016_draws_the_textured_terrain_and_its_
     };
     let covered = textured.iter().filter(|p| !is(**p, clear)).count();
     let wet = textured.iter().filter(|p| is(**p, water)).count();
-    let fraction = wet as f64 / covered as f64;
+    let count = |n: usize| f64::from(u32::try_from(n).unwrap_or(u32::MAX));
+    let fraction = count(wet) / count(covered);
     println!("GROUND_FRAME SCMP_016 water share: {fraction}");
     assert!(
         (fraction - 0.095).abs() <= 0.03,

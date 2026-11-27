@@ -112,7 +112,8 @@ fn run_view(args: &ViewArgs) -> Result<Outcome, RunError> {
     })?;
     let game_dir = resolve_game_dir(env::var_os(GAME_DIR_VAR), env::var_os("HOME"));
     let map = plan::plan_run(game_dir.as_deref(), &args.folder)?;
-    window::run(event_loop, map, args.frames)
+    let install = plan::check_install(game_dir.as_deref())?.to_path_buf();
+    window::run(event_loop, map, install, args.frames)
 }
 
 /// The run with no argument: report whether the game data is found.
