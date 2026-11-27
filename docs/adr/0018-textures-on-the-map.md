@@ -120,9 +120,9 @@ docs/specs/render.md; this section records each choice and its ground.
   uses, at commit bac3e5f478e0293d04a4d18cf8dba95b57b5d49d, in
   Assets/Scripts/Ozone SCMAP Code/ScmapEditor.cs, lines 477, 493 to 500, and
   514, and it fits the installed scales: 4 for most layers, and 26.25 and 128
-  for slot 9 on SCMP_012 and SCMP_016, on maps 256 units wide. The owner
+  for slot 9 on SCMP_012 and SCMP_016, on maps 256 units wide. The head
   accepted it as provisional on 2026-11-26. Its evaluator is the first look,
-  the owner's run of the binary on SCMP_012, SCMP_016, and the replay beside
+  the head's run of the binary on SCMP_012, SCMP_016, and the replay beside
   the original, which asks whether the size of the ground's pattern matches.
 - **The colour rule is this project's choice (REN-101, REN-102).** The
   original names no colour-space conversion. Textures and masks are uploaded
@@ -166,7 +166,7 @@ docs/specs/render.md; this section records each choice and its ground.
   statement is scoped to a terrain drawn by the fallback, because the textured
   terrain's pixels are REN-102's. REN-022's one sentence, that the water's
   colour is told from every terrain colour by its blue channel, is narrowed to
-  the colours of the height ramp, by the owner's ruling of 2026-11-26, since a
+  the colours of the height ramp, by the head's ruling of 2026-11-26, since a
   texel may be bluer than the water. REN-035's order gains the map's textures,
   resolved and decoded after the window and before the upload. The sentence of
   the clauses' prose that listed terrain splatting among later slices now says
