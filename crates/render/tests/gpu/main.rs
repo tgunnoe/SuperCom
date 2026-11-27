@@ -2900,3 +2900,108 @@ fn render_textured_shader_source_is_a_third_module_assembled_from_the_constants(
         );
     }
 }
+
+/// Pins REN-107's sentence that the module's shader writes the transfer
+/// function of REN-101: the five numbers 0.04045, 12.92, 0.055, 1.055, and
+/// 2.4 are in the source, which no pixel could show within 2 in 255 for the
+/// linear segment's divisor.
+#[test]
+fn render_textured_shader_source_holds_the_transfer_function() {
+    let source = textured_shader_source();
+    for number in ["0.04045", "12.92", "0.055", "1.055", "2.4"] {
+        assert!(
+            source.contains(number),
+            "the source holds the transfer function's {number}"
+        );
+    }
+    assert!(
+        source.contains("v / 12.92"),
+        "the linear segment divides by 12.92"
+    );
+}
+
+/// Pins REN-101's sentence that the interpolated normal is renormalized: the
+/// facing plane's normals are scaled to twice their length before the upload,
+/// and a stored 128 still reads 128 in the sRGB formats and 55 in Rgba8Unorm,
+/// the factor 1 of the unit normals.
+#[test]
+fn conformance_gpu_textured_shader_renormalizes_the_normal() {
+    let mut set = blend_set(Blend::Four, &[], Filtering::Nearest);
+    set.base = solid_layer([128, 128, 128, 9]);
+    set.low = texture_level(1, 1, &[[0, 0, 0, 0]]);
+    set.top = solid_layer([10, 20, 250, 0]);
+    for (format, want) in [
+        (TextureFormat::Rgba8UnormSrgb, 128.0),
+        (TextureFormat::Bgra8UnormSrgb, 128.0),
+        (TextureFormat::Rgba8Unorm, 55.04),
+    ] {
+        let Some(mut renderer) = gpu(format) else {
+            return;
+        };
+        must(renderer.set_terrain_textures(&set), "the set is accepted");
+        let mut mesh = mesh_of(&lit_plane());
+        for normal in &mut mesh.normals {
+            *normal = normal.map(|c| 2.0 * c);
+        }
+        must(renderer.upload(&mesh, None), "the mesh uploads");
+        let camera = must(Camera::for_mesh(&mesh, 1.0), "the camera builds");
+        let frame = draw_frame(&mut renderer, &camera, SIZE, "long-normals");
+        for at in [(20.0, 20.0), (32.0, 32.0), (44.0, 20.0)] {
+            let (x, y) = lit_pixel(&camera, at, SIZE);
+            assert!(
+                near(frame.at(x, y), [want; 3]),
+                "{format:?} at {at:?}: {:?}, want {want}",
+                frame.at(x, y)
+            );
+        }
+    }
+}
+
+/// Pins REN-097's sentence that a mask is looked up across the whole map,
+/// (x / width, z / height): on a map 64 wide and 32 deep, a mask of 2 by 2
+/// texels, one channel each, reads the layers of slots 1, 2, 3, and 4 at
+/// points inside the north-west, north-east, south-west, and south-east
+/// quarters, so that swapping the two extents reads another texel at
+/// (12, 26) and (52, 26).
+#[test]
+fn conformance_gpu_mask_lookup_divides_by_each_extent_on_a_map_that_is_not_square() {
+    let mut map = map_of(8, 64.0, 0.1, |i, j| {
+        i16::try_from(36 * i + 24 * j).unwrap_or(0)
+    });
+    map.height = 32.0;
+    let mut set = blend_set(Blend::Four, &[], Filtering::Nearest);
+    set.low = texture_level(
+        2,
+        2,
+        &[
+            [255, 0, 0, 0],
+            [0, 255, 0, 0],
+            [0, 0, 255, 0],
+            [0, 0, 0, 255],
+        ],
+    );
+    set.top = solid_layer([10, 20, 250, 0]);
+    for format in FORMATS {
+        let Some(mut renderer) = gpu(format) else {
+            return;
+        };
+        must(renderer.set_terrain_textures(&set), "the set is accepted");
+        let mesh = scene(&mut renderer, &map, false);
+        let camera = must(Camera::for_mesh(&mesh, 1.0), "the camera builds");
+        let frame = draw_frame(&mut renderer, &camera, SIZE, "not-square");
+        for (at, stored) in [
+            ((12.0, 6.0), [40.0, 200.0, 40.0]),
+            ((52.0, 6.0), [40.0, 40.0, 200.0]),
+            ((12.0, 26.0), [200.0, 200.0, 40.0]),
+            ((52.0, 26.0), [40.0, 200.0, 200.0]),
+        ] {
+            let (x, y) = lit_pixel(&camera, at, SIZE);
+            let want = stored_pixel(stored, 1.0, format);
+            assert!(
+                frame.is_terrain(x, y) && near(frame.at(x, y), want),
+                "{format:?} at {at:?}: {:?}, want {want:?}",
+                frame.at(x, y)
+            );
+        }
+    }
+}

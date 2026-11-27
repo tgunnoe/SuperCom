@@ -395,3 +395,37 @@ fn render_texture_checks_refuse_a_device_with_too_few_sampled_textures() {
     );
     assert_eq!(check_textures(&good(), 4096, 12), Ok(()));
 }
+
+/// Pins REN-101's sentence that the interpolated normal is renormalized
+/// before the light: a normal of twice the light direction's length faces it
+/// exactly as the unit one does, a factor of 1, so a stored 128 reads 128/255
+/// decoded, 0.2158605, and not a factor of 1.7.
+#[test]
+fn render_textured_color_renormalizes_the_normal() {
+    let stored = [128.0 / 255.0; 3];
+    let long = textured_color(stored, [-0.72, 1.6, -0.96]);
+    assert!(near3(long, [0.215_860_5; 3], 1e-5), "{long:?}");
+    // A normal shorter than unit, a quarter of the way down the flat
+    // ground's, still faces up: the factor is 0.86 whatever its length.
+    let short = textured_color(stored, [0.0, 0.25, 0.0]);
+    assert!(near3(short, [0.156_168; 3], 1e-5), "{short:?}");
+}
+
+/// Pins REN-104's sentence that a side above the device's largest is refused
+/// and so a side exactly at it is not: the largest side of the set is 5 (the
+/// top layer's 5 by 3), accepted at a limit of 5 and refused at 4.
+#[test]
+fn render_texture_checks_accept_a_side_at_the_device_limit() {
+    assert_eq!(check_textures(&good(), 5, 16), Ok(()));
+    assert_eq!(
+        check_textures(&good(), 4, 16),
+        Err(fault(
+            TextureItem::Layer(9),
+            TextureFault::Oversize {
+                level: 0,
+                side: 5,
+                limit: 4
+            }
+        ))
+    );
+}
