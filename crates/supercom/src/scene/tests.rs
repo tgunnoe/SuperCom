@@ -45,6 +45,9 @@ fn ramp_mesh() -> TerrainMesh {
         },
         strata: Vec::new(),
         water: None,
+        terrain_program: String::new(),
+        low_mask: Vec::new(),
+        high_mask: Vec::new(),
     };
     TerrainMesh::build(&map).expect("the ramp builds")
 }
