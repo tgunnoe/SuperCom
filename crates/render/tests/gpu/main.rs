@@ -2922,7 +2922,7 @@ fn render_textured_shader_source_holds_the_transfer_function() {
 
 /// Pins REN-101's sentence that the interpolated normal is renormalized: the
 /// facing plane's normals are scaled to twice their length before the upload,
-/// and a stored 128 still reads 128 in the sRGB formats and 55 in Rgba8Unorm,
+/// and a stored 128 still reads 128 in the sRGB formats and 55 in `Rgba8Unorm`,
 /// the factor 1 of the unit normals.
 #[test]
 fn conformance_gpu_textured_shader_renormalizes_the_normal() {
