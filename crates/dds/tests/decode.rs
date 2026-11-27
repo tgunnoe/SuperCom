@@ -880,3 +880,53 @@ fn decode_blocks_overhanging_the_level_are_cropped() {
     pixels.extend_from_slice(&[green, green, green, green, white, black]);
     assert_eq!(level.rgba, flat(&pixels));
 }
+
+/// FMT-071: the checks run in the stated order, so a file with two faults
+/// is refused for the one checked first.
+#[test]
+fn decode_refusals_follow_the_order_of_the_checks() {
+    assert_eq!(
+        refused(&Tex::dxt1(0, 4, vec![0; 8]).with_mips(0)),
+        Error::BadDimensions {
+            width: 0,
+            height: 4
+        }
+    );
+    assert_eq!(
+        refused(&Tex {
+            caps2: 0x200,
+            ..Tex::dxt1(4, 4, vec![0; 8]).with_mips(4)
+        }),
+        Error::BadMipCount {
+            mip_count: 4,
+            most: 3
+        }
+    );
+    for (caps2, kind) in [(0x200, "cube map"), (0x0020_0000, "volume texture")] {
+        assert_eq!(
+            refused(&Tex {
+                caps2,
+                ..Tex::block(*b"ATI2", 4, 4, vec![0; 16])
+            }),
+            Error::UnsupportedKind { kind }
+        );
+    }
+    assert_eq!(
+        refused(&Tex::block(*b"ATI2", 4, 4, Vec::new())),
+        Error::UnsupportedFormat {
+            found: Format::Other { fourcc: *b"ATI2" }
+        }
+    );
+    assert_eq!(
+        refused(&Tex::raw32(
+            2,
+            2,
+            [0x0000_0F0F, 0x0000_FF00, 0x00FF_0000, 0],
+            Vec::new()
+        )),
+        Error::BadChannelMask {
+            channel: 'R',
+            mask: 0x0000_0F0F
+        }
+    );
+}
