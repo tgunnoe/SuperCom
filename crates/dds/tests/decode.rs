@@ -364,7 +364,7 @@ fn decode_dxt5_colour_block_ignores_endpoint_order() {
 }
 
 /// Three-bit codes 0 to 7 twice over, the 48 bits of FMT-061: the first
-/// 24 bits are 0xFAC688 (bytes 88 C6 FA), and so are the second.
+/// 24 bits are 0xFAC688 (bytes 0x88, 0xC6, 0xFA), and so are the second.
 const CODES_0_TO_7_TWICE: [u8; 6] = [0x88, 0xC6, 0xFA, 0x88, 0xC6, 0xFA];
 
 fn dxt5_alpha_rows(a0: u8, a1: u8, rows: [[u8; 4]; 4]) {
