@@ -1,4 +1,5 @@
 use super::*;
+use crate::error::RunError;
 use supercom_scmap::{Heightmap, Stratum};
 
 fn ready(item: Item) -> Checked {
@@ -643,4 +644,63 @@ fn conformance_gpu_ground_installed_scmp_016_draws_the_textured_terrain_and_its_
         (fraction - 0.095).abs() <= 0.03,
         "the water covers {fraction} of the covered pixels, REN-031 says 0.095 within 0.03"
     );
+}
+
+/// A renderer on the adapter found, or `None` after the skip line.
+fn adapter_renderer() -> Option<Renderer> {
+    use supercom_render::{GpuGate, gpu_gate};
+    let made = Renderer::new(supercom_render::wgpu::TextureFormat::Rgba8UnormSrgb);
+    let found = !matches!(made, Err(supercom_render::Error::NoAdapter { .. }));
+    let require = std::env::var("SUPERCOM_REQUIRE_GPU").is_ok_and(|value| value == "1");
+    match gpu_gate(found, require) {
+        GpuGate::Skip(reason) => {
+            eprintln!("SKIP: {reason}");
+            None
+        }
+        gate => {
+            assert_eq!(gate, GpuGate::Run, "an adapter is required");
+            Some(made.expect("the renderer is built on the adapter found"))
+        }
+    }
+}
+
+/// Pins REN-035's order: the grid fit check against the renderer's device
+/// comes before the map's textures are read. A map of 4096 cells a side is
+/// refused (REN-024), and the run ends with that error before any file is
+/// asked for.
+#[test]
+fn supercom_ground_fit_check_comes_before_any_file_is_read() {
+    let Some(mut renderer) = adapter_renderer() else {
+        return;
+    };
+    let mut map = map_named("TTerrain", &all(), 4.0);
+    map.heightmap.width = 4096;
+    map.heightmap.height = 4096;
+    let mut asked = Vec::new();
+    let mut read = |path: &str| {
+        asked.push(path.to_owned());
+        Ok(dds())
+    };
+    let got = terrain(&map, &mut read, &mut renderer);
+    assert!(
+        matches!(
+            got,
+            Err(RunError::Render(
+                supercom_render::Error::GridTooLarge { .. }
+            ))
+        ),
+        "the grid is refused: {got:?}"
+    );
+    assert!(asked.is_empty(), "no file is read: {asked:?}");
+    assert!(!renderer.terrain_textured(), "nothing was handed over");
+    // A map that fits reads its six files after the check.
+    let fits = map_named("TTerrain", &all(), 4.0);
+    let mut asked = Vec::new();
+    let mut read = |path: &str| {
+        asked.push(path.to_owned());
+        Ok(dds())
+    };
+    let got = terrain(&fits, &mut read, &mut renderer);
+    assert_eq!(got.ok(), Some(Verdict::Textured(Blend::Four)));
+    assert_eq!(asked.len(), 6);
 }

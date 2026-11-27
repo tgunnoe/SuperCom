@@ -2,10 +2,11 @@
 //! draws, their reading and decoding, the decision between the textured
 //! terrain and the height ramp, and the hand-over to the renderer.
 
+use crate::error::RunError;
 use std::fmt;
 use supercom_render::{
     Blend, Error as RenderError, Filtering, Layer, Renderer, TerrainTextures, TextureItem,
-    TextureLevel,
+    TextureLevel, grid_fits,
 };
 use supercom_scmap::Map;
 
@@ -316,22 +317,25 @@ fn refused(error: &RenderError, map: &Map) -> Notice {
     }
 }
 
-/// Reads, decodes, decides, and hands the renderer the set or nothing: a
-/// decision for the fallback, and a set the renderer refuses, leave the
-/// renderer holding no textures.
-pub fn resolve(
-    map: &Map,
-    read: &mut dyn FnMut(&str) -> Result<Vec<u8>, String>,
-    renderer: &mut Renderer,
-    filtering: Filtering,
-) -> Resolution {
-    let got = gather(map, read, filtering);
+/// The verdict once the renderer has answered a set it was handed: the
+/// textured terrain when it accepted, the fallback, with the item the error
+/// names and a count of one, when it refused.
+fn after_renderer(blend: Blend, answer: Result<(), RenderError>, map: &Map) -> Verdict {
+    match answer {
+        Ok(()) => Verdict::Textured(blend),
+        Err(error) => Verdict::Fallback(refused(&error, map)),
+    }
+}
+
+/// Decides from what was gathered and hands the renderer the set or
+/// nothing: a decision for the fallback, and a set the renderer refuses,
+/// leave the renderer holding no textures.
+fn settle(map: &Map, got: Gathered, renderer: &mut Renderer) -> Resolution {
     let decided = decide(&map.terrain_program, &got.items);
     let verdict = match (decided, got.textures) {
-        (Verdict::Textured(blend), Some(set)) => match renderer.set_terrain_textures(&set) {
-            Ok(()) => Verdict::Textured(blend),
-            Err(error) => Verdict::Fallback(refused(&error, map)),
-        },
+        (Verdict::Textured(blend), Some(set)) => {
+            after_renderer(blend, renderer.set_terrain_textures(&set), map)
+        }
         (Verdict::Fallback(notice), _) => Verdict::Fallback(notice),
         (Verdict::Textured(_), None) => Verdict::Fallback(Notice {
             item: Item::Set,
@@ -351,21 +355,76 @@ pub fn resolve(
     }
 }
 
-/// The step of a run between the renderer and the terrain upload: mounts the
-/// install's archives, resolves the map's textures through them, and writes
-/// the notice to stderr, once, when the terrain is drawn by the height ramp.
-/// An install that does not mount makes every file missing.
-pub fn load(map: &Map, install: &std::path::Path, renderer: &mut Renderer) -> Verdict {
-    let vfs = supercom_scd::Vfs::from_install(install);
-    let mut read = |path: &str| match &vfs {
-        Ok(vfs) => vfs.read(path).map_err(|error| error.to_string()),
-        Err(error) => Err(format!("the archives do not mount: {error}")),
-    };
-    let resolution = resolve(map, &mut read, renderer, Filtering::Linear);
+/// Reads, decodes, decides, and hands the renderer the set or nothing.
+#[cfg(test)]
+pub fn resolve(
+    map: &Map,
+    read: &mut dyn FnMut(&str) -> Result<Vec<u8>, String>,
+    renderer: &mut Renderer,
+    filtering: Filtering,
+) -> Resolution {
+    let got = gather(map, read, filtering);
+    settle(map, got, renderer)
+}
+
+/// The filtering of the binary's own lookups: linear, with the levels.
+const RUN_FILTERING: Filtering = Filtering::Linear;
+
+/// Reads and decodes what `map`'s program draws, as a run asks for it: the
+/// filtered lookups.
+fn run_gather(map: &Map, read: &mut dyn FnMut(&str) -> Result<Vec<u8>, String>) -> Gathered {
+    gather(map, read, RUN_FILTERING)
+}
+
+/// The step of a run between the renderer and the terrain mesh, the same for
+/// `view` and for `replay`: the grid fit check against the renderer's
+/// device, then, only if the map fits, the textures read through `read`, and
+/// the notice written to stderr, once, when the terrain is drawn by the height
+/// ramp.
+///
+/// # Errors
+/// [`RunError::Render`] when the grid does not fit the device, before any
+/// file is read.
+pub fn terrain(
+    map: &Map,
+    read: &mut dyn FnMut(&str) -> Result<Vec<u8>, String>,
+    renderer: &mut Renderer,
+) -> Result<Verdict, RunError> {
+    grid_fits(
+        map.heightmap.width,
+        map.heightmap.height,
+        renderer.device().limits().max_buffer_size,
+    )?;
+    let got = run_gather(map, read);
+    let resolution = settle(map, got, renderer);
     if let Verdict::Fallback(notice) = &resolution.verdict {
         eprintln!("supercom: {notice}");
     }
-    resolution.verdict
+    Ok(resolution.verdict)
+}
+
+/// The step of `view`: [`terrain`] reading through the install's archives,
+/// which are mounted at the first read, so a map that does not fit the device
+/// mounts nothing. An install that does not mount makes every file missing.
+///
+/// # Errors
+/// As [`terrain`].
+pub fn load(
+    map: &Map,
+    install: &std::path::Path,
+    renderer: &mut Renderer,
+) -> Result<Verdict, RunError> {
+    let mut vfs: Option<Result<supercom_scd::Vfs, String>> = None;
+    let mut read = |path: &str| {
+        let mounted = vfs.get_or_insert_with(|| {
+            supercom_scd::Vfs::from_install(install).map_err(|error| error.to_string())
+        });
+        match mounted {
+            Ok(vfs) => vfs.read(path).map_err(|error| error.to_string()),
+            Err(error) => Err(format!("the archives do not mount: {error}")),
+        }
+    };
+    terrain(map, &mut read, renderer)
 }
 
 impl fmt::Display for Item {

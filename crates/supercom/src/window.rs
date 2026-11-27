@@ -25,7 +25,7 @@ use supercom_render::wgpu::{
     CompositeAlphaMode, PresentMode, SurfaceColorSpace, SurfaceConfiguration, SurfaceTexture,
     TextureUsages, TextureView, TextureViewDescriptor,
 };
-use supercom_render::{Camera, Renderer, SurfaceRenderer, TerrainMesh, WaterPlane, grid_fits};
+use supercom_render::{Camera, Renderer, SurfaceRenderer, TerrainMesh, WaterPlane};
 use supercom_scmap::Map;
 use supercom_sim::{Digest, Replay, State, commands_at};
 use winit::application::ApplicationHandler;
@@ -376,8 +376,7 @@ fn set_scene(replaying: &Replaying, gfx: &mut Gfx) -> Result<(), RunError> {
 }
 
 /// Everything between the window and the first frame, in the order of the
-/// run: the window, the renderer for its surface, the map's ground textures
-/// and masks, the grid fit check against
+/// run: the window, the renderer for its surface, the grid fit check against
 /// that renderer's device, the mesh, the water, the camera, the upload, and,
 /// for a replay, the model set (the markers and one model for each resolved
 /// kind).
@@ -407,12 +406,7 @@ fn build(
         surface.renderer.backend(),
         surface.format
     );
-    load(map, install, &mut surface.renderer);
-    grid_fits(
-        map.heightmap.width,
-        map.heightmap.height,
-        surface.renderer.device().limits().max_buffer_size,
-    )?;
+    load(map, install, &mut surface.renderer)?;
     let mesh = TerrainMesh::build(map)?;
     let water = WaterPlane::from_map(map);
     let size = window.inner_size();
