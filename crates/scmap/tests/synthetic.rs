@@ -5,9 +5,8 @@
 //!
 //! These pin what the installed game cannot: the exact error for each way a
 //! map can be wrong, the walk through every section between the heightmap
-//! and the strata, and the meaning of every field of a minimal map. The
-//! crate is a skeleton, so each test below fails today on
-//! `Error::Unimplemented` and passes only when the parser exists.
+//! and the strata and between the strata and the two masks, and the meaning
+//! of every field of a minimal map.
 
 #![allow(
     clippy::expect_used,
@@ -23,6 +22,9 @@ const HEADER_LEN: usize = 30;
 const STRATA: usize = 10;
 /// Normal-map slots that follow the strata.
 const NORMALS: usize = 9;
+/// Bytes of a decal after its textures: scale, position, rotation, two
+/// `f32`, and the owner.
+const DECAL_TAIL: usize = 48;
 
 fn put_i32(out: &mut Vec<u8>, value: i32) {
     out.extend_from_slice(&value.to_le_bytes());
@@ -65,6 +67,21 @@ struct Spec {
     water: Option<(f32, f32, f32)>,
     /// Overwrites the presence byte after the block is written.
     presence: Option<u8>,
+    /// The first of the three paths after the heightmap.
+    program: &'static str,
+    /// Decals, each with `decal_textures` textures.
+    decals: usize,
+    decal_textures: usize,
+    /// Decal groups, each with `group_members` members.
+    groups: usize,
+    group_name: &'static str,
+    group_members: usize,
+    /// The embedded normal maps, each a blob.
+    normal_maps: Vec<Vec<u8>>,
+    low_mask: Vec<u8>,
+    high_mask: Vec<u8>,
+    /// Bytes after the high mask.
+    trailer: Vec<u8>,
 }
 
 /// A built map and the offsets the tests patch or cut at.
@@ -72,6 +89,14 @@ struct Built {
     bytes: Vec<u8>,
     version_at: usize,
     strata_end: usize,
+    decal_count_at: usize,
+    /// The length word of the first texture of the first decal.
+    decal_texture_len_at: usize,
+    group_count_at: usize,
+    normal_count_at: usize,
+    low_len_at: usize,
+    high_len_at: usize,
+    masks_end: usize,
 }
 
 /// Ten strata with `used` at the given slots and unused (empty) elsewhere.
@@ -101,6 +126,16 @@ impl Spec {
             strata: strata(&[(0, "/textures/test/a.dds", 4.0)]),
             water: Some((0.25, 0.25, 0.25)),
             presence: None,
+            program: "",
+            decals: 0,
+            decal_textures: 0,
+            groups: 0,
+            group_name: "group",
+            group_members: 0,
+            normal_maps: vec![vec![1, 2, 3]],
+            low_mask: Vec::new(),
+            high_mask: Vec::new(),
+            trailer: Vec::new(),
         }
     }
 
@@ -130,12 +165,19 @@ impl Spec {
                 deep,
                 abyss,
             }),
+            terrain_program: self.program.to_owned(),
+            low_mask: self.low_mask.clone(),
+            high_mask: self.high_mask.clone(),
         }
     }
 
     /// The file. Sections between the heightmap and the strata carry
     /// non-zero filler so that nothing but their structure locates the
-    /// strata; the sections after the strata are present but unread.
+    /// strata, and so do the sections between the strata and the masks.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one straight-line writer of the file's sections in their order"
+    )]
     fn build(&self) -> Built {
         assert_eq!(self.strata.len(), STRATA);
         let mut out = Vec::new();
@@ -161,7 +203,7 @@ impl Spec {
         }
         out.push(0);
 
-        for text in ["shader", "background", "skycube"] {
+        for text in [self.program, "background", "skycube"] {
             put_cstr(&mut out, text);
         }
         put_i32(&mut out, len32(self.cube_maps));
@@ -212,10 +254,58 @@ impl Spec {
         }
         put_i32(&mut out, 0);
         put_i32(&mut out, 0);
+        let decal_count_at = out.len();
+        put_i32(&mut out, len32(self.decals));
+        let decal_texture_len_at = out.len() + 12;
+        for _ in 0..self.decals {
+            put_i32(&mut out, 7); // id
+            put_i32(&mut out, 1); // type
+            put_i32(&mut out, len32(self.decal_textures));
+            // Textures of different lengths: 3, 7, 11 bytes, and so on.
+            for texture in 0..self.decal_textures {
+                let name = "d".repeat(3 + 4 * texture);
+                put_i32(&mut out, len32(name.len()));
+                out.extend_from_slice(name.as_bytes());
+            }
+            out.extend_from_slice(&[0x5A; DECAL_TAIL]);
+        }
+        let group_count_at = out.len();
+        put_i32(&mut out, len32(self.groups));
+        for _ in 0..self.groups {
+            put_i32(&mut out, 5); // id
+            put_cstr(&mut out, self.group_name);
+            put_i32(&mut out, len32(self.group_members));
+            for member in 0..self.group_members {
+                put_i32(&mut out, len32(member));
+            }
+        }
+        put_i32(&mut out, 8);
+        put_i32(&mut out, 4);
+        let normal_count_at = out.len();
+        put_i32(&mut out, len32(self.normal_maps.len()));
+        for blob in &self.normal_maps {
+            put_i32(&mut out, len32(blob.len()));
+            out.extend_from_slice(blob);
+        }
+        let low_len_at = out.len();
+        put_i32(&mut out, len32(self.low_mask.len()));
+        out.extend_from_slice(&self.low_mask);
+        let high_len_at = out.len();
+        put_i32(&mut out, len32(self.high_mask.len()));
+        out.extend_from_slice(&self.high_mask);
+        let masks_end = out.len();
+        out.extend_from_slice(&self.trailer);
         Built {
             bytes: out,
             version_at,
             strata_end,
+            decal_count_at,
+            decal_texture_len_at,
+            group_count_at,
+            normal_count_at,
+            low_len_at,
+            high_len_at,
+            masks_end,
         }
     }
 }
@@ -463,4 +553,237 @@ fn scmap_water_block_reads_presence_and_elevations() {
         assert_eq!(map.water, None, "presence byte {byte}");
         assert_eq!(map.strata, Spec::minimal().expected().strata);
     }
+}
+
+/// A map whose every section after the strata has something in it.
+fn busy_after_the_strata() -> Spec {
+    Spec {
+        program: "TTerrainTest",
+        decals: 2,
+        decal_textures: 2,
+        groups: 2,
+        group_members: 3,
+        normal_maps: vec![vec![1; 5], vec![2; 3]],
+        low_mask: vec![11, 12, 13, 14, 15],
+        high_mask: vec![21, 22, 23],
+        ..Spec::minimal()
+    }
+}
+
+/// Pins the end of the walk (FMT-076): the parser returns the terrain
+/// program's name, the first of the three paths after the heightmap, and the
+/// two masks' bytes in file order, each left as stored.
+#[test]
+fn scmap_parse_reads_on_to_the_two_masks() {
+    let spec = Spec {
+        program: "TTerrainTest",
+        low_mask: b"DDS low".to_vec(),
+        high_mask: b"DDS high, longer".to_vec(),
+        ..Spec::minimal()
+    };
+    let map = parsed(&spec.build().bytes);
+    assert_eq!(map.terrain_program, "TTerrainTest");
+    assert_eq!(map.low_mask, b"DDS low");
+    assert_eq!(map.high_mask, b"DDS high, longer");
+    assert_eq!(map, spec.expected());
+}
+
+/// Pins the walk to the masks (FMT-076): decals with no, one, and three
+/// textures, groups with no and with three members, and one, two, and four
+/// embedded normal maps leave every field of the result as it is without
+/// them.
+#[test]
+fn scmap_parse_walks_every_section_after_the_strata() {
+    let plain = Spec {
+        program: "TTerrainTest",
+        low_mask: vec![11, 12, 13],
+        high_mask: vec![21, 22],
+        ..Spec::minimal()
+    };
+    let expected = plain.expected();
+    for (decals, decal_textures, groups, group_members, maps) in [
+        (0, 0, 0, 0, 1),
+        (1, 0, 1, 0, 2),
+        (2, 1, 2, 3, 4),
+        (3, 3, 1, 5, 1),
+    ] {
+        let spec = Spec {
+            decals,
+            decal_textures,
+            groups,
+            group_members,
+            normal_maps: (0..maps).map(|n| vec![9; n + 1]).collect(),
+            ..plain_clone(&plain)
+        };
+        assert_eq!(
+            parsed(&spec.build().bytes),
+            expected,
+            "{decals} decals of {decal_textures} textures, {groups} groups of {group_members}, {maps} normal maps"
+        );
+    }
+}
+
+fn plain_clone(spec: &Spec) -> Spec {
+    Spec {
+        strata: spec.strata.clone(),
+        preview: spec.preview.clone(),
+        samples: spec.samples.clone(),
+        normal_maps: spec.normal_maps.clone(),
+        low_mask: spec.low_mask.clone(),
+        high_mask: spec.high_mask.clone(),
+        trailer: spec.trailer.clone(),
+        ..*spec
+    }
+}
+
+/// Pins that reading stops after the high mask (FMT-076): bytes that follow
+/// it, whatever they are, change nothing.
+#[test]
+fn scmap_bytes_after_the_high_mask_are_ignored() {
+    let plain = busy_after_the_strata();
+    let with_trailer = Spec {
+        trailer: vec![0xEE; 40],
+        ..plain_clone(&plain)
+    };
+    assert_eq!(parsed(&with_trailer.build().bytes), plain.expected());
+    assert_eq!(parsed(&plain.build().bytes), plain.expected());
+}
+
+/// Pins `Error::Malformed` after the strata (FMT-076): a negative count of
+/// decals, of decal groups, or of normal maps, a negative texture length, and
+/// a negative mask length are not sizes.
+#[test]
+fn scmap_negative_counts_and_lengths_after_the_strata_are_malformed() {
+    let built = busy_after_the_strata().build();
+    for (name, at) in [
+        ("decal count", built.decal_count_at),
+        ("decal texture length", built.decal_texture_len_at),
+        ("decal group count", built.group_count_at),
+        ("normal map count", built.normal_count_at),
+        ("low mask length", built.low_len_at),
+        ("high mask length", built.high_len_at),
+    ] {
+        let mut buf = built.bytes.clone();
+        set_i32(&mut buf, at, -1);
+        let result = Map::parse(&buf);
+        assert!(
+            matches!(result, Err(Error::Malformed { .. })),
+            "{name}: got {:?}",
+            result.err()
+        );
+    }
+}
+
+/// Pins `Error::Truncated` after the strata (FMT-076): a count or length
+/// beyond the bytes that remain is truncated, reporting more than the buffer
+/// holds, and the mask length reports exactly what it would need.
+#[test]
+fn scmap_counts_beyond_the_buffer_after_the_strata_are_truncated() {
+    let built = busy_after_the_strata().build();
+    let len = built.bytes.len();
+    for (name, at) in [
+        ("decal count", built.decal_count_at),
+        ("decal texture length", built.decal_texture_len_at),
+        ("decal group count", built.group_count_at),
+        ("normal map count", built.normal_count_at),
+    ] {
+        let mut buf = built.bytes.clone();
+        set_i32(&mut buf, at, i32::MAX);
+        let result = Map::parse(&buf);
+        assert!(
+            matches!(result, Err(Error::Truncated { needed, len: l }) if l == len && needed > len),
+            "{name}: got {:?}",
+            result.err()
+        );
+    }
+    let mut buf = built.bytes.clone();
+    set_i32(&mut buf, built.low_len_at, 1_000_000);
+    let result = Map::parse(&buf);
+    assert!(
+        matches!(result, Err(Error::Truncated { needed, len: l })
+            if l == len && needed == built.low_len_at + 4 + 1_000_000),
+        "got {:?}",
+        result.err()
+    );
+}
+
+/// Pins totality after the strata (FMT-076): every proper prefix that ends
+/// before the end of the high mask, however many decals, groups, and normal
+/// maps it holds, is truncated and reports the length it was given.
+#[test]
+fn scmap_every_prefix_before_the_masks_end_is_truncated() {
+    let built = busy_after_the_strata().build();
+    assert_eq!(parsed(&built.bytes[..built.masks_end]).low_mask.len(), 5);
+    for len in built.strata_end..built.masks_end {
+        let result = Map::parse(&built.bytes[..len]);
+        assert!(
+            matches!(result, Err(Error::Truncated { needed, len: l }) if l == len && needed > len),
+            "prefix of {len} bytes: got {:?}",
+            result.err()
+        );
+    }
+}
+
+/// Pins the decal group's layout (FMT-074, FMT-076): an id of 4 bytes, then
+/// a name of any length (here 2 bytes and its terminator, so a reader that
+/// skips more than the id lands inside the name's successor), then a count
+/// and that many 4-byte members. Two decals with textures of 3 and 7 bytes
+/// come before it. The masks that follow are returned exactly.
+#[test]
+fn scmap_decal_group_with_a_short_name_and_members_is_walked() {
+    let spec = Spec {
+        program: "TTerrainTest",
+        decals: 2,
+        decal_textures: 2,
+        groups: 2,
+        group_name: "ab",
+        group_members: 2,
+        low_mask: vec![31, 32, 33, 34],
+        high_mask: vec![41, 42],
+        ..Spec::minimal()
+    };
+    let map = parsed(&spec.build().bytes);
+    assert_eq!(map.low_mask, [31, 32, 33, 34]);
+    assert_eq!(map.high_mask, [41, 42]);
+    assert_eq!(map, spec.expected());
+}
+
+/// Pins the bound on a count (FMT-076): a count that cannot fit in the bytes
+/// that remain is refused at once, reporting the position after the count
+/// plus the count times the least one item takes. A decal takes at least 60
+/// bytes (8 + 4 + 48), a decal group 9 (4 + 1 + 4), a normal map 4; the
+/// products are 2,147,483,647 times 60, 9, and 4.
+#[test]
+fn scmap_counts_that_cannot_fit_are_refused_at_once() {
+    let built = busy_after_the_strata().build();
+    for (name, at, needed_beyond) in [
+        ("decal count", built.decal_count_at, 128_849_018_820_usize),
+        ("decal group count", built.group_count_at, 19_327_352_823),
+        ("normal map count", built.normal_count_at, 8_589_934_588),
+    ] {
+        let mut buf = built.bytes.clone();
+        set_i32(&mut buf, at, i32::MAX);
+        let result = Map::parse(&buf);
+        let expected = Error::Truncated {
+            needed: at + 4 + needed_beyond,
+            len: buf.len(),
+        };
+        assert_eq!(result, Err(expected), "{name}");
+    }
+}
+
+/// FMT-076: a decal's texture count that cannot fit is refused at once, as
+/// the other counts are; it is the word before the first texture's length.
+#[test]
+fn scmap_decal_texture_count_that_cannot_fit_is_refused_at_once() {
+    let built = busy_after_the_strata().build();
+    let mut buf = built.bytes.clone();
+    set_i32(&mut buf, built.decal_texture_len_at - 4, i32::MAX);
+    assert_eq!(
+        Map::parse(&buf),
+        Err(Error::Truncated {
+            needed: built.decal_texture_len_at + 8_589_934_588,
+            len: buf.len()
+        })
+    );
 }

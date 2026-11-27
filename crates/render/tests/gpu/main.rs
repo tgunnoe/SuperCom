@@ -344,6 +344,9 @@ fn map_of(cells: u32, extent: f32, scale: f32, sample: impl Fn(u32, u32) -> i16)
         },
         strata: Vec::new(),
         water: None,
+        terrain_program: String::new(),
+        low_mask: Vec::new(),
+        high_mask: Vec::new(),
     }
 }
 
