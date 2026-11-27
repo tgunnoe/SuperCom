@@ -20,30 +20,40 @@ let
     libxrandr
     alsa-lib
   ];
+  # Mesa's software Vulkan driver (llvmpipe), offered only when the environment asks
+  # for it with SUPERCOM_SOFTWARE_VULKAN=1: CI runners have no graphics adapter. Without
+  # the request the shell sets no driver variable, so a developer's loader finds the
+  # devices it always did. The request makes the software driver the only one the loader
+  # is given, so a test run names it and nothing else.
+  softwareVulkan = builtins.getEnv "SUPERCOM_SOFTWARE_VULKAN" == "1";
+  softwareDriver = "${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.${pkgs.stdenv.hostPlatform.parsed.cpu.name}.json";
 in
-pkgs.mkShell {
-  packages = with pkgs; [
-    toolchain
-    cargo-component
-    cargo-deny
-    cargo-nextest
-    wasm-tools
-    wasmtime
-    nickel
-    just
-    treefmt
-    nixfmt
-    prettier
-    shfmt
-    taplo
-    pkg-config
-    python3
-    unzip
-    vulkan-tools
-    vulkan-validation-layers
-    renderdoc
-  ];
-  RUST_SRC_PATH = "${toolchain}/lib/rustlib/src/rust/library";
-  LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeLibs;
-  VK_LAYER_PATH = "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d";
-}
+pkgs.mkShell (
+  {
+    packages = with pkgs; [
+      toolchain
+      cargo-component
+      cargo-deny
+      cargo-nextest
+      wasm-tools
+      wasmtime
+      nickel
+      just
+      treefmt
+      nixfmt
+      prettier
+      shfmt
+      taplo
+      pkg-config
+      python3
+      unzip
+      vulkan-tools
+      vulkan-validation-layers
+      renderdoc
+    ];
+    RUST_SRC_PATH = "${toolchain}/lib/rustlib/src/rust/library";
+    LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeLibs;
+    VK_LAYER_PATH = "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d";
+  }
+  // pkgs.lib.optionalAttrs softwareVulkan { VK_DRIVER_FILES = softwareDriver; }
+)

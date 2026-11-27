@@ -43,5 +43,41 @@ deny:
 audit:
     cargo deny check advisories
 
+# Run a nextest selection the way CI's hardware jobs do: list it, run it, and fail
+# on an empty selection, on a skipped test, or on any listed test that did not pass.
+# The arguments are cargo-nextest's package options and its filter expression. A game-dependent test
+# skips by printing `SKIP: <reason>` and passing, so a skip line is a failure here.
+[private]
+ci-select packages filter:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    log=$(mktemp)
+    trap 'rm -f "$log"' EXIT
+    listed=$(cargo nextest list {{ packages }} -E {{ quote(filter) }} --message-format oneline | grep -c .) || listed=0
+    echo "ci-select: the selection lists $listed tests"
+    [ "$listed" -gt 0 ] || { echo "ci-select: the selection lists no tests" >&2; exit 1; }
+    # The default profile shows a passing test's output only for conformance_ tests, so
+    # without --success-output immediate a skip line from any other selected test
+    # never reaches the log and the check below could not see it.
+    cargo nextest run {{ packages }} -E {{ quote(filter) }} --no-tests=fail --no-fail-fast --success-output immediate 2>&1 | tee "$log"
+    passed=$(sed -nE 's/.* ([0-9]+) passed.*/\1/p' "$log" | tail -n 1)
+    echo "ci-select: listed $listed, passed ${passed:-0}"
+    [ "${passed:-0}" -eq "$listed" ] || { echo "ci-select: not every listed test passed" >&2; exit 1; }
+    if grep -E '^[[:space:]]*SKIP:' "$log"; then
+        echo "ci-select: a test skipped" >&2
+        exit 1
+    fi
+
+# GPU tests that need no installed game, on whatever adapter the environment offers
+# (CI starts the shell with SUPERCOM_SOFTWARE_VULKAN=1 and sets SUPERCOM_REQUIRE_GPU=1,
+# so no adapter fails). A GPU test that needs the installed game carries `installed`
+# in its name, so this filter needs no new name when one is added; the two scene
+# tests that ask for the game are named out because they predate that rule.
+ci-gpu: (ci-select "--workspace" "test(/(^|::)conformance_gpu_/) - test(/installed/) - test(/replay_start_draws|close_zoom_draws/)")
+
+# The determinism and decoding tests on the ARM runner: three packages, without the
+# conformance_ tests, which ask for the installed game.
+ci-arm: (ci-select "-p supercom-detbench -p supercom-sim -p supercom-dds" "not test(/(^|::)conformance_/)")
+
 # The CI gate: formatting, spec lint, clean-room check, lints, tests, license audit
 gate: fmt-check lint scan clippy test deny
