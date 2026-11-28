@@ -3,19 +3,20 @@
 use crate::error::RunError;
 use crate::mapfile::choose_map_file;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use supercom_scmap::Map;
 
 /// Finds, reads, and parses the map in `folder` of the install at
-/// `game_dir`, the install as the binary resolves it.
+/// `game_dir`, the install as the binary resolves it, and hands the install
+/// directory on with the map.
 ///
 /// # Errors
 /// [`RunError`] for an unresolved or missing install, a folder that cannot
 /// be listed, a folder without exactly one map file, an unreadable file, or
 /// a file that does not parse.
-pub fn plan_run(game_dir: Option<&Path>, folder: &str) -> Result<Map, RunError> {
+pub fn plan_run(game_dir: Option<&Path>, folder: &str) -> Result<(Map, PathBuf), RunError> {
     let dir = check_install(game_dir)?;
-    read_map(dir, folder)
+    Ok((read_map(dir, folder)?, dir.to_path_buf()))
 }
 
 /// The install directory, if there is one and it is a directory.

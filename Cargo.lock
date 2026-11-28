@@ -2946,6 +2946,7 @@ name = "supercom"
 version = "0.0.1"
 dependencies = [
  "supercom-bp",
+ "supercom-dds",
  "supercom-render",
  "supercom-scd",
  "supercom-scm",

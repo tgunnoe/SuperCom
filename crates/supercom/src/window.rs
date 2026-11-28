@@ -6,6 +6,7 @@
 
 use crate::error::RunError;
 use crate::frame::{FramePlan, Progress, Step, frame_plan};
+use crate::ground::{Source, load};
 use crate::input::{Flow, Input, apply_input, key_input, wheel_input};
 use crate::interp::Kept;
 use crate::pacing::{Pace, pace};
@@ -23,7 +24,7 @@ use supercom_render::wgpu::{
     CompositeAlphaMode, PresentMode, SurfaceColorSpace, SurfaceConfiguration, SurfaceTexture,
     TextureUsages, TextureView, TextureViewDescriptor,
 };
-use supercom_render::{Camera, Renderer, SurfaceRenderer, TerrainMesh, WaterPlane, grid_fits};
+use supercom_render::{Camera, Renderer, SurfaceRenderer, TerrainMesh, WaterPlane};
 use supercom_scmap::Map;
 use supercom_sim::{Digest, Replay, State, commands_at};
 use winit::application::ApplicationHandler;
@@ -281,6 +282,7 @@ impl Replaying {
 
 struct App {
     map: Map,
+    source: Option<Source>,
     progress: Progress,
     gfx: Option<Gfx>,
     shift: bool,
@@ -296,10 +298,12 @@ struct App {
 pub fn run(
     event_loop: EventLoop<()>,
     map: Map,
+    source: Source,
     frames: Option<NonZeroU32>,
 ) -> Result<Outcome, RunError> {
     let mut app = App {
         map,
+        source: Some(source),
         progress: Progress::new(frames),
         gfx: None,
         shift: false,
@@ -330,12 +334,14 @@ pub fn run_replay(
 ) -> Result<Outcome, RunError> {
     let Prepared {
         map,
+        vfs,
         replay,
         state,
         meshes,
     } = prepared;
     let mut app = App {
         map,
+        source: Some(Source::Mounted(vfs)),
         progress: Progress::new(frames),
         gfx: None,
         shift: false,
@@ -376,6 +382,7 @@ fn set_scene(replaying: &Replaying, gfx: &mut Gfx) -> Result<(), RunError> {
 fn build(
     event_loop: &ActiveEventLoop,
     map: &Map,
+    source: Source,
     meshes: Option<&Meshes>,
 ) -> Result<Gfx, RunError> {
     let attributes = Window::default_attributes()
@@ -398,11 +405,7 @@ fn build(
         surface.renderer.backend(),
         surface.format
     );
-    grid_fits(
-        map.heightmap.width,
-        map.heightmap.height,
-        surface.renderer.device().limits().max_buffer_size,
-    )?;
+    load(map, source, &mut surface.renderer)?;
     let mesh = TerrainMesh::build(map)?;
     let water = WaterPlane::from_map(map);
     let size = window.inner_size();
@@ -560,9 +563,13 @@ impl ApplicationHandler for App {
         if self.gfx.is_some() {
             return;
         }
+        let Some(source) = self.source.take() else {
+            return;
+        };
         match build(
             event_loop,
             &self.map,
+            source,
             self.replay
                 .as_ref()
                 .map(|replaying| replaying.play.meshes()),

@@ -13,6 +13,7 @@ mod cache;
 mod cli;
 mod error;
 mod frame;
+mod ground;
 mod input;
 mod interp;
 mod mapfile;
@@ -30,6 +31,7 @@ mod window;
 use cache::cache_vars_from;
 use cli::{Command, ReplayArgs, ViewArgs};
 use error::RunError;
+use ground::Source;
 use std::env;
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -110,8 +112,8 @@ fn run_view(args: &ViewArgs) -> Result<Outcome, RunError> {
         reason: error.to_string(),
     })?;
     let game_dir = resolve_game_dir(env::var_os(GAME_DIR_VAR), env::var_os("HOME"));
-    let map = plan::plan_run(game_dir.as_deref(), &args.folder)?;
-    window::run(event_loop, map, args.frames)
+    let (map, install) = plan::plan_run(game_dir.as_deref(), &args.folder)?;
+    window::run(event_loop, map, Source::Install(install), args.frames)
 }
 
 /// The run with no argument: report whether the game data is found.

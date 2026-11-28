@@ -6,9 +6,10 @@ use crate::cache::{CacheVars, cache_dir};
 use crate::cli::is_single_component;
 use crate::error::RunError;
 use crate::plan::{check_install, read_map};
-use crate::units::{Meshes, resolve_kinds, run_kinds};
+use crate::units::{Meshes, mount_kinds, run_kinds};
 use std::fs;
 use std::path::Path;
+use supercom_scd::Vfs;
 use supercom_scmap::Map;
 use supercom_sim::{Replay, State, read_replay};
 use supercom_sim_ingest::load_world;
@@ -17,6 +18,9 @@ use supercom_sim_ingest::load_world;
 pub struct Prepared {
     /// The parsed map, drawn as `view` draws it.
     pub map: Map,
+    /// The install's archives, mounted once to resolve the kinds and handed
+    /// on to the texture step.
+    pub vfs: Vfs,
     /// The parsed replay, with its checkpoints.
     pub replay: Replay,
     /// The state at tick 0 of the skirmish the replay's header names.
@@ -73,9 +77,10 @@ pub fn prepare_replay(
             reason: error.to_string(),
         })?;
     let map = read_map(install, folder)?;
-    let meshes = resolve_kinds(install, &run_kinds(&state, &replay))?;
+    let (meshes, vfs) = mount_kinds(install, &run_kinds(&state, &replay))?;
     Ok(Prepared {
         map,
+        vfs,
         replay,
         state,
         meshes,

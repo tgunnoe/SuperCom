@@ -376,3 +376,9 @@ REN-056); this record is the source each names.
   frame can be counted as held back at the very end of a recording with nothing
   held), and 92 (the windowed tests wait on each other in one compositor) of
   https://github.com/tgunnoe/SuperCom.
+
+## After ratification
+
+- **Extended on 2026-11-27:** the binary now also depends on supercom-dds, the
+  texture decoder, because it decodes the map's ground textures and masks and
+  hands the renderer plain pixel buffers (docs/adr/0018-textures-on-the-map.md).

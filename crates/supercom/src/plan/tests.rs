@@ -91,6 +91,6 @@ fn conformance_plan_loads_an_installed_map() {
     };
     let map = plan_run(Some(&fa), "SCMP_012");
     assert!(map.is_ok(), "SCMP_012 loads: {:?}", map.as_ref().err());
-    let dims = map.map(|map| (map.heightmap.width, map.heightmap.height));
+    let dims = map.map(|(map, _)| (map.heightmap.width, map.heightmap.height));
     assert_eq!(dims.ok(), Some((256, 256)));
 }

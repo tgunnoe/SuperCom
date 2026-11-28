@@ -417,3 +417,10 @@ the head had not seen it when ratifying.
   binary depends on no loader or simulation crate no longer holds, since the
   replay run needs the simulation's crates. The two bullets above were written
   while that record was proposed and stand as written.
+- **Amended on 2026-11-27:** three clauses of the first slice changed when the
+  terrain gained its ground textures: REN-021's statement is scoped to a
+  terrain drawn by the fallback, one sentence of REN-022 (the water's colour is
+  told from the terrain's by its blue channel) is narrowed to the colours of
+  the height ramp, by the head's ruling of 2026-11-26, and REN-035's order
+  gains the map's textures after the window and before the upload. The record
+  is docs/adr/0018-textures-on-the-map.md.

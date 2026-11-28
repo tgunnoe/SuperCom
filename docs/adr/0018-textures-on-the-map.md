@@ -93,6 +93,92 @@ about drawing; later work adds its own sections under Decision.
   reproduce. A digest is a number from which no byte of the game can be
   recovered.
 
+### The textured terrain
+
+The terrain is drawn with the map's own ground textures and masks, blended as
+the original's terrain program blends them, and the first slice's height ramp
+stays as the fallback. The clauses are REN-092 to REN-117 of
+docs/specs/render.md; this section records each choice and its ground.
+
+- **The blend is the original's.** A mask channel's value m weighs
+  clamp(2m - 1, 0, 1) (REN-093); the program TTerrain starts from the layer of
+  slot 0, blends slots 1 to 4 in turn by the first mask's four channels, and
+  lays slot 9 on by its own alpha; TTerrainXP does the same with slots 5 to 8
+  by the second mask's channels before slot 9 (REN-094, REN-095). The ground
+  is a read of the original's terrain program, effects.scd, member
+  effects/terrain.fx, lines 697 to 713 and 728 to 751, stated in this
+  project's own words; REN-092 pins the member's size and line count so the
+  line numbers stay checkable, and nothing of its text is kept. A slot the map
+  leaves unnamed among those its program blends is skipped; REN-096 measures
+  that the largest value under such a slot on the installed maps is 34 of 255,
+  which weighs nothing, so skipping and weighing are one drawing on every
+  installed map.
+- **The tiling rule is PROVISIONAL.** One repeat of a layer covers its stored
+  scale in world units on each axis (REN-099, REN-100). The original's shader
+  multiplies by a factor the engine sets and does not say how the factor comes
+  from the stored scale. The rule is the one the FAF map editor's preview
+  uses, at commit bac3e5f478e0293d04a4d18cf8dba95b57b5d49d, in
+  Assets/Scripts/Ozone SCMAP Code/ScmapEditor.cs, lines 477, 493 to 500, and
+  514, and it fits the installed scales: 4 for most layers, and 26.25 and 128
+  for slot 9 on SCMP_012 and SCMP_016, on maps 256 units wide. The head
+  accepted it as provisional on 2026-11-26. Its evaluator is the first look,
+  the head's run of the binary on SCMP_012, SCMP_016, and the replay beside
+  the original, which asks whether the size of the ground's pattern matches.
+- **The colour rule is this project's choice (REN-101, REN-102).** The
+  original names no colour-space conversion. Textures and masks are uploaded
+  as stored bytes in a format that applies none, the layers are blended as
+  stored numbers, the blend is multiplied by the first slice's light, and the
+  product is decoded by the sRGB transfer function, the exact inverse of the
+  encoding an sRGB target applies. So on an sRGB target a texel lit at a factor
+  of 1 shows its stored value. The first look judges the choice.
+- **The mask's orientation is this project's choice (REN-097, REN-098).** A
+  mask is looked up across the whole map; its first stored row lies at the
+  north edge and its first column at the west edge, with no flip, and the
+  lookup clamps at the edges as the original's mask sampler does. The installed
+  files do not say which edge a mask starts at, so the first look judges it.
+- **The fallback is the whole terrain (REN-111, REN-112, REN-113, REN-114, REN-116).** When
+  the program is none of the three, a file the program draws is missing or
+  refused, a mask is missing or refused, or the renderer refuses the set, the
+  terrain is drawn by the unchanged height ramp with one notice naming the
+  first failing item, its file, the reason, and the count. A terrain with one
+  layer left out would show a ground the map does not have and hide the cause;
+  a run never ends for a refusal. The readings built where the sources were
+  silent: a map that leaves slot 0 or slot 9 unnamed falls back (the skip is for
+  slots 1 to 8); a named slot whose stored scale is not finite and positive
+  falls back, naming the scale; in `view`, an install whose archives do not
+  mount makes every file missing, so the ramp is drawn with its notice; and a
+  mask or layer the program does not read is neither decoded nor a reason.
+- **What the pixel tests prove and what only a look judges (REN-103, REN-108,
+  REN-109).** Every pixel test compares read-back pixels with a number worked
+  from a clause, within 2 in 255 a channel, with the nearest lookup at texel
+  centres, on the hardware adapter and on the software driver, from literal
+  pixels. The binary's lookups are filtered, the two paths differing in the
+  samplers alone. Filtering, wrap, and the choice of a mip level are judged by
+  the first look; the one measurement taken is how far the two adapters'
+  frames differ where a level other than the first is chosen, reported and not
+  asserted.
+- **The glow map's two omissions (REN-110).** SCMP_023 names the glow program,
+  drawn here by TTerrain's rule. The original adds two terms, left out as this
+  project's omission: layer two's lookup is shifted by an offset (terrain.fx
+  lines 780 and 781), and the output's alpha carries a glow term (lines 782 and
+  804).
+- **Three clauses of the first slice changed, and why.** REN-021's
+  statement is scoped to a terrain drawn by the fallback, because the textured
+  terrain's pixels are REN-102's. REN-022's one sentence, that the water's
+  colour is told from every terrain colour by its blue channel, is narrowed to
+  the colours of the height ramp, by the head's ruling of 2026-11-26, since a
+  texel may be bluer than the water. REN-035's order gains the map's textures,
+  resolved and decoded after the window and before the upload. The sentence of
+  the clauses' prose that listed terrain splatting among later slices now says
+  what this slice draws. REN-015, REN-024, REN-029, REN-030, REN-031, and the
+  rest stand byte for byte: the textured terrain has a shader module and a
+  source function of its own (REN-107), and its vertex keeps 24 bytes.
+- **The binary's new dependency.** The binary now depends on the decoder crate
+  to decode the textures and masks it hands the renderer; the renderer's own
+  dependencies stay four, and no loader type crosses into its signatures,
+  which take plain pixel buffers, refused before anything is created and
+  leaving the renderer as it was (REN-104, REN-105, REN-106).
+
 ## Consequences
 
 - A later renderer unit receives decoded levels and masks without trusting a
@@ -106,3 +192,8 @@ about drawing; later work adds its own sections under Decision.
   place to revise it, and the three digests change with it.
 - The map loader now refuses a file that the earlier one accepted when what
   follows its strata does not run through its masks; the 60 installed maps all do.
+- A map's textures cost time at the start of a run: the install's archives
+  mount in several seconds on the machine of the first measurement, and the six
+  textures and the mask decode in a fraction of that; `replay` mounts the
+  archives a second time after the window. Nothing is cached or threaded in
+  this version.
